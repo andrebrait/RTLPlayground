@@ -15,3 +15,12 @@ build/
 !test/stub/html_data.h
 !test/stub/version.h
 .vscode
+
+# SNMP local credentials and generated verification artifacts
+snmp_local.h
+snmp-*.log
+snmp-*.mem
+test/build/
+
+# Ephemeral dependencies for the browser regression suite
+node_modules/

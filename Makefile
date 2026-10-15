@@ -60,6 +60,9 @@ ifndef BUILDDIR
 	BUILDDIR = output/$(MACHINE)
 endif
 
+ifeq ($(SNMP),1)
+CC_FLAGS += -DSNMP
+endif
 CONFIG_STAMP := $(BUILDDIR)/.config
 VERSION_HEADER := version.h
 
@@ -164,6 +167,10 @@ SRCS += \
 	uip/uip-fw.c \
 	uip/uip-neighbor.c \
 	uip/uip-split.c
+
+ifeq ($(SNMP),1)
+SRCS += snmp.c snmp_hw.c snmp_control.c
+endif
 
 OBJS = ${SRCS:%.c=$(BUILDDIR)/%.rel}
 DEPS := ${SRCS:%.c=$(BUILDDIR)/%.d}
