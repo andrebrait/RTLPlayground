@@ -1,3 +1,4 @@
+#include "uip/uip_rx.h"
 #include <8051.h>
 #include <stdint.h>
 
@@ -727,6 +728,7 @@ void get_random_32(void)
 }
 
 
+
 /* Read flash using the MMIO capabilities of the DW8051 core
  * Bank is < 0x3f and is the MSB
  * addr gives the address in the bank
@@ -1000,8 +1002,7 @@ void handle_rx(void)
 			}
 		} else if (ETH_IN->ether_type == HTONS(0x0800)) { // IPv4
 			if (!management_vlan || management_vlan == rx_packet_vlan) {
-				uip_arp_ipin();
-				uip_input();
+				uip_rx_ip_input();
 				if (uip_len) {
 					// Add ethernet frame
 					uip_arp_out();
