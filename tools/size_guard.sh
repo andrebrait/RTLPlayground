@@ -1,6 +1,8 @@
 #!/bin/sh
 # Fails when HEAD (committed) is larger than <base-ref> on a guarded build:
-# ROM/EPROM/FLASH or EXTERNAL RAM grew, or the stack headroom shrank.
+# ROM/EPROM/FLASH grew or the stack headroom shrank. EXTERNAL RAM growth is
+# allowed (only the .bin size is bound; XRAM has room), so it is reported with
+# an "(xram grew, allowed)" note and does not fail.
 # Both commits are built in clean worktrees, so local edits do not skew sizes.
 # Sizes come from output/<MACHINE>/rtlplayground.mem. Needs sdcc on PATH, as CI does.
 # Usage: tools/size_guard.sh <base-ref>
@@ -63,9 +65,11 @@ check() {
 	measure "$BASE_TREE" "$machine" "$@"
 	base_rom=$ROM; base_xram=$XRAM; base_stack=$STACK
 	measure "$HEAD_TREE" "$machine" "$@"
-	printf '%s rom %s->%s xram %s->%s stack %s->%s\n' "$label" \
-		"$base_rom" "$ROM" "$base_xram" "$XRAM" "$base_stack" "$STACK"
-	if [ "$ROM" -gt "$base_rom" ] || [ "$XRAM" -gt "$base_xram" ] || [ "$STACK" -lt "$base_stack" ]; then
+	note=
+	[ "$XRAM" -gt "$base_xram" ] && note=' (xram grew, allowed)'
+	printf '%s rom %s->%s xram %s->%s stack %s->%s%s\n' "$label" \
+		"$base_rom" "$ROM" "$base_xram" "$XRAM" "$base_stack" "$STACK" "$note"
+	if [ "$ROM" -gt "$base_rom" ] || [ "$STACK" -lt "$base_stack" ]; then
 		status=1
 	fi
 }
