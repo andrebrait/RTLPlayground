@@ -964,16 +964,16 @@ void port_lag_members_set(__xdata uint8_t lag, __xdata uint16_t members) __banke
 }
 
 
-/*
- * Configures the hash algorithm used for a LAG
- * lag is the Group to configure and hash is a bitmask
- */
 void port_lag_hash_get(uint8_t lag) __banked
 {
 	reg_read_m(RTL837X_TRK_HASH_CTRL_BASE + (lag << 2));
 	sfr_data_copy(port_buf);
 }
 
+/*
+ * Configures the hash algorithm used for a LAG
+ * lag is the Group to configure and hash is a bitmask
+ */
 void port_lag_hash_set(__xdata uint8_t lag, __xdata uint8_t hash_bits) __banked
 {
 	print_string("port_lag_hash_set, lag: "); print_byte(lag); print_string(", hash: "); print_byte(hash_bits);

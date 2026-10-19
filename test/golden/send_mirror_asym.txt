@@ -1,0 +1,5 @@
+HTTP/1.1 200 OK
+Connection: close
+Content-Type: application/json
+
+{"enabled":1,"mPort":9,"mirror_rx":"0000000000000011","mirror_tx":"0000000000000001"}

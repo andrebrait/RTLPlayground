@@ -42,8 +42,9 @@ int main(void)
 
 	send_mirror();
 	outbuf[slen < TCP_OUTBUF_SIZE ? slen : TCP_OUTBUF_SIZE - 1] = 0;
-	if (!strstr((const char *)outbuf, "\"enabled\":1") || !strstr((const char *)outbuf, "\"mirror_rx\":\"0000000000000011\"")) {
-		printf("FAIL: send_mirror: no enabled mirror with RX mask 0003 in:\n%s\n", outbuf);
+	if (!strstr((const char *)outbuf, "\"enabled\":1") ||
+	    !strstr((const char *)outbuf, "\"mirror_rx\":\"0000000000000011\",\"mirror_tx\":\"0000000000000001\"")) {
+		printf("FAIL: send_mirror: no enabled mirror with RX mask 0003, TX mask 0001 in:\n%s\n", outbuf);
 		return 1;
 	}
 	printf("ok: send_mirror reports the mirror through platform.h\n");
@@ -66,7 +67,7 @@ int main(void)
 
 	send_storm();
 	outbuf[slen < TCP_OUTBUF_SIZE ? slen : TCP_OUTBUF_SIZE - 1] = 0;
-	if (!strstr((const char *)outbuf, "\"en\":\"1111\",\"pps\":\"1111\",\"rate\":\"000123000123000123000123\"")) {
+	if (!strstr((const char *)outbuf, "\"en\":\"1010\",\"pps\":\"1100\",\"rate\":\"000123000124000125000126\"")) {
 		printf("FAIL: send_storm: no storm entry in:\n%s\n", outbuf);
 		return 1;
 	}

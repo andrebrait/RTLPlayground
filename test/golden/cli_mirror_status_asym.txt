@@ -1,0 +1,3 @@
+mirror status
+Enabled: Mirroring port: 1, Port mask RX: 0003, Port mask TX: 0001
+> 

@@ -1,0 +1,11 @@
+storm
+port 1 bcast 000064 pps mcast off ucast 0000c8 kbps umcast off
+port 2 bcast off mcast off ucast off umcast off
+port 3 bcast off mcast off ucast off umcast off
+port 4 bcast off mcast off ucast off umcast off
+port 5 bcast off mcast off ucast off umcast off
+port 6 bcast off mcast off ucast off umcast off
+port 7 bcast off mcast off ucast off umcast off
+port 8 bcast off mcast off ucast off umcast off
+port 9 bcast off mcast off ucast off umcast off
+> 

@@ -82,14 +82,15 @@ void bandwidth_get(uint8_t port, __xdata uint8_t egress) __banked
 	port_buf[4] = !egress;
 }
 
-/* Every storm control is on, in pps, at rate 0x000123. */
+/* Storm types: enabled 1010, pps 1100, rate 0x000123 + type. */
 void storm_get(uint8_t port) __banked
 {
 	for (uint8_t t = 0; t < 4; t++) {
-		port_buf[t] = port_buf[4 + t] = 1;
+		port_buf[t] = !(t & 1);
+		port_buf[4 + t] = t < 2;
 		port_buf[8 + 4 * t] = 0;
 		port_buf[9 + 4 * t] = 0x00;
 		port_buf[10 + 4 * t] = 0x01;
-		port_buf[11 + 4 * t] = 0x23;
+		port_buf[11 + 4 * t] = 0x23 + t;
 	}
 }

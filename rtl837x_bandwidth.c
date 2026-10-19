@@ -88,9 +88,15 @@ void bandwidth_egress_disable(uint8_t port) __banked
 }
 
 
-void bandwidth_get(uint8_t port, __xdata uint8_t egress) __banked
+static void bw_read(uint8_t port, __xdata uint8_t egress)
 {
 	reg_read_m(egress ? RTL837X_EGBW_PORT_CTRL + port * 1024 : RTL837X_IGBW_PORT_CTRL + port * 4);
+}
+
+
+void bandwidth_get(uint8_t port, __xdata uint8_t egress) __banked
+{
+	bw_read(port, egress);
 	sfr_data_copy(port_buf);
 	port_buf[0] = (port_buf[1] >> 4) & 1;
 	port_buf[1] &= 0x0f;
@@ -104,13 +110,14 @@ void bandwidth_status(uint8_t port) __banked
 {
 	for (uint8_t egress = 0; egress < 2; egress++) {
 		print_string(egress ? "egress: " : "ingress: ");
-		bandwidth_get(port, egress);
-		if (port_buf[0]) {
+		bw_read(port, egress);
+		if (sfr_data[1] & 0x10) {
 			print_string("enabled: ");
+			sfr_data[1] &= 0xef;
 			print_string("0x");
-			print_byte(port_buf[1]);
-			print_byte(port_buf[2]);
-			print_byte(port_buf[3]);
+			print_byte(sfr_data[1]);
+			print_byte(sfr_data[2]);
+			print_byte(sfr_data[3]);
 			write_char('0');
 			write_char('\n');
 		} else {

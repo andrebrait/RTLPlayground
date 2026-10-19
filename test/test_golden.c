@@ -227,6 +227,13 @@ static void p_basic_info_frac(void)
 	send_basic_info();
 }
 static void p_vlan(void)     { send_vlan(10); }
+
+/* Mirroring with RX mask 0003 and TX mask 0001, and storm control on port 1
+ * with bcast enabled in pps and ucast in kbps, so RX != TX and enabled != pps. */
+static void mirror_asym(void) { cli("mirror 9 1 2r"); env_reset(); }
+static void storm_mixed(void) { cli("storm 1 ucast 200 kbps"); env_reset(); }
+static void p_mirror_asym(void) { mirror_asym(); send_mirror(); }
+static void p_storm_mixed(void) { storm_mixed(); send_storm(); }
 static void p_l2(void)       { send_l2(0); }
 
 static void p_l2_delete(void)
@@ -277,6 +284,7 @@ int main(void)
 	page("send_l2", p_l2);
 	page("l2_delete", p_l2_delete);
 	page("send_mirror", send_mirror);
+	page("send_mirror_asym", p_mirror_asym);
 	page("send_lag", send_lag);
 	page("send_stp", send_stp);
 	page("send_lacp", send_lacp);
@@ -284,17 +292,20 @@ int main(void)
 	page("send_eee", send_eee);
 	page("send_bandwidth", send_bandwidth);
 	page("send_storm", send_storm);
+	page("send_storm_mixed", p_storm_mixed);
 	page("send_isolation", send_isolation);
 	page("send_mtu", send_mtu);
 	page("send_config", send_config);
 
 	cmd("cli_mtu_show", "mtu show");
 	cmd("cli_mirror_status", "mirror status");
+	cmd_with("cli_mirror_status_asym", "mirror status", mirror_asym);
 	cmd("cli_lag_show", "lag show");
 	cmd("cli_bw_show", "bw show");
 	cmd("cli_bw_status", "bw status 1");
 	cmd("cli_storm_show", "storm show");
 	cmd("cli_storm", "storm");
+	cmd_with("cli_storm_mixed", "storm", storm_mixed);
 	cmd("cli_eee_show", "eee show");
 	cmd("cli_eee_status", "eee status");
 	cmd("cli_vlan_show", "vlan show");
