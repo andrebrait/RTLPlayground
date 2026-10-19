@@ -1,0 +1,3 @@
+regset 0abc 12345678
+REGSET: 0abc: VAL: 0x12345678
+> 

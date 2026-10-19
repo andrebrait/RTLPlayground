@@ -1,0 +1,5 @@
+sdsset 1 a1 b2 c3d4
+SDSSET: 1:0xa1:0xb2: VAL: [stub:sds_write_v]
+01a1b2c3d4
+c3d4
+> 

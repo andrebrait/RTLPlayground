@@ -207,7 +207,7 @@ void phy_read(uint8_t phy_id, uint8_t dev_id, uint16_t reg)
 			v = phy_regs[i].val;
 	hw_sfr_load(v);
 }
-void     phy_write(uint8_t phy_id, uint8_t dev_id, uint16_t reg, uint16_t val) { (void)phy_id; (void)dev_id; (void)reg; (void)val; }
+void     phy_write(uint8_t phy_id, uint8_t dev_id, uint16_t reg, uint16_t val) { phy_mock_set(phy_id, dev_id, reg, val); }
 void     phy_reset(uint8_t port) { (void)port; }
 uint8_t  stp_port_role(uint8_t port) { (void)port; return 0; }
 uint8_t  stp_port_state(uint8_t port) { (void)port; return 3; }

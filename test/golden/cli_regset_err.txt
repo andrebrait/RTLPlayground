@@ -1,0 +1,3 @@
+regset 0abc
+Error: regset <hexvalue> <hexvalue>
+	like regset 0b abcd1234.> 

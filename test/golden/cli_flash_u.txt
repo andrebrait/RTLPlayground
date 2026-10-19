@@ -1,0 +1,5 @@
+flash u
+
+UNIQUE ID (note: only 4 bytes are likely correct here!)
+[stub:flash_read_uid]
+> 

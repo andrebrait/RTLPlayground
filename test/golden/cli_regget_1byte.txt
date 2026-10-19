@@ -1,0 +1,3 @@
+regget 0c
+REGGET: 000c: VAL: 0x00000000
+> 

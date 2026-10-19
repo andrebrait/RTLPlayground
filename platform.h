@@ -375,4 +375,10 @@ bool l2_entry_next(void) __banked;
 uint8_t l2_entry_delete(uint16_t idx) __banked;
 void port_l2_static_mgmt(__xdata uint8_t *mac, __xdata uint16_t vlan, __xdata bool remove_entry) __banked;
 
+/* Console commands that only this platform has (raw registers, flash IDs, chip reset...).
+ * cmd_parser() calls it with the tokenized line (cmd_buffer, cmd_words_b, cmd_words_len) for
+ * every word it does not handle itself; true = the line was one of the platform's commands
+ * and has been run, false = unknown, cmd_parser() then reports it. */
+bool platform_cmd(void) __banked;
+
 #endif

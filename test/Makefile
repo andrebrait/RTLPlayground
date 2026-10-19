@@ -61,7 +61,7 @@ $(BUILDDIR)/test_page_json: test_page_json.c $(TABLE_ENV) hw_mock.h | $(BUILDDIR
 # dispatches into elsewhere. cmd_parser.c has its own definitions of the editor
 # buffers support.c also defines, so common symbols merge, and it needs three
 # diagnostics relaxed that the other units do not trigger.
-GOLDEN_SRC = test_golden.c golden_env.c $(TABLE_ENV) $(SRCROOT)/cmd_parser.c \
+GOLDEN_SRC = test_golden.c golden_env.c $(TABLE_ENV) $(SRCROOT)/cmd_parser.c $(SRCROOT)/rtl837x_cli.c \
              $(SRCROOT)/rtl837x_trap.c
 $(BUILDDIR)/test_golden: $(GOLDEN_SRC) hw_mock.h support.h | $(BUILDDIR)
 	$(CC) $(CFLAGS) -fcommon -Wno-parentheses -Wno-misleading-indentation -Wno-incompatible-pointer-types \

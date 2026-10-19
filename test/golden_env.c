@@ -27,6 +27,7 @@ uint8_t              flash_buf[FLASH_BUF_SIZE];
 struct dhcp_state    dhcp_state;
 struct phy_settings  phy_settings;
 uint8_t              sfp_speed[2];
+extern struct flash_region_t flash_region;
 
 static void mark(const char *name)
 {
@@ -38,14 +39,31 @@ static void mark(const char *name)
 void reset_chip(void)                  { mark("reset_chip"); }
 void flash_read_uid(void)              { mark("flash_read_uid"); }
 void flash_read_jedecid(void)          { mark("flash_read_jedecid"); }
-void flash_read_security(void)         { mark("flash_read_security"); }
+/* prints the region it was asked for, so "flash s" pins the three addresses and the length */
+void flash_read_security(void)
+{
+	mark("flash_read_security");
+	print_long(flash_region.addr);
+	write_char(' ');
+	print_byte(flash_region.len);
+	write_char('\n');
+}
 void phy_set_speed(void)               { mark("phy_set_speed"); }
 void phy_set_duplex(void)              { mark("phy_set_duplex"); }
 void phy_show(uint8_t port)            { mark("phy_show"); }
 bool sfp_print_info(uint8_t sfp)       { mark("sfp_print_info"); return false; }
 void handle_sfp(void)                  { mark("handle_sfp"); }
-void sds_read(uint8_t sds_id, uint8_t page, uint8_t reg)              { mark("sds_read"); }
-void sds_write_v(uint8_t sds_id, uint8_t page, uint8_t reg, uint16_t v) { mark("sds_write_v"); }
+/* the SerDes accessors print their arguments, so "sdsget"/"sdsset" pin what they pass on */
+void sds_read(uint8_t sds_id, uint8_t page, uint8_t reg)
+{
+	mark("sds_read");
+	print_byte(sds_id); print_byte(page); print_byte(reg); write_char('\n');
+}
+void sds_write_v(uint8_t sds_id, uint8_t page, uint8_t reg, uint16_t v)
+{
+	mark("sds_write_v");
+	print_byte(sds_id); print_byte(page); print_byte(reg); print_short(v); write_char('\n');
+}
 void igmp_setup(void)                  { mark("igmp_setup"); }
 void igmp_enable(void)                 { mark("igmp_enable"); }
 void igmp_show(void)                   { mark("igmp_show"); }

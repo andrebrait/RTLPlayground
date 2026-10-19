@@ -1,0 +1,3 @@
+regget
+Error: regget <hexvalue>
+	like: regget 0BB0 or regget 0c> 

@@ -170,3 +170,6 @@ uint16_t config_read(uint16_t offset, __xdata uint8_t * __xdata buf, __xdata uin
 }
 
 void config_stream_rest(uint16_t offset, __xdata uint16_t len) __banked { }
+
+/* A platform with no console commands of its own: every unknown word stays unknown. */
+bool platform_cmd(void) __banked { return false; }

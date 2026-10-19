@@ -1,0 +1,6 @@
+reset
+
+RESET
+
+[stub:reset_chip]
+> 

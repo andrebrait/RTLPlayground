@@ -1,0 +1,3 @@
+sdsget 1 a1
+Error: sdsget <sds-id> <hex:page> <hex:reg>
+> 

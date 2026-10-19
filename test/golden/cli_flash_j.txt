@@ -1,0 +1,5 @@
+flash j
+
+JEDEC ID
+[stub:flash_read_jedecid]
+> 

@@ -1,0 +1,12 @@
+flash s
+
+SECURITY REGISTERS
+Region 1: [stub:flash_read_security]
+00001000 28
+
+Region 2: [stub:flash_read_security]
+00002000 28
+
+Region 3: [stub:flash_read_security]
+00003000 28
+> 

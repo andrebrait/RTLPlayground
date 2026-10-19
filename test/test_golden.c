@@ -415,6 +415,51 @@ static void config_case(const char *name, size_t nonnul)
 
 static void cmd(const char *name, const char *line) { cmd_with(name, line, NULL); }
 
+/* "physet" writes the PHY register: read it back. */
+static void physet_done(void) { cli("physet 1 31 a610 beef"); env_reset(); }
+
+/* A second "gpio" shows what changed since the first (gpio_last_value). */
+static void gpio_changed(void)
+{
+	cli("gpio");
+	env_reset();
+	hw_reg_set(RTL837X_REG_GPIO_00_31_INPUT, 0x80000003);
+}
+
+/* The dispatch contract of the commands that a platform handles: an unknown word
+ * is reported exactly once, and a hardware command is still found. Both compare
+ * with the goldens taken before the commands moved out of cmd_parser.c. */
+static void unknown_command_message(void)
+{
+	fixture_load();
+	cli("foo");
+	int n = 0;
+	for (const char *s = out_buf; (s = strstr(s, "Unknown command")); s++)
+		n++;
+	tests_run++;
+	if (n != 1) {
+		printf("  FAIL: unknown_command_message: %d messages\n", n);
+		failed++;
+	} else {
+		printf("  ok:   unknown_command_message\n");
+	}
+	golden("cli_unknown", out_buf, out_len);
+}
+
+static void regget_still_dispatched(void)
+{
+	fixture_load();
+	cli("regget 0abc");
+	tests_run++;
+	if (!strstr(out_buf, "REGGET: 0abc: VAL: 0x00c0ffee") || strstr(out_buf, "Unknown command")) {
+		printf("  FAIL: regget_still_dispatched\n");
+		failed++;
+	} else {
+		printf("  ok:   regget_still_dispatched\n");
+	}
+	golden("cli_regget", out_buf, out_len);
+}
+
 int main(void)
 {
 	update = getenv("GOLDEN_UPDATE") != NULL;
@@ -479,6 +524,27 @@ int main(void)
 	cmd("cli_gpio", "gpio");
 	cmd("cli_rnd", "rnd");
 	cmd("cli_unknown", "foo");
+	unknown_command_message();
+	regget_still_dispatched();
+	cmd("cli_regget_err", "regget");
+	cmd("cli_regget_1byte", "regget 0c");
+	cmd("cli_physet_1byte", "physet 1 31 a6 ab");
+	cmd("cli_regset", "regset 0abc 12345678");
+	cmd("cli_regset_err", "regset 0abc");
+	cmd("cli_sdsget", "sdsget 1 a1 b2");
+	cmd("cli_sdsget_err", "sdsget 1 a1");
+	cmd("cli_sdsset", "sdsset 1 a1 b2 c3d4");
+	cmd("cli_phyget", "phyget 1 31 a610");
+	cmd("cli_physet", "physet 1 31 a610 beef");
+	cmd_with("cli_physet_readback", "phyget 1 31 a610", physet_done);
+	cmd("cli_flash_j", "flash j");
+	cmd("cli_flash_s", "flash s");
+	cmd("cli_flash_u", "flash u");
+	cmd("cli_flash_x", "flash x");
+	cmd("cli_flash_bare", "flash");
+	cmd("cli_leds", "leds");
+	cmd("cli_reset", "reset");
+	cmd_with("cli_gpio_changed", "gpio", gpio_changed);
 
 	printf("\n%d outputs, %d failed%s\n", tests_run, failed, update ? " (GOLDEN_UPDATE: goldens rewritten)" : "");
 	return failed ? 1 : 0;
