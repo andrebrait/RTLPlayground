@@ -591,26 +591,25 @@ uint8_t port_link_get(uint8_t port) __banked
 }
 
 
-// The 4 bytes of a register, big-endian
-static void reg_to_buf(uint16_t reg, __xdata uint8_t *out4)
-{
-	reg_read_m(reg);
-	for (uint8_t i = 0; i < 4; i++)
-		out4[i] = sfr_data[i];
-}
+__xdata uint8_t port_buf[8];
 
 
-void port_counter_get(uint8_t port, uint8_t counter, __xdata uint8_t *out8) __banked
+void port_counter_get(uint8_t port, __xdata uint8_t counter) __banked
 {
 	STAT_GET(counter, port);
-	reg_to_buf(RTL837X_STAT_V_HIGH, out8);
-	reg_to_buf(RTL837X_STAT_V_LOW, out8 + 4);
+	for (uint8_t i = 0; i < 8; i++) {
+		if (!(i & 3))
+			reg_read_m(i ? RTL837X_STAT_V_LOW : RTL837X_STAT_V_HIGH);
+		port_buf[i] = sfr_data[i & 3];
+	}
 }
 
 
-void port_macs_learned_get(uint8_t port, __xdata uint8_t *out4) __banked
+void port_macs_learned_get(uint8_t port) __banked
 {
-	reg_to_buf(RTL837X_L2_LRN_PORT_CONSTRT_CNT + (port << 2), out4);
+	reg_read_m(RTL837X_L2_LRN_PORT_CONSTRT_CNT + (port << 2));
+	for (uint8_t i = 0; i < 4; i++)
+		port_buf[i] = sfr_data[i];
 }
 
 
@@ -621,7 +620,7 @@ uint16_t port_mtu_get(uint8_t port) __banked
 }
 
 
-void port_mtu_set(uint8_t port, uint16_t mtu) __banked
+void port_mtu_set(uint8_t port, __xdata uint16_t mtu) __banked
 {
 	REG_WRITE(RTL8373_REG_MAC_L2_PORT_MAX_LEN + ((uint16_t) port << 8), (mtu >> 10) & 0xf, (mtu >> 2) & 0xff,
 		  ((mtu & 0x3) << 6) | ((mtu >> 8) & 0x3f), mtu & 0xff);
@@ -842,7 +841,7 @@ uint8_t port_phy_adv_get(uint8_t port) __banked
 
 
 // bit 2..0 = 2.5G, 1G, 100M of the EEE register pair (reg2 holds 2.5G, reg1 1G and 100M)
-static uint8_t eee_bits(uint8_t port, uint8_t reg2, uint8_t reg1)
+static uint8_t eee_bits(uint8_t port, __xdata uint8_t reg2, __xdata uint8_t reg1)
 {
 	uint8_t r = 0;
 	uint16_t v;

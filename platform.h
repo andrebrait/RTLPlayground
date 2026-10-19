@@ -193,12 +193,17 @@ uint8_t port_link_get(uint8_t port) __banked;
 bool port_phy_enabled(uint8_t port) __banked;
 // bit 5..0 = 2500F, 1000F, 100F, 100H, 10F, 10H
 uint8_t port_phy_adv_get(uint8_t port) __banked;
-// 8 bytes, big-endian, of the 64-bit MIB counter
-void port_counter_get(uint8_t port, uint8_t counter, __xdata uint8_t *out8) __banked;
-// 4 bytes, big-endian
-void port_macs_learned_get(uint8_t port, __xdata uint8_t *out4) __banked;
+/* Getters that return more than a byte leave the result in port_buf, and every
+ * argument after the first is __xdata. Both keep the banked call's extra parameters
+ * and out-pointers out of internal data RAM, where each byte comes off the stack
+ * headroom. Follow this pattern for new platform getters. */
+extern __xdata uint8_t port_buf[8];
+// 64-bit MIB counter -> port_buf[0..7], big-endian
+void port_counter_get(uint8_t port, __xdata uint8_t counter) __banked;
+// MACs learned -> port_buf[0..3], big-endian
+void port_macs_learned_get(uint8_t port) __banked;
 uint16_t port_mtu_get(uint8_t port) __banked;
-void port_mtu_set(uint8_t port, uint16_t mtu) __banked;
+void port_mtu_set(uint8_t port, __xdata uint16_t mtu) __banked;
 // bit 2..0 = 2.5G, 1G, 100M
 uint8_t port_eee_adv_get(uint8_t port) __banked;
 uint8_t port_eee_lp_get(uint8_t port) __banked;

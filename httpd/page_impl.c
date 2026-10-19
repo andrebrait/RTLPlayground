@@ -171,15 +171,17 @@ uint16_t port_status(void)
 }
 
 
-/* Converts 4 big-endian bytes into raw hex string.
-   Suppress leading zeros.
+/* Converts big-endian bytes into raw hex string, n nibbles (2 per byte) of them.
+   Suppress leading zeros, so a 64-bit counter (n = 16) keeps the low word's zeros
+   exactly when the high word is set.
+   The counter and MAC-count getters leave their result in port_buf.
 */
-void hex_to_html(__xdata uint8_t *p)
+void hex_to_html(__xdata uint8_t *p, __xdata uint8_t n)
 {
  	uint8_t print_zeros = 0;
 	uint8_t val = 0;
 
-	for (uint8_t nibble = 0; nibble < 8; nibble++) {
+	for (uint8_t nibble = 0; nibble < n; nibble++) {
 	  	if (!(nibble & 1))
 	        val = p[nibble>>1];
 		// force the swap instruction, itohex() ignores the upper nibble.
@@ -194,27 +196,6 @@ void hex_to_html(__xdata uint8_t *p)
 	}
 	if (print_zeros == 0) {
 	    char_to_html('0');
-	}
-}
-
-
-/* A 64-bit big-endian counter as one number: the low word keeps its
- * leading zeros whenever the high word is set.
- * Pages read counters and MAC counts into sfp_buf, which nothing else uses while a
- * page is built; that saves a dedicated 8-byte XRAM buffer. */
-void counter_to_html(__xdata uint8_t *c)
-{
-	uint8_t i;
-	uint8_t high = 0;
-
-	for (i = 0; i < 4; i++)
-		high |= c[i];
-	if (high) {
-		hex_to_html(c);
-		for (i = 4; i < 8; i++)
-			byte_to_html(c[i]);
-	} else {
-		hex_to_html(c + 4);
 	}
 }
 
@@ -328,7 +309,7 @@ void send_vlan(uint16_t vlan)
 	//{"members":"0x00060011"}
 	slen += strtox(outbuf + slen, "{\"members\":\"0x");
 	vlan_get(vlan);
-	hex_to_html(sfr_data);
+	hex_to_html(sfr_data, 8);
 	slen += strtox(outbuf + slen, "\",\"name\":\"");
 	__xdata uint16_t n = vlan_name(vlan);
 	if (n== 0xffff) {
@@ -365,9 +346,9 @@ bool send_counters(uint8_t phys_port)
 
 	char_to_html('[');
 	for (uint8_t counter = 0; counter < 0x37; counter++) {
-		port_counter_get(log_port, counter, sfp_buf);
+		port_counter_get(log_port, counter);
 		slen += strtox(outbuf + slen, "\"0x");
-		counter_to_html(sfp_buf);
+		hex_to_html(port_buf, 16);
 		char_to_html('\"');
 		if (counter != 0x36)
 			char_to_html(',');
@@ -590,7 +571,7 @@ void send_lag(void)
 		}
 		slen += strtox(outbuf + slen, "\",\"hash\":\"");
 		reg_read_m(RTL837X_TRK_HASH_CTRL_BASE + (l << 2));
-		hex_to_html(sfr_data);
+		hex_to_html(sfr_data, 8);
 		slen += strtox(outbuf + slen, "\"},");
 	}
 	slen -=1; // remove comma
@@ -1044,24 +1025,24 @@ void send_status(void)
 		char_to_html('0' + port_link_get(i));
 
 		slen += strtox(outbuf + slen, ",\"txG\":\"0x");
-		port_counter_get(i, STAT_COUNTER_TX_PKTS, sfp_buf);
-		counter_to_html(sfp_buf);
+		port_counter_get(i, STAT_COUNTER_TX_PKTS);
+		hex_to_html(port_buf, 16);
 
 		slen += strtox(outbuf + slen, "\",\"txB\":\"0x");
-		port_counter_get(i, STAT_COUNTER_ERR_PKTS, sfp_buf);
-		hex_to_html(sfp_buf + 4);		// 32 bit Tx Packet errors
+		port_counter_get(i, STAT_COUNTER_ERR_PKTS);
+		hex_to_html(port_buf + 4, 8);		// 32 bit Tx Packet errors
 
 		slen += strtox(outbuf + slen, "\",\"rxG\":\"0x");
-		port_counter_get(i, STAT_COUNTER_RX_PKTS, sfp_buf);
-		counter_to_html(sfp_buf);
+		port_counter_get(i, STAT_COUNTER_RX_PKTS);
+		hex_to_html(port_buf, 16);
 
 		slen += strtox(outbuf + slen, "\",\"rxB\":\"0x");
-		port_counter_get(i, STAT_COUNTER_ERR_PKTS, sfp_buf);
-		hex_to_html(sfp_buf);		// 32bit RX packet errors
+		port_counter_get(i, STAT_COUNTER_ERR_PKTS);
+		hex_to_html(port_buf, 8);		// 32bit RX packet errors
 
 		slen += strtox(outbuf + slen, "\",\"macs\":\"0x");
-		port_macs_learned_get(i, sfp_buf);
-		hex_to_html(sfp_buf);
+		port_macs_learned_get(i);
+		hex_to_html(port_buf, 8);
 		slen += strtox(outbuf + slen, "\"}");
 		if (i < machine.max_port)
 			char_to_html(',');

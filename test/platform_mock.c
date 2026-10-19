@@ -35,22 +35,24 @@ uint8_t port_link_get(uint8_t port) __banked { return 3; }
 bool port_phy_enabled(uint8_t port) __banked { return true; }
 uint8_t port_phy_adv_get(uint8_t port) __banked { return 0x3f; }
 
+__xdata uint8_t port_buf[8];
+
 /* Every counter reads 0x0000000100000002. */
-void port_counter_get(uint8_t port, uint8_t counter, __xdata uint8_t *out8) __banked
+void port_counter_get(uint8_t port, __xdata uint8_t counter) __banked
 {
 	static const uint8_t v[8] = { 0, 0, 0, 1, 0, 0, 0, 2 };
 	for (uint8_t i = 0; i < 8; i++)
-		out8[i] = v[i];
+		port_buf[i] = v[i];
 }
 
-void port_macs_learned_get(uint8_t port, __xdata uint8_t *out4) __banked
+void port_macs_learned_get(uint8_t port) __banked
 {
-	out4[0] = out4[1] = out4[2] = 0;
-	out4[3] = 5;
+	port_buf[0] = port_buf[1] = port_buf[2] = 0;
+	port_buf[3] = 5;
 }
 
 uint16_t port_mtu_get(uint8_t port) __banked { return 1522; }
-void port_mtu_set(uint8_t port, uint16_t mtu) __banked { }
+void port_mtu_set(uint8_t port, __xdata uint16_t mtu) __banked { }
 
 uint8_t port_eee_adv_get(uint8_t port) __banked { return 7; }
 uint8_t port_eee_lp_get(uint8_t port) __banked { return 5; }
