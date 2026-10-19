@@ -522,8 +522,8 @@ void parse_lag(void)
 				members >>= 1;
 			}
 			print_string(" (hash: 0x"); 
-			reg_read_m(RTL837X_TRK_HASH_CTRL_BASE + (i << 2));
-			print_byte(sfr_data[3]);
+			port_lag_hash_get(i);
+			print_byte(port_buf[3]);
 			print_string(")\n");
 		}
 		return;
@@ -841,22 +841,20 @@ void parse_mirror(void)
 	__xdata uint16_t tx_pmask = 0;
 
 	if (cmd_compare(1, "status")) {
-		reg_read_m(RTL837x_MIRROR_CTRL);
-		uint8_t mPort = sfr_data[3];
-		if (mPort & 1) {
+		port_mirror_get();
+		if (port_buf[0]) {
 			print_string("Enabled: ");
 		} else {
 			print_string("NOT Enabled: ");
 		}
 		print_string("Mirroring port: ");
 		print_phys_port(mirroring_port);
-		reg_read_m(RTL837x_MIRROR_CONF);
-		uint16_t m = sfr_data[0];
-		m = (m << 8) | sfr_data[1];
+		uint16_t m = port_buf[2];
+		m = (m << 8) | port_buf[3];
 		print_string(", Port mask RX: ");
 		print_short(m);
-		m = sfr_data[2];
-		m = (m << 8) | sfr_data[3];
+		m = port_buf[4];
+		m = (m << 8) | port_buf[5];
 		print_string(", Port mask TX: ");
 		print_short(m);
 		write_char('\n');

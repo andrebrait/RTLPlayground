@@ -530,25 +530,23 @@ void send_mirror(void)
 	dbg_string("send_mirror called\n");
 	slen = strtox(outbuf, HTTP_RESPONCE_JSON);
 
-	reg_read_m(RTL837x_MIRROR_CTRL);
-	uint8_t mPort = sfr_data[3];
-	if (mPort & 1) {
+	port_mirror_get();
+	if (port_buf[0]) {
 		slen += strtox(outbuf + slen, "{\"enabled\":1,\"mPort\":");
 	} else {
 		slen += strtox(outbuf + slen, "{\"enabled\":0,\"mPort\":");
 	}
-	itoa_html(machine.log_to_phys_port[mPort >> 1]);
+	itoa_html(machine.log_to_phys_port[port_buf[1]]);
 
-	reg_read_m(RTL837x_MIRROR_CONF);
-	uint16_t m = sfr_data[0];
-	m = (m << 8) | sfr_data[1];
+	uint16_t m = port_buf[2];
+	m = (m << 8) | port_buf[3];
 	slen += strtox(outbuf + slen, ",\"mirror_rx\":\"");
 	for (uint8_t i = 0; i < 16; i++) {
 		bool_to_html(!!(m & 0x8000));
 		m <<= 1;
 	}
-	m = sfr_data[2];
-	m = (m << 8) | sfr_data[3];
+	m = port_buf[4];
+	m = (m << 8) | port_buf[5];
 	slen += strtox(outbuf + slen, "\",\"mirror_tx\":\"");
 	for (uint8_t i = 0; i < 16; i++) {
 		bool_to_html(!!(m & 0x8000));
@@ -575,8 +573,8 @@ void send_lag(void)
 			ports <<= 1;
 		}
 		slen += strtox(outbuf + slen, "\",\"hash\":\"");
-		reg_read_m(RTL837X_TRK_HASH_CTRL_BASE + (l << 2));
-		hex_to_html(sfr_data, 8);
+		port_lag_hash_get(l);
+		hex_to_html(port_buf, 8);
 		slen += strtox(outbuf + slen, "\"},");
 	}
 	slen -=1; // remove comma
@@ -838,30 +836,21 @@ void send_bandwidth(void)
 		slen += strtox(outbuf + slen, "{\"portNum\":");
 		itoa_html(machine.log_to_phys_port[i]);
 		slen += strtox(outbuf + slen, ",\"iLimited\":");
-		reg_read_m(RTL837X_IGBW_PORT_CTRL + i * 4);
-		if (sfr_data[1] & 0x10)
-			char_to_html('1');
-		else
-			char_to_html('0');
+		bandwidth_get(i, 0);
+		bool_to_html(port_buf[0]);
 		slen += strtox(outbuf + slen, ",\"iBW\":\"");
-		byte_to_html(sfr_data[1] & 0x0f);
-		byte_to_html(sfr_data[2]);
-		byte_to_html(sfr_data[3]);
+		byte_to_html(port_buf[1]);
+		byte_to_html(port_buf[2]);
+		byte_to_html(port_buf[3]);
 		slen += strtox(outbuf + slen, "\",\"iFC\":");
-		if (reg_bit_test(RTL837X_IGBW_PORT_FC_CTRL, i))
-			char_to_html('1');
-		else
-			char_to_html('0');
-		reg_read_m(RTL837X_EGBW_PORT_CTRL + i * 1024);
+		bool_to_html(port_buf[4]);
+		bandwidth_get(i, 1);
 		slen += strtox(outbuf + slen, ",\"eLimited\":");
-		if (sfr_data[1] & 0x10)
-			char_to_html('1');
-		else
-			char_to_html('0');
+		bool_to_html(port_buf[0]);
 		slen += strtox(outbuf + slen, ",\"eBW\":\"");
-		byte_to_html(sfr_data[1] & 0x0f);
-		byte_to_html(sfr_data[2]);
-		byte_to_html(sfr_data[3]);
+		byte_to_html(port_buf[1]);
+		byte_to_html(port_buf[2]);
+		byte_to_html(port_buf[3]);
 		char_to_html('"');
 		char_to_html('}');
 		if (i < machine.max_port)
@@ -874,28 +863,24 @@ void send_bandwidth(void)
 
 void send_storm(void)
 {
-	__xdata uint8_t i, t, idx;
+	__xdata uint8_t i, t, j;
 
 	slen = strtox(outbuf, HTTP_RESPONCE_JSON);
 	char_to_html('[');
 	for (i = machine.min_port; i <= machine.max_port; i++) {
 		slen += strtox(outbuf + slen, "{\"portNum\":");
 		itoa_html(machine.log_to_phys_port[i]);
+		storm_get(i);
 		slen += strtox(outbuf + slen, ",\"en\":\"");
 		for (t = 0; t < STORM_TYPES; t++)
-			char_to_html(reg_bit_test(RTL837X_STORM_CTRL + (t << 2), i) ? '1' : '0');
+			bool_to_html(port_buf[t]);
 		slen += strtox(outbuf + slen, "\",\"pps\":\"");
-		for (t = 0; t < STORM_TYPES; t++) {
-			idx = STORM_METER(i, t);
-			char_to_html(reg_bit_test(RTL837X_METER_MODE + ((idx >> 5) << 2), idx & 0x1f) ? '1' : '0');
-		}
+		for (t = 0; t < STORM_TYPES; t++)
+			bool_to_html(port_buf[4 + t]);
 		slen += strtox(outbuf + slen, "\",\"rate\":\"");
-		for (t = 0; t < STORM_TYPES; t++) {
-			reg_read_m(RTL837X_METER_RATE + (STORM_METER(i, t) << 2));
-			byte_to_html(sfr_data[1]);
-			byte_to_html(sfr_data[2]);
-			byte_to_html(sfr_data[3]);
-		}
+		for (t = 0; t < STORM_TYPES; t++)
+			for (j = 1; j < 4; j++)
+				byte_to_html(port_buf[8 + (t << 2) + j]);
 		char_to_html('"');
 		char_to_html('}');
 		if (i < machine.max_port)

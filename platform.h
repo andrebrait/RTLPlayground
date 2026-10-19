@@ -197,7 +197,7 @@ uint8_t port_phy_adv_get(uint8_t port) __banked;
  * argument after the first is __xdata. Both keep the banked call's extra parameters
  * and out-pointers out of internal data RAM, where each byte comes off the stack
  * headroom. Follow this pattern for new platform getters. */
-extern __xdata uint8_t port_buf[8];
+extern __xdata uint8_t port_buf[24];
 // 64-bit MIB counter -> port_buf[0..7], big-endian
 void port_counter_get(uint8_t port, __xdata uint8_t counter) __banked;
 // MACs learned -> port_buf[0..3], big-endian
@@ -222,11 +222,15 @@ void vlan_delete(uint16_t vlan) __banked;
 void vlan_dump(void) __banked;
 void port_mirror_set(uint8_t port, __xdata uint16_t rx_pmask, __xdata uint16_t tx_pmask) __banked;
 void port_mirror_del(void) __banked;
+// port_buf[0] = enabled, [1] = monitor port (logical), [2..3] = RX mask, [4..5] = TX mask, big-endian
+void port_mirror_get(void) __banked;
 bool port_ingress_filter(__xdata uint8_t port, __xdata vlan_ingress_mode_t type) __banked;
 uint16_t port_lag_members_get(uint8_t lag) __banked;
 uint8_t port_lag_of(uint8_t port) __banked;
 void port_lag_members_set(__xdata uint8_t lag, __xdata uint16_t members) __banked;
 void port_lag_hash_set(__xdata uint8_t lag, __xdata uint8_t hash) __banked;
+// the 32-bit hash control word -> port_buf[0..3], big-endian
+void port_lag_hash_get(uint8_t lag) __banked;
 void port_eee_enable_all(__xdata uint8_t speed) __banked;
 void port_eee_disable_all(void) __banked;
 void port_eee_status_all(void) __banked;
@@ -234,6 +238,11 @@ void port_eee_enable(__xdata uint8_t port, __xdata uint8_t speed) __banked;
 void port_eee_disable(uint8_t port) __banked;
 void port_eee_status(uint8_t port) __banked;
 void print_port_ingress_filter_mode(vlan_ingress_mode_t mode) __banked;
+// port_buf[0] = limited, [1..3] = 20-bit rate, big-endian, [4] = flow control (ingress only)
+void bandwidth_get(uint8_t port, __xdata uint8_t egress) __banked;
+// per storm type t < STORM_TYPES: port_buf[t] = enabled, port_buf[4 + t] = pps (else kbps),
+// port_buf[8 + 4t + 1..3] = 24-bit rate, big-endian
+void storm_get(uint8_t port) __banked;
 void port_isolate(uint8_t port, __xdata uint16_t pmask) __banked;
 uint16_t port_isolation_get(uint8_t port) __banked;
 void port_l2_static_mgmt(__xdata uint8_t *mac, __xdata uint16_t vlan, __xdata bool remove_entry) __banked;

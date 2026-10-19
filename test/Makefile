@@ -35,7 +35,8 @@ TESTS = $(BUILDDIR)/test_cmd_editor \
 # The table tests link the register mock and one environment file; stub/
 # stands in for the two headers a firmware build generates.
 TABLE_ENV = support.c hw_mock.c env_tables.c $(SRCROOT)/cmd_editor.c \
-            $(SRCROOT)/rtl837x_port.c $(SRCROOT)/httpd/page_impl.c
+            $(SRCROOT)/rtl837x_port.c $(SRCROOT)/rtl837x_bandwidth.c $(SRCROOT)/rtl837x_storm.c \
+            $(SRCROOT)/httpd/page_impl.c
 
 all: run
 
@@ -46,23 +47,22 @@ $(BUILDDIR):
 $(BUILDDIR)/test_cmd_editor: test_cmd_editor.c support.c $(SRCROOT)/cmd_editor.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
 
-# rtl837x_port.c and httpd/page_impl.c are compiled UNMODIFIED from the firmware tree.
+# rtl837x_port.c, the bandwidth and storm units and httpd/page_impl.c are compiled UNMODIFIED from the firmware tree.
 $(BUILDDIR)/test_port_tables: test_port_tables.c $(TABLE_ENV) hw_mock.h | $(BUILDDIR)
-	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@ $(LDFLAGS)
+	$(CC) $(CFLAGS) -Wno-incompatible-pointer-types $(filter %.c,$^) -o $@ $(LDFLAGS)
 
 $(BUILDDIR)/test_tick_gate: test_tick_gate.c support.c $(SRCROOT)/cmd_editor.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
 
 $(BUILDDIR)/test_page_json: test_page_json.c $(TABLE_ENV) hw_mock.h | $(BUILDDIR)
-	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@ $(LDFLAGS)
+	$(CC) $(CFLAGS) -Wno-incompatible-pointer-types $(filter %.c,$^) -o $@ $(LDFLAGS)
 
-# cmd_parser.c, the bandwidth, storm and trap units and the rest of the table
-# environment are compiled UNMODIFIED; golden_env.c stubs what the parser
+# cmd_parser.c, the trap unit and the table environment are compiled UNMODIFIED; golden_env.c stubs what the parser
 # dispatches into elsewhere. cmd_parser.c has its own definitions of the editor
 # buffers support.c also defines, so common symbols merge, and it needs three
 # diagnostics relaxed that the other units do not trigger.
 GOLDEN_SRC = test_golden.c golden_env.c $(TABLE_ENV) $(SRCROOT)/cmd_parser.c \
-             $(SRCROOT)/rtl837x_bandwidth.c $(SRCROOT)/rtl837x_storm.c $(SRCROOT)/rtl837x_trap.c
+             $(SRCROOT)/rtl837x_trap.c
 $(BUILDDIR)/test_golden: $(GOLDEN_SRC) hw_mock.h support.h | $(BUILDDIR)
 	$(CC) $(CFLAGS) -fcommon -Wno-parentheses -Wno-misleading-indentation -Wno-incompatible-pointer-types \
 		-DGOLDEN_DIR='"$(CURDIR)/golden"' $(filter %.c,$(GOLDEN_SRC)) -o $@ $(LDFLAGS)

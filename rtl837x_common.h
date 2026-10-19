@@ -93,6 +93,7 @@ void reg_bit_clear(uint16_t reg_addr, char bit);
 uint8_t reg_bit_test(uint16_t reg_addr, char bit);
 void sfr_mask_data(uint8_t n, uint8_t mask, uint8_t set);
 void sfr_set_zero(void);
+void sfr_data_copy(__xdata uint8_t *dst);
 void memcpyc(__xdata uint8_t *dst, __code const uint8_t *src, uint16_t len);
 uint16_t strlen_x(__xdata const char *s);
 bool strstart(__xdata const uint8_t *a, __code const uint8_t *b);

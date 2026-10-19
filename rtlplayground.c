@@ -704,6 +704,19 @@ void sfr_set_zero(void) {
 
 
 /*
+ * Copies the 4 sfr data bytes to dst
+ */
+void sfr_data_copy(__xdata uint8_t *dst)
+{
+	uint8_t idx = 4;
+	while (idx) {
+		idx -= 1;
+		dst[idx] = sfr_data[idx];
+	}
+}
+
+
+/*
  * Create 32 random number in sfr_data
  */
 void get_random_32(void)

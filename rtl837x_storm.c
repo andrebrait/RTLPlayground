@@ -63,23 +63,38 @@ void storm_off(uint8_t port, __xdata uint8_t type) __banked
 }
 
 
+void storm_get(uint8_t port) __banked
+{
+	uint8_t t, idx, b;
+
+	for (t = 0; t < STORM_TYPES; t++) {
+		idx = STORM_METER(port, t);
+		b = reg_bit_test(RTL837X_STORM_CTRL + (t << 2), port);
+		port_buf[t] = b;
+		b = reg_bit_test(RTL837X_METER_MODE + ((idx >> 5) << 2), idx & 0x1f);
+		port_buf[4 + t] = b;
+		reg_read_m(RTL837X_METER_RATE + (idx << 2));
+		sfr_data_copy(port_buf + 8 + (t << 2));
+	}
+}
+
+
 void storm_show(void) __banked
 {
-	uint8_t i, t, idx;
+	uint8_t i, t;
 
 	for (i = machine.min_port; i <= machine.max_port; i++) {
 		print_string("port ");
 		write_char('0' + machine.log_to_phys_port[i]);
+		storm_get(i);
 		for (t = 0; t < STORM_TYPES; t++) {
 			print_string(storm_names[t]);
-			if (!reg_bit_test(RTL837X_STORM_CTRL + (t << 2), i)) {
+			if (!port_buf[t]) {
 				print_string("off");
 				continue;
 			}
-			idx = STORM_METER(i, t);
-			reg_read_m(RTL837X_METER_RATE + (idx << 2));
-			print_byte(sfr_data[1]); print_byte(sfr_data[2]); print_byte(sfr_data[3]);
-			if (reg_bit_test(RTL837X_METER_MODE + ((idx >> 5) << 2), idx & 0x1f))
+			print_byte(port_buf[9 + (t << 2)]); print_byte(port_buf[10 + (t << 2)]); print_byte(port_buf[11 + (t << 2)]);
+			if (port_buf[4 + t])
 				print_string(" pps");
 			else
 				print_string(" kbps");

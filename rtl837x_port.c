@@ -55,6 +55,16 @@ void port_mirror_del(void) __banked
 }
 
 
+void port_mirror_get(void) __banked
+{
+	reg_read_m(RTL837x_MIRROR_CTRL);
+	port_buf[0] = sfr_data[3] & 1;
+	port_buf[1] = sfr_data[3] >> 1;
+	reg_read_m(RTL837x_MIRROR_CONF);
+	sfr_data_copy(port_buf + 2);
+}
+
+
 bool port_ingress_filter(__xdata uint8_t port, __xdata vlan_ingress_mode_t type) __banked
 {
 	if (port > CPU_PORT || type >= VLAN_INVALID) {
@@ -591,7 +601,7 @@ uint8_t port_link_get(uint8_t port) __banked
 }
 
 
-__xdata uint8_t port_buf[8];
+__xdata uint8_t port_buf[24];
 
 
 void port_counter_get(uint8_t port, __xdata uint8_t counter) __banked
@@ -608,8 +618,7 @@ void port_counter_get(uint8_t port, __xdata uint8_t counter) __banked
 void port_macs_learned_get(uint8_t port) __banked
 {
 	reg_read_m(RTL837X_L2_LRN_PORT_CONSTRT_CNT + (port << 2));
-	for (uint8_t i = 0; i < 4; i++)
-		port_buf[i] = sfr_data[i];
+	sfr_data_copy(port_buf);
 }
 
 
@@ -959,6 +968,12 @@ void port_lag_members_set(__xdata uint8_t lag, __xdata uint16_t members) __banke
  * Configures the hash algorithm used for a LAG
  * lag is the Group to configure and hash is a bitmask
  */
+void port_lag_hash_get(uint8_t lag) __banked
+{
+	reg_read_m(RTL837X_TRK_HASH_CTRL_BASE + (lag << 2));
+	sfr_data_copy(port_buf);
+}
+
 void port_lag_hash_set(__xdata uint8_t lag, __xdata uint8_t hash_bits) __banked
 {
 	print_string("port_lag_hash_set, lag: "); print_byte(lag); print_string(", hash: "); print_byte(hash_bits);

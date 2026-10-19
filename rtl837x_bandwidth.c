@@ -88,35 +88,33 @@ void bandwidth_egress_disable(uint8_t port) __banked
 }
 
 
+void bandwidth_get(uint8_t port, __xdata uint8_t egress) __banked
+{
+	reg_read_m(egress ? RTL837X_EGBW_PORT_CTRL + port * 1024 : RTL837X_IGBW_PORT_CTRL + port * 4);
+	sfr_data_copy(port_buf);
+	port_buf[0] = (port_buf[1] >> 4) & 1;
+	port_buf[1] &= 0x0f;
+	port_buf[4] = 0;
+	if (!egress)
+		port_buf[4] = reg_bit_test(RTL837X_IGBW_PORT_FC_CTRL, port);
+}
+
+
 void bandwidth_status(uint8_t port) __banked
 {
-	print_string("ingress: ");
-	reg_read_m(RTL837X_IGBW_PORT_CTRL + port * 4);
-	if (sfr_data[1] & 0x10) {
-		print_string("enabled: ");
-		sfr_data[1] &= 0xef;
-		print_string("0x");
-		print_byte(sfr_data[1]);
-		print_byte(sfr_data[2]);
-		print_byte(sfr_data[3]);
-		write_char('0');
-		write_char('\n');
-	} else {
-		print_string("disabled\n");
-	}
-
-	print_string("egress: ");
-	reg_read_m(RTL837X_EGBW_PORT_CTRL + port * 1024);
-	if (sfr_data[1] & 0x10) {
-		print_string("enabled: ");
-		sfr_data[1] &= 0xef;
-		print_string("0x");
-		print_byte(sfr_data[1]);
-		print_byte(sfr_data[2]);
-		print_byte(sfr_data[3]);
-		write_char('0');
-		write_char('\n');
-	} else {
-		print_string("disabled\n");
+	for (uint8_t egress = 0; egress < 2; egress++) {
+		print_string(egress ? "egress: " : "ingress: ");
+		bandwidth_get(port, egress);
+		if (port_buf[0]) {
+			print_string("enabled: ");
+			print_string("0x");
+			print_byte(port_buf[1]);
+			print_byte(port_buf[2]);
+			print_byte(port_buf[3]);
+			write_char('0');
+			write_char('\n');
+		} else {
+			print_string("disabled\n");
+		}
 	}
 }
