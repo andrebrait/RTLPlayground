@@ -18,6 +18,7 @@ typedef char vlan_ingress_mode_check[(VLAN_ALL == INGR_ALLOW_ALL && VLAN_TAGGED 
 				      && VLAN_UNTAGGED == INGR_ALLOW_UNTAGGED) ? 1 : -1];
 
 void vlan_setup(void) __banked;
+int8_t vlan_get(uint16_t vlan) __banked;
 void port_l2mc_set(uint8_t mac_last, __xdata uint16_t vid, __xdata uint16_t pmask) __banked;
 void port_l2_forget_port(uint8_t port) __banked;
 void port_l2_setup(void) __banked;

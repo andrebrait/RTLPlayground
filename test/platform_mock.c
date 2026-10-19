@@ -1,9 +1,11 @@
 /*
  * platform_mock.c - the platform side of the seam check.
  *
- * Defines, against platform.h only, what cmd_parser.c, cmd_editor.c and
- * httpd/page_impl.c need from the platform, with no register file behind it.
- * Each task that moves hardware access behind platform.h adds its mock here.
+ * Defines what cmd_parser.c, cmd_editor.c and httpd/page_impl.c need from the
+ * platform, with no register file behind it. The seam is platform.h plus the
+ * hardware-free module headers rtl837x_stp.h, rtl837x_lacp.h, rtl837x_igmp.h,
+ * rtl837x_bandwidth.h, rtl837x_lldp.h, rtl837x_storm.h, rtl837x_cabletest.h,
+ * dhcp.h, dns.h, ntp.h and syslog.h, not platform.h alone.
  */
 #include "platform.h"
 #include "rtl837x_flash.h"

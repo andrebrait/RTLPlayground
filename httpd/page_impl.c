@@ -181,6 +181,7 @@ void hex_to_html(__xdata uint8_t *p, __xdata uint8_t n)
 
 // One '0'/'1' per bit of v below its highest set bit (a marker the caller ORs in).
 // Single parameter: a second one on a static function costs a byte of internal RAM.
+// Precondition: v != 0; callers OR in a marker bit above the bits to print.
 static void bits_to_html(uint8_t v)
 {
 	uint8_t m = 0x80;

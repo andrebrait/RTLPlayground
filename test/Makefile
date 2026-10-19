@@ -95,7 +95,7 @@ SEAM_SHARED = $(SRCROOT)/cmd_parser.c $(SRCROOT)/cmd_editor.c $(SRCROOT)/httpd/p
 SEAMDIR     = $(BUILDDIR)/seam
 SEAM_COPIES = $(addprefix $(SEAMDIR)/,$(notdir $(SEAM_SHARED)))
 SEAM_CFLAGS = -Iseam_stub $(CFLAGS) -Wno-parentheses -Wno-misleading-indentation -Wno-incompatible-pointer-types
-SEAM_HW     = rtl837x_(regs|sfr|common|port|phy|flash)\.h|8051\.h|(^|[ /])(sfp|phy)\.h
+SEAM_HW     = rtl837x_(regs|sfr|common|port|phy|flash|pins|leds)\.h|8051\.h|(^|[ /])(sfp|phy)\.h
 $(BUILDDIR)/test_platform_seam: test_platform_seam.c platform_mock.c $(SEAM_SHARED) FORCE | $(BUILDDIR)
 	mkdir -p $(SEAMDIR) && cp $(SEAM_SHARED) $(SEAMDIR)/
 	$(CC) -MM $(SEAM_CFLAGS) $(SEAM_COPIES) > $(SEAMDIR)/deps.txt

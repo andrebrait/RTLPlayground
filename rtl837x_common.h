@@ -70,6 +70,11 @@ struct vlan_tag {
 
 extern __xdata uint8_t uip_buf[UIP_CONF_BUFFER_SIZE+2];
 
+struct flash_region_t {
+    uint32_t addr;
+    uint16_t len;
+};
+
 // Headers for calls in the common code area (HOME/BANK0)
 void print_string_no_syslog(__code const char *p);
 void print_string_newline_no_syslog(__code const char *p);
@@ -107,4 +112,5 @@ void set_sys_led_state(uint8_t state);
 void sds_read(uint8_t sds_id, uint8_t page, uint8_t reg);
 void sds_write_v(uint8_t sds_id, uint8_t page, uint8_t reg, uint16_t v);
 void flash_default_config(void);
+void reset_chip(void);
 #endif

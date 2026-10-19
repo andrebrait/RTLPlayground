@@ -24,7 +24,9 @@ cleanup() {
 	git -C "$ROOT" worktree remove --force "$HEAD_TREE" 2>/dev/null || true
 	rm -rf "$TMP"
 }
-trap cleanup EXIT INT TERM
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap cleanup EXIT
 git -C "$ROOT" worktree add --detach --quiet "$BASE_TREE" "$BASE_SHA"
 git -C "$ROOT" worktree add --detach --quiet "$HEAD_TREE" "$HEAD_SHA"
 

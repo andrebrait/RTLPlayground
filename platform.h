@@ -5,14 +5,18 @@
  * The hardware-facing interface of the shared CLI and web-page code
  * (cmd_parser.c, cmd_editor.c, httpd/page_impl.c).
  *
- * Everything those files need from the platform is declared here, and nothing
+ * The seam is this header plus the hardware-free module headers those files also
+ * include: rtl837x_stp.h, rtl837x_lacp.h, rtl837x_igmp.h, rtl837x_bandwidth.h,
+ * rtl837x_lldp.h, rtl837x_storm.h, rtl837x_cabletest.h, dhcp.h, dns.h, ntp.h and
+ * syslog.h (plus cmd_parser.h, page_impl.h, httpd.h and uip). Everything
+ * hardware-specific the shared files need is declared here, and nothing
  * register-level is: register addresses, SFR declarations and the
  * reg_*()/phy_*()/sds_*() accessors stay in rtl837x_regs.h, rtl837x_sfr.h and
  * rtl837x_common.h. On the 8051 each function below is implemented by the
  * RTL837x firmware modules and bound at link time; a host build binds the same
  * names to a mock (test/platform_mock.c). `make -C test seam_check` compiles
  * the three shared files with the register headers poisoned to prove they
- * reach the hardware only through this header.
+ * reach the hardware only through this header and those module headers.
  *
  * rtl837x_common.h, rtl837x_port.h, sfp.h and rtl837x_flash.h include this
  * header, so every 8051 translation unit sees these declarations once.
@@ -82,11 +86,6 @@ enum sfp_speeds {
  */
 struct uip_eth_addr {
    uint8_t addr[6];
-};
-
-struct flash_region_t {
-    uint32_t addr;
-    uint16_t len;
 };
 
 /*
@@ -210,20 +209,16 @@ extern __xdata uint8_t  lacp_agg_sys[LACP_NUM_LAGS][MAC_ADDR_LEN];
 extern __xdata uint8_t  lacp_agg_valid[LACP_NUM_LAGS];
 extern __xdata uint16_t lacp_members_last[LACP_NUM_LAGS];
 
-/* 2-bit MSTP state of a logical port (3 = forwarding), or of the STP entity it answers to. */
+/* 2-bit MSTP state of a logical port index (3 = forwarding). */
 uint8_t stp_port_state_get(uint8_t log_port) __banked;
 
 /* Called first by send_stp/send_lacp/send_lldp. Nothing to do on the 8051, whose
- * protocol engines keep the globals above current; a platform without them
- * provides functions here instead. */
+ * protocol engines keep the globals above current; a platform without them defines
+ * PLATFORM_HAS_STATUS_REFRESH and provides these three functions instead. */
 #ifndef PLATFORM_HAS_STATUS_REFRESH
 #define stp_status_refresh()
 #define lacp_status_refresh()
 #define lldp_status_refresh()
-#else
-void stp_status_refresh(void);
-void lacp_status_refresh(void);
-void lldp_status_refresh(void);
 #endif
 
 /* System hostname (device identity). Set via `hostname <text>` and the System
@@ -234,6 +229,10 @@ extern __xdata char hostname[24];
 extern __xdata struct uip_eth_addr uip_ethaddr;
 
 extern __xdata uint8_t sfp_buf[16];
+/* The debounced SFP pin snapshot handle_sfp() keeps, four bits per slot (bit 4*slot = no
+ * module, bit 4*slot+1 = loss of signal). The `sfp <slot> <speed>` command sets bit 4*slot
+ * ("module absent") and calls handle_sfp(), which then sees the module as just inserted and
+ * probes the slot again. Nothing else outside the platform writes it. */
 extern __xdata uint8_t sfp_pins_last;
 extern __xdata char sfp_module_vendor[2][17];
 extern __xdata char sfp_module_model[2][17];
@@ -253,7 +252,6 @@ void print_cmd_prompt(void);
 void print_phys_port(uint8_t port);
 void write_char(char c);
 uint16_t strtox(__xdata uint8_t *dst, __code const char *s);
-void reset_chip(void);
 /* Firmware implementations that shadow libc names. Host unit-test builds
  * (RTLP_HOST_TEST) hide these prototypes so they don't clash with glibc;
  * argument order matches libc, so on-host callers transparently use the
@@ -280,10 +278,6 @@ bool sfp_los(uint8_t slot) __banked;
 bool sfp_present_live(uint8_t slot);
 
 // Flash
-void flash_read_uid(void);
-void flash_read_jedecid(void);
-void flash_read_security(void);
-void flash_read_bulk(__xdata uint8_t *dst);
 __code const char* get_flash_size_str(void);
 
 // Chip temperature, raw in 1/128 C. sensor 0 = now, 1 = at power-on
@@ -326,7 +320,6 @@ uint8_t port_l2_forget(void) __banked;
 void port_l2_learned(void) __banked;
 void port_stats_print(void) __banked;
 void port_media_show(uint8_t port) __banked;
-int8_t vlan_get(uint16_t vlan) __banked;
 __xdata uint16_t vlan_name(uint16_t vlan) __banked;
 void vlan_name_remove(uint16_t vlan) __banked;
 void port_pvid_set(uint8_t port, __xdata uint16_t pvid) __banked;

@@ -30,16 +30,6 @@ extern volatile __xdata uint8_t sfr_data[4];
 extern __xdata struct flash_region_t flash_region;
 extern __xdata uint16_t management_vlan;
 
-/* The command parser's state, owned by cmd_parser.c */
-extern __xdata uint8_t cmd_words_len;
-extern __xdata uint8_t cmd_words_b[15];
-extern __xdata uint8_t hexvalue[4];
-extern __xdata uint8_t atoi_results_u8;
-uint8_t cmd_compare(uint8_t start, __code const uint8_t * cmd);
-uint8_t atoi_hex(uint8_t idx);
-uint8_t atoi_byte(uint8_t idx);
-void cmd_error(__code const char *msg);
-
 __xdata uint8_t gpio_last_value[8] = { 0 };
 
 

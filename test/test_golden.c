@@ -588,6 +588,7 @@ int main(void)
 	sfp_poll("handle_sfp_insert", 0xff, 1, 3);
 	sfp_poll("handle_sfp_remove", 0x00, 0, 2);
 	reg_after("regset_readback", "regset 0abc 12345678", 0x0abc, 0x12345678);
+	reg_after("mtu_9000_packing", "mtu 1 9000", RTL8373_REG_MAC_L2_PORT_MAX_LEN, 0x08ca2328);
 	reg_after("mtu_packing", "mtu 1 9003", RTL8373_REG_MAC_L2_PORT_MAX_LEN, 0x08cae32b);	/* 9003 = 0x232b: both low bits set */
 	page("send_lacp", send_lacp);
 	page("send_lldp", send_lldp);

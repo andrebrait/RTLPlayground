@@ -59,9 +59,11 @@ fires — so it drops straight into CI.
 | `test_platform_seam` | `cmd_parser.c` + `cmd_editor.c` + `httpd/page_impl.c` | the platform seam, see below |
 
 ## The platform seam
-`cmd_parser.c`, `cmd_editor.c` and `httpd/page_impl.c` are shared code: they reach
-the hardware only through `../platform.h` (plus their own headers, `httpd.h`, C
-headers and the hardware-free module headers such as `rtl837x_stp.h`).
+`cmd_parser.c`, `cmd_editor.c` and `httpd/page_impl.c` are shared code. Their seam
+is `../platform.h` plus the hardware-free module headers `rtl837x_stp.h`,
+`rtl837x_lacp.h`, `rtl837x_igmp.h`, `rtl837x_bandwidth.h`, `rtl837x_lldp.h`,
+`rtl837x_storm.h`, `rtl837x_cabletest.h`, `dhcp.h`, `dns.h`, `ntp.h` and `syslog.h`
+(plus their own headers, `httpd.h`, C headers and uip), not `platform.h` alone.
 `make` runs `test_platform_seam` (`make seam_check` runs just it). It compiles
 copies of the three files with `seam_stub/` first on the include path, where
 `rtl837x_regs.h`, `rtl837x_sfr.h` and `8051.h` are `#error`, and links them with
@@ -69,7 +71,8 @@ copies of the three files with `seam_stub/` first on the include path, where
 declare, fails to compile or link. A header that is included through another header slips past
 the stubs, so `gcc -MM` also lists every header the copies reach and the check fails
 if one of them is `rtl837x_regs.h`, `rtl837x_sfr.h`, `8051.h`, `rtl837x_common.h` (the `reg_*`/`phy_*`/`sds_*`
-primitives), `rtl837x_port.h`, `rtl837x_phy.h`, `rtl837x_flash.h`, `sfp.h` or `phy.h` (register-level declarations). `sfp_pins_last` and the
+primitives), `rtl837x_port.h`, `rtl837x_phy.h`, `rtl837x_flash.h`, `rtl837x_pins.h`,
+`rtl837x_leds.h`, `sfp.h` or `phy.h` (register-level declarations). `sfp_pins_last` and the
 other `extern` variables in `platform.h` are state the platform provides, not register access:
 shared code may read and write them.
 
