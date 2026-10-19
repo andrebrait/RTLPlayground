@@ -1,0 +1,5 @@
+HTTP/1.1 200 OK
+Connection: close
+Content-Type: application/json
+
+[{"portNum":1,"allow":"0006"},{"portNum":2,"allow":"0000"},{"portNum":3,"allow":"0000"},{"portNum":4,"allow":"0000"},{"portNum":5,"allow":"0000"},{"portNum":6,"allow":"0000"},{"portNum":7,"allow":"0000"},{"portNum":8,"allow":"0000"},{"portNum":9,"allow":"0000"}]

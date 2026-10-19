@@ -1,0 +1,7 @@
+l2
+
+	MAC		VLAN	type	port
+00:11:22:33:44:01	0001	learned	LAG1
+00:11:22:33:44:02	000a	learned	LAG1
+00:11:22:33:44:03	0001	static	CPU
+> 

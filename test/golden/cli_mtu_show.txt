@@ -1,0 +1,11 @@
+mtu show
+Port 1 2328
+Port 2 0000
+Port 3 0000
+Port 4 0000
+Port 5 0000
+Port 6 0000
+Port 7 0000
+Port 8 0000
+Port 9 0000
+> 

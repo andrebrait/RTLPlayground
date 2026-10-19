@@ -1,0 +1,5 @@
+HTTP/1.1 200 OK
+Connection: close
+Content-Type: application/json
+
+[{"portNum":1,"mtu":"0x2328"},{"portNum":2,"mtu":"0x0000"},{"portNum":3,"mtu":"0x0000"},{"portNum":4,"mtu":"0x0000"},{"portNum":5,"mtu":"0x0000"},{"portNum":6,"mtu":"0x0000"},{"portNum":7,"mtu":"0x0000"},{"portNum":8,"mtu":"0x0000"},{"portNum":9,"mtu":"0x0000"}]

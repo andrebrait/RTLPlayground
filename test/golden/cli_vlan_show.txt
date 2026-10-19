@@ -1,0 +1,18 @@
+vlan show
+Ingress VLAN configuration:
+Port	PVID	Type	Filtering
+1	000a	Any	Disabled
+2	000a	Any	Disabled
+3	000a	Any	Disabled
+4	0000	Any	Disabled
+5	0000	Any	Disabled
+6	0000	Any	Disabled
+7	0000	Any	Disabled
+8	0000	Any	Disabled
+9	0000	Any	Disabled
+CPU	0000	Any	Disabled
+
+Type - Which frame types are allowed: untagged, tagged or any
+Filtering - Whether packets not belonging to member VLANs on that port are dropped
+PVID - Assumed VLAN for untagged packets
+> 

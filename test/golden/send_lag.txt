@@ -1,0 +1,5 @@
+HTTP/1.1 200 OK
+Connection: close
+Content-Type: application/json
+
+[{"lagNum":0,"members":"0000000000000011","hash":"6"},{"lagNum":1,"members":"0000000000000000","hash":"0"},{"lagNum":2,"members":"0000000000000000","hash":"0"},{"lagNum":3,"members":"0000000000000000","hash":"0"}]

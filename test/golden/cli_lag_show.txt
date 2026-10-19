@@ -1,0 +1,7 @@
+lag show
+LAG status:
+ 1 member ports: 1 2  (hash: 0x06)
+ 2 disabled
+ 3 disabled
+ 4 disabled
+> 

@@ -1,0 +1,3 @@
+bw show
+Error: bw [in|out|status] <port> [<hexvalue>|off|drop|fc]
+> 

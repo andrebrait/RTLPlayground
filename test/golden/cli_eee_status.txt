@@ -1,0 +1,11 @@
+eee status
+Port: 1: Advertising:  2.5G  1G  100M   Link Partner:  2.5G  1G       ACTIVE   
+Port: 2: Advertising:        1G  100M   Link Partner:        1G       ACTIVE   
+Port: 3: Advertising:                   Link Partner:                 INACTIVE 
+Port: 4: Advertising:                   Link Partner:                 INACTIVE 
+Port: 5: Advertising:                   Link Partner:                 INACTIVE 
+Port: 6: Advertising:                   Link Partner:                 INACTIVE 
+Port: 7: Advertising:                   Link Partner:                 INACTIVE 
+Port: 8: Advertising:                   Link Partner:                 INACTIVE 
+Port: 9: SFP
+> 

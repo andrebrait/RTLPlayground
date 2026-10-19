@@ -1,0 +1,5 @@
+HTTP/1.1 200 OK
+Connection: close
+Content-Type: application/json
+
+[{"portNum":1,"iLimited":1,"iBW":"000010","iFC":1,"eLimited":1,"eBW":"000020"},{"portNum":2,"iLimited":0,"iBW":"000000","iFC":0,"eLimited":0,"eBW":"000000"},{"portNum":3,"iLimited":0,"iBW":"000000","iFC":0,"eLimited":0,"eBW":"000000"},{"portNum":4,"iLimited":0,"iBW":"000000","iFC":0,"eLimited":0,"eBW":"000000"},{"portNum":5,"iLimited":0,"iBW":"000000","iFC":0,"eLimited":0,"eBW":"000000"},{"portNum":6,"iLimited":0,"iBW":"000000","iFC":0,"eLimited":0,"eBW":"000000"},{"portNum":7,"iLimited":0,"iBW":"000000","iFC":0,"eLimited":0,"eBW":"000000"},{"portNum":8,"iLimited":0,"iBW":"000000","iFC":0,"eLimited":0,"eBW":"000000"},{"portNum":9,"iLimited":0,"iBW":"000000","iFC":0,"eLimited":0,"eBW":"000000"}]

@@ -1,0 +1,5 @@
+HTTP/1.1 200 OK
+Connection: close
+Content-Type: application/json
+
+{"on":1,"portStatus":[{"portNum":1,"logPort":0,"name":"uplink","permitted":1},{"portNum":2,"logPort":1,"name":"nas","permitted":1},{"portNum":3,"logPort":2,"name":"","permitted":0},{"portNum":4,"logPort":3,"name":"","permitted":0},{"portNum":5,"logPort":4,"name":"","permitted":0},{"portNum":6,"logPort":5,"name":"","permitted":0},{"portNum":7,"logPort":6,"name":"","permitted":0},{"portNum":8,"logPort":7,"name":"","permitted":0},{"portNum":9,"logPort":8,"name":"","permitted":0}]}

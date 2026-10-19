@@ -29,7 +29,8 @@ TESTS = $(BUILDDIR)/test_cmd_editor \
         $(BUILDDIR)/test_page_json \
         $(BUILDDIR)/test_httpd_tx \
         $(BUILDDIR)/test_tick_gate \
-        $(BUILDDIR)/test_lacp
+        $(BUILDDIR)/test_lacp \
+        $(BUILDDIR)/test_golden
 
 # The table tests link the register mock and one environment file; stub/
 # stands in for the two headers a firmware build generates.
@@ -54,6 +55,17 @@ $(BUILDDIR)/test_tick_gate: test_tick_gate.c support.c $(SRCROOT)/cmd_editor.c |
 
 $(BUILDDIR)/test_page_json: test_page_json.c $(TABLE_ENV) hw_mock.h | $(BUILDDIR)
 	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@ $(LDFLAGS)
+
+# cmd_parser.c, the bandwidth, storm and trap units and the rest of the table
+# environment are compiled UNMODIFIED; golden_env.c stubs what the parser
+# dispatches into elsewhere. cmd_parser.c has its own definitions of the editor
+# buffers support.c also defines, so common symbols merge, and it needs three
+# diagnostics relaxed that the other units do not trigger.
+GOLDEN_SRC = test_golden.c golden_env.c $(TABLE_ENV) $(SRCROOT)/cmd_parser.c \
+             $(SRCROOT)/rtl837x_bandwidth.c $(SRCROOT)/rtl837x_storm.c $(SRCROOT)/rtl837x_trap.c
+$(BUILDDIR)/test_golden: $(GOLDEN_SRC) hw_mock.h support.h | $(BUILDDIR)
+	$(CC) $(CFLAGS) -fcommon -Wno-parentheses -Wno-misleading-indentation -Wno-incompatible-pointer-types \
+		-DGOLDEN_DIR='"$(CURDIR)/golden"' $(filter %.c,$(GOLDEN_SRC)) -o $@ $(LDFLAGS)
 
 # rtl837x_lacp.c is compiled UNMODIFIED from the firmware tree.
 $(BUILDDIR)/test_lacp: test_lacp.c $(SRCROOT)/rtl837x_lacp.c | $(BUILDDIR)

@@ -1,0 +1,5 @@
+HTTP/1.1 200 OK
+Connection: close
+Content-Type: application/json
+
+[{"vlan":"001","mac":"00:11:22:33:44:01","type":"l","port":0,"lag":1,"idx":"0010"},{"vlan":"00a","mac":"00:11:22:33:44:02","type":"l","port":1,"lag":1,"idx":"0020"},{"vlan":"001","mac":"00:11:22:33:44:03","type":"s","port":9,"lag":0,"idx":"08f0"},{"vlan":"001","mac":"00:11:22:33:44:01","type":"l","port":0,"lag":1,"idx":"0010"}]

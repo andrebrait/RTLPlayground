@@ -17,6 +17,8 @@
 #include "rtl837x_phy.h"
 #include "support.h"
 #include "rtl837x_lacp.h"
+#include "hw_mock.h"
+#include "rtl837x_sfr.h"
 
 /* ---- console: everything lands in out_buf (support.c) ---- */
 void print_byte(uint8_t v)
@@ -27,7 +29,6 @@ void print_byte(uint8_t v)
 }
 void print_short(uint16_t v) { print_byte(v >> 8); print_byte(v); }
 void print_long(uint32_t v)  { print_short(v >> 16); print_short(v); }
-void print_reg(uint16_t v)   { print_short(v); }
 void itoa_short(uint16_t v)
 {
 	char b[6]; int n = 0;
@@ -40,6 +41,39 @@ void dbg_char(char c) { (void)c; }
 void dbg_byte(uint8_t v) { (void)v; }
 
 /* ---- copied verbatim from rtlplayground.c ---- */
+void print_sfr_data(void)
+{
+	write_char('0');
+	write_char('x');
+	print_byte(sfr_data[0]);
+	print_byte(sfr_data[1]);
+	print_byte(sfr_data[2]);
+	print_byte(sfr_data[3]);
+}
+
+void print_phy_data(void)
+{
+	write_char('0');
+	write_char('x');
+	print_byte(SFR_DATA_8);
+	print_byte(SFR_DATA_0);
+}
+
+void print_reg(uint16_t reg)
+{
+	reg_read_m(reg);
+	print_sfr_data();
+}
+
+void sfr_set_zero(void)
+{
+	uint8_t idx = 4;
+	while (idx) {
+		idx -= 1;
+		sfr_data[idx] = 0;
+	}
+}
+
 uint16_t strtox(uint8_t *dst, const char *s)
 {
 	uint8_t *b = dst;
@@ -61,9 +95,10 @@ const struct machine machine = {
 	.machine_name = "HOSTTEST",
 	.min_port = 0,
 	.max_port = 8,
-	.n_sfp = 0,
+	.n_sfp = 1,
 	.log_to_phys_port = { 1, 2, 3, 4, 5, 6, 7, 8, 9 },
 	.phys_to_log_port = { 0, 1, 2, 3, 4, 5, 6, 7, 8 },
+	.is_sfp = { 0, 0, 0, 0, 0, 0, 0, 0, 1 },
 };
 struct machine_runtime machine_detected = { .isRTL8373 = 1 };
 
@@ -93,11 +128,37 @@ uip_ipaddr_t uip_hostaddr, uip_draddr, uip_netmask;
 struct uip_eth_addr uip_ethaddr = { .addr = { 0x02, 0x11, 0x22, 0x33, 0x44, 0x55 } };
 
 /* ---- leaf calls into subsystems not under test ---- */
-void     flash_read_bulk(uint8_t *dst) { (void)dst; }
+/* The flash holds the config text at CONFIG_START, NUL-terminated, zeros after it. */
+const char *flash_config = "";
+void flash_read_bulk(uint8_t *dst)
+{
+	uint32_t n = t_strlen(flash_config) + 1;
+	for (uint16_t i = 0; i < flash_region.len; i++) {
+		uint32_t off = flash_region.addr - CONFIG_START + i;
+		dst[i] = off < n ? (uint8_t)flash_config[off] : 0;
+	}
+}
 const char *get_flash_size_str(void) { return "2M"; }
 uint8_t  sfp_read_reg(uint8_t slot, uint8_t reg) { (void)slot; (void)reg; return 0; }
 bool     gpio_pin_test(uint8_t pin) { (void)pin; return false; }
-void     phy_read(uint8_t phy_id, uint8_t dev_id, uint16_t reg) { (void)phy_id; (void)dev_id; (void)reg; }
+/* PHY registers a test has set; every other register reads 0. */
+static struct { uint32_t key; uint16_t val; } phy_regs[32];
+static uint8_t n_phy_regs;
+static uint32_t phy_key(uint8_t phy_id, uint8_t dev_id, uint16_t reg) { return ((uint32_t)phy_id << 24) | ((uint32_t)dev_id << 16) | reg; }
+void phy_mock_reset(void) { n_phy_regs = 0; }
+void phy_mock_set(uint8_t phy_id, uint8_t dev_id, uint16_t reg, uint16_t val)
+{
+	phy_regs[n_phy_regs].key = phy_key(phy_id, dev_id, reg);
+	phy_regs[n_phy_regs++].val = val;
+}
+void phy_read(uint8_t phy_id, uint8_t dev_id, uint16_t reg)
+{
+	uint16_t v = 0;
+	for (uint8_t i = 0; i < n_phy_regs; i++)
+		if (phy_regs[i].key == phy_key(phy_id, dev_id, reg))
+			v = phy_regs[i].val;
+	hw_sfr_load(v);
+}
 void     phy_write(uint8_t phy_id, uint8_t dev_id, uint16_t reg, uint16_t val) { (void)phy_id; (void)dev_id; (void)reg; (void)val; }
 void     phy_reset(uint8_t port) { (void)port; }
 uint8_t  stp_port_role(uint8_t port) { (void)port; return 0; }
@@ -124,7 +185,18 @@ uint8_t  stp_prio = 0x80, stp_root_port = 0xff, stp_rstp = 1, stp_txhold = 6;
 /* ---- SFP: no module present, reads fail ---- */
 uint8_t sfp_buf[16];
 bool    sfp_read_block(uint8_t slot, uint8_t reg, uint8_t len) { (void)slot; (void)reg; (void)len; return false; }
-void    print_phys_port(uint8_t port) { itoa_short(machine.log_to_phys_port[port]); }
+/* copied verbatim from rtlplayground.c */
+void print_phys_port(uint8_t port)
+{
+	if (port < CPU_PORT)
+		write_char(machine.log_to_phys_port[port] + '0');
+	else if (port == CPU_PORT)
+		print_string("CPU");
+	else {
+		print_string("UNKNOWN ");
+		write_char(port + '0');
+	}
+}
 
 uint8_t  lacpEnabled;
 uint8_t  lacp_actor_state[10];

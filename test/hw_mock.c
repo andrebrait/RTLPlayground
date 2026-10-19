@@ -291,7 +291,11 @@ static uint32_t sfr_word(void)
 static void sfr_load(uint32_t v)
 {
 	SFR_DATA_24 = v >> 24; SFR_DATA_16 = v >> 16; SFR_DATA_8 = v >> 8; SFR_DATA_0 = v;
+	/* the 16-bit SFRs overlay the byte ones on the 8051 */
+	SFR_DATA_U16_UPPER = v >> 16; SFR_DATA_U16 = v;
 }
+
+void hw_sfr_load(uint32_t v) { sfr_load(v); }
 
 void reg_read(uint16_t addr)
 {

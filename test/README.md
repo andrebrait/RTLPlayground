@@ -49,6 +49,7 @@ fires — so it drops straight into CI.
 | `test_page_json` | `httpd/page_impl.c` + `rtl837x_port.c` | `/vlan.json`, `/vlanlist`, `/l2.json` (walk, wrap marker, paging inside `outbuf`), 64-bit counters in `/status.json` and `/counters.json` |
 | `test_httpd_tx` | `httpd/httpd.c` + `uip/uip.c` | a GET of a static file against a client that moves its receive window: ACK accounting, continuation chunks out of flash, retransmission |
 | `test_lacp` | `rtl837x_lacp.c` | state machines against a simulated 802.3ad partner: convergence, mis-cabling, expiry, re-election, two groups, delivery by trap |
+| `test_golden` | `cmd_parser.c` + `httpd/page_impl.c` + `rtl837x_port.c`, bandwidth, storm, trap | every JSON page and a set of CLI commands on one register fixture, byte-compared with `golden/*.txt`. Subsystems not linked (PHY, SFP, flash, IGMP, STP, LACP, ...) are stubs in `golden_env.c` that print `[stub:<name>]`. `GOLDEN_UPDATE=1 build/test_golden` rewrites the goldens; review the diff before committing it |
 
 ## Adding a test for another module
 1. Write `test_<module>.c` with `main()` driving the module's entry points and

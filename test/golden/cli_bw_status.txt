@@ -1,0 +1,4 @@
+bw status 1
+ingress: enabled: 0x0000100
+egress: enabled: 0x0000200
+> 

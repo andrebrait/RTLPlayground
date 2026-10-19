@@ -23,6 +23,8 @@ void     hw_reset(void);                       /* every register 0, tables empty
 void     hw_reg_set(uint16_t addr, uint32_t v);
 uint32_t hw_reg_get(uint16_t addr);
 
+void     hw_sfr_load(uint32_t v);              /* put v into SFR_DATA_*, as a register read does */
+
 extern uint8_t       sfr_data[4];               /* the firmware's register scratch, owned here */
 extern unsigned long hw_reads;                 /* reg_read + reg_read_m calls since hw_reset */
 extern unsigned long hw_writes;                /* reg_write + reg_write_m calls since hw_reset */
