@@ -1,0 +1,4 @@
+
+<MODULE REMOVED>  Slot: 2
+pins 10
+pins 10

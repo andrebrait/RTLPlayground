@@ -1,0 +1,4 @@
+
+<SFP-RX LOS>  Slot: 2
+pins 20
+pins 20

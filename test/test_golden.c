@@ -412,10 +412,27 @@ static void p_status_adv(void) { adv_distinct(); send_status(); }
 /* A trunk hash word with four distinct bytes, so a reader that drops or reorders one shows. */
 static void p_lag_hash_wide(void) { hw_reg_set(RTL837X_TRK_HASH_CTRL_BASE, 0x12345678); send_lag(); }
 
+#ifdef TEST_TWO_SFP
+/* The two-SFP machine (env_tables.c under TEST_TWO_SFP): slot 0 pins 0/1, slot 1 pins 2/3. */
+static void s2_s0_in(void) { gpio_pins_low = 0x1; }
+static void s2_s1_in(void) { gpio_pins_low = 0x4; }
+static void s2_status(uint8_t pins)
+{
+	uint8_t saved = sfp_pins_last;
+	sfp_pins_last = pins;
+	send_status();
+	sfp_pins_last = saved;
+}
+static void s2_status_s0ok_s1los(void)  { s2_status(0x20); }
+static void s2_status_s0los_s1ok(void)  { s2_status(0x02); }
+static void s2_status_s0gone_s1in(void) { s2_status(0x01); }
+static void s2_status_s0in_s1gone(void) { s2_status(0x10); }
+#endif
+
 static void sfp_inserted(void) { gpio_pins_low = 1; }	/* pin_detect of both slots is 0 */
 
 /* handle_sfp() polled `polls` times from the snapshot `pins`, the detect and LOS pins driven low (module
- * in, signal ok) by bit 0 of `low`; ticks advance by the wake delay between polls, the I2C read fails. */
+ * in, signal ok) by the bits of `low`; ticks advance by the wake delay between polls, the I2C read fails. */
 extern volatile uint32_t ticks;
 extern uint8_t sfp_wake_pending[2];
 static void sfp_poll(const char *name, uint8_t pins, uint64_t low, int polls)
@@ -423,7 +440,7 @@ static void sfp_poll(const char *name, uint8_t pins, uint64_t low, int polls)
 	uint8_t saved = sfp_pins_last;
 	fixture_load();
 	sfp_pins_last = pins;
-	sfp_wake_pending[0] = 0;
+	sfp_wake_pending[0] = sfp_wake_pending[1] = 0;
 	gpio_pins_low = low;
 	ticks = 0;
 	for (int i = 0; i < polls; i++) {
@@ -561,6 +578,23 @@ int main(void)
 	watchdog_arm(30, "golden run");
 	printf("== golden output: JSON pages and CLI ==\n");
 
+#ifdef TEST_TWO_SFP
+	/* Two SFP slots, the two always in different states. gpio_pins_low bits: 0 slot 0 module in, 1 slot 0 signal ok,
+	 * 2 slot 1 module in, 3 slot 1 signal ok. sfp_pins_last: bit 0/1 slot 0 no module/LOS, bit 4/5 slot 1. */
+	page("2sfp_send_status_s0ok_s1los", s2_status_s0ok_s1los);
+	page("2sfp_send_status_s0los_s1ok", s2_status_s0los_s1ok);
+	page("2sfp_send_status_s0gone_s1in", s2_status_s0gone_s1in);
+	page("2sfp_send_status_s0in_s1gone", s2_status_s0in_s1gone);
+	cmd_with("2sfp_cli_stat_s0in", "stat", s2_s0_in);
+	cmd_with("2sfp_cli_stat_s1in", "stat", s2_s1_in);
+	cmd_with("2sfp_cli_sfp_s0in", "sfp", s2_s0_in);
+	cmd_with("2sfp_cli_sfp_s1in", "sfp", s2_s1_in);
+	sfp_poll("2sfp_handle_sfp_s1_insert", 0xff, 0xc, 3);	/* slot 1 in, signal ok; slot 0 empty, LOS */
+	sfp_poll("2sfp_handle_sfp_s1_remove", 0x00, 0xb, 2);	/* slot 0 stays in; slot 1 gone, its signal pin still ok */
+	sfp_poll("2sfp_handle_sfp_s1_los", 0x00, 0x7, 2);	/* only slot 1's LOS pin goes high */
+	sfp_poll("2sfp_handle_sfp_s1_los_clear", 0x20, 0xf, 2);	/* only slot 1's LOS pin goes low */
+	page("2sfp_send_eee", send_eee);
+#else
 	page("send_basic_info", send_basic_info);
 	page("send_basic_info_frac", p_basic_info_frac);
 	page("send_status", send_status);
@@ -650,6 +684,7 @@ int main(void)
 	cmd("cli_reset", "reset");
 	cmd_with("cli_gpio_changed", "gpio", gpio_changed);
 
+#endif
 	printf("\n%d outputs, %d failed%s\n", tests_run, failed, update ? " (GOLDEN_UPDATE: goldens rewritten)" : "");
 	return failed ? 1 : 0;
 }

@@ -55,6 +55,7 @@ fires — so it drops straight into CI.
 | `test_httpd_tx` | `httpd/httpd.c` + `uip/uip.c` | a GET of a static file against a client that moves its receive window: ACK accounting, continuation chunks out of flash, retransmission |
 | `test_lacp` | `rtl837x_lacp.c` | state machines against a simulated 802.3ad partner: convergence, mis-cabling, expiry, re-election, two groups, delivery by trap |
 | `test_golden` | `cmd_parser.c` + `httpd/page_impl.c` + `rtl837x_port.c`, bandwidth, storm, trap, STP, SFP, `platform_hw.c` | every JSON page and a set of CLI commands on one register fixture, byte-compared with `golden/*.txt`, plus `handle_sfp()` insert/remove polls. Subsystems not linked (PHY, flash, IGMP, LACP, ...) are stubs in `golden_env.c` that print `[stub:<name>]`. `GOLDEN_UPDATE=1 build/test_golden` rewrites the goldens; review the diff before committing it |
+| `test_golden_2sfp` | the `test_golden` sources with `-DTEST_TWO_SFP` | a machine with two SFP slots (ports 8 and 9, detect/LOS pins 0/1 and 2/3) and a case list of its own, goldens `golden/2sfp_*.txt`: slot 1 is held apart from slot 0 in the status page, `stat`, `sfp`, `handle_sfp()` polls and `send_eee` |
 | `test_startup_crlf.py` | `cmd_parser.c` (`execute_config`, extracted and compiled with a mocked `config_read`) | CR, LF, CRLF, comments, NUL, overlong lines and flash-page boundaries in the startup config; `make` runs it after the binaries |
 | `test_platform_seam` | `cmd_parser.c` + `cmd_editor.c` + `httpd/page_impl.c` | the platform seam, see below |
 

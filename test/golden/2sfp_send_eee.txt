@@ -1,0 +1,5 @@
+HTTP/1.1 200 OK
+Connection: close
+Content-Type: application/json
+
+[{"portNum":1,"isSFP":0,"eee":"111","eee_lp":"110","active":1},{"portNum":2,"isSFP":0,"eee":"011","eee_lp":"010","active":1},{"portNum":3,"isSFP":0,"eee":"000","eee_lp":"000","active":0},{"portNum":4,"isSFP":0,"eee":"000","eee_lp":"000","active":0},{"portNum":5,"isSFP":0,"eee":"000","eee_lp":"000","active":0},{"portNum":6,"isSFP":0,"eee":"000","eee_lp":"000","active":0},{"portNum":7,"isSFP":0,"eee":"000","eee_lp":"000","active":0},{"portNum":8,"isSFP":1},{"portNum":9,"isSFP":1}]

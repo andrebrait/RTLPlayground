@@ -31,6 +31,7 @@ TESTS = $(BUILDDIR)/test_cmd_editor \
         $(BUILDDIR)/test_tick_gate \
         $(BUILDDIR)/test_lacp \
         $(BUILDDIR)/test_golden \
+        $(BUILDDIR)/test_golden_2sfp \
         $(BUILDDIR)/test_platform_seam
 
 # The table tests link the register mock and one environment file; stub/
@@ -69,6 +70,12 @@ GOLDEN_SRC = test_golden.c golden_env.c $(TABLE_ENV) $(SRCROOT)/cmd_parser.c $(S
 $(BUILDDIR)/test_golden: $(GOLDEN_SRC) hw_mock.h support.h | $(BUILDDIR)
 	$(CC) $(CFLAGS) -fcommon -Wno-parentheses -Wno-misleading-indentation -Wno-incompatible-pointer-types \
 		-DGOLDEN_DIR='"$(CURDIR)/golden"' $(filter %.c,$(GOLDEN_SRC)) -o $@ $(LDFLAGS)
+
+# The same sources again with a two-SFP machine (env_tables.c) and a two-SFP case list (test_golden.c), pinning
+# slot 1. Most of the default case list's helpers are unused there.
+$(BUILDDIR)/test_golden_2sfp: $(GOLDEN_SRC) hw_mock.h support.h | $(BUILDDIR)
+	$(CC) $(CFLAGS) -DTEST_TWO_SFP -Wno-unused-function -fcommon -Wno-parentheses -Wno-misleading-indentation \
+		-Wno-incompatible-pointer-types -DGOLDEN_DIR='"$(CURDIR)/golden"' $(filter %.c,$(GOLDEN_SRC)) -o $@ $(LDFLAGS)
 
 # rtl837x_lacp.c is compiled UNMODIFIED from the firmware tree.
 $(BUILDDIR)/test_lacp: test_lacp.c $(SRCROOT)/rtl837x_lacp.c | $(BUILDDIR)

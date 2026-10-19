@@ -1,0 +1,4 @@
+
+<SFP-RX OK>  Slot: 2
+pins 00
+pins 00

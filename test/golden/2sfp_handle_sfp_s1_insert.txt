@@ -1,0 +1,8 @@
+
+<MODULE INSERTED>  Slot: 2
+<SFP-RX OK>  Slot: 2
+pins cf
+SFP: an I2C read failed, retrying on the next poll
+pins df
+
+<MODULE INSERTED>  Slot: 2pins cf

@@ -97,10 +97,18 @@ const struct machine machine = {
 	.machine_name = "HOSTTEST",
 	.min_port = 0,
 	.max_port = 8,
-	.n_sfp = 1,
 	.log_to_phys_port = { 1, 2, 3, 4, 5, 6, 7, 8, 9 },
 	.phys_to_log_port = { 0, 1, 2, 3, 4, 5, 6, 7, 8 },
+#ifdef TEST_TWO_SFP
+	/* test_golden_2sfp: ports 8 and 9 are the two SFP slots, four distinct pins */
+	.n_sfp = 2,
+	.is_sfp = { 0, 0, 0, 0, 0, 0, 0, 1, 2 },
+	.sfp_port = { { .pin_detect = 0, .pin_los = 1, .pin_tx_disable = GPIO_NA },
+	              { .pin_detect = 2, .pin_los = 3, .pin_tx_disable = GPIO_NA } },
+#else
+	.n_sfp = 1,
 	.is_sfp = { 0, 0, 0, 0, 0, 0, 0, 0, 1 },
+#endif
 };
 struct machine_runtime machine_detected = { .isRTL8373 = 1 };
 

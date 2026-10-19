@@ -1,0 +1,6 @@
+sfp
+
+Slot 1 - I2C read failed on this slot
+
+Slot 2 - empty
+> 
