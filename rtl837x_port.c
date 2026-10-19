@@ -29,6 +29,7 @@ extern __xdata struct machine_runtime machine_detected;
 __xdata	uint32_t l2_head;
 
 __xdata struct vlan_settings vlan_settings;
+__xdata struct l2_entry l2_buf;
 
 // Wait for the TABLE ready
 static void wait_table_ready(void)
@@ -203,6 +204,86 @@ int8_t vlan_get(uint16_t vlan) __banked
 	reg_read_m(RTL837x_L2_DATA_OUT_A);
 
 	return 0;
+}
+
+
+bool vlan_entry_get(uint16_t vlan) __banked
+{
+	vlan_get(vlan);
+	sfr_data_copy(port_buf);
+	return port_buf[0] & 0x02;
+}
+
+
+bool l2_entry_next(void) __banked
+{
+	wait_table_ready();
+	reg_read_m(RTL837x_TBL_DATA_0);
+	REG_WRITE(RTL837x_TBL_DATA_0, sfr_data[0], sfr_data[1] & 0xfc, sfr_data[2] | (TBL_LUTREAD_NEXT_L2UC << 6), sfr_data[3]);
+
+	REG_WRITE(RTL837X_TBL_CTRL, l2_buf.idx >> 8, l2_buf.idx, TBL_L2_UNICAST, TBL_EXECUTE);
+	wait_table_ready();
+
+	reg_read_m(RTL837x_L2_DATA_OUT_B);
+	__bit valid = (sfr_data[0] & 0x20) != 0;
+	if (valid) {
+		l2_buf.vid = ((uint16_t)(sfr_data[0] & 0x0f) << 8) | sfr_data[1];
+		l2_buf.mac[0] = sfr_data[2];
+		l2_buf.mac[1] = sfr_data[3];
+		l2_buf.port = (sfr_data[0] >> 6) & 0x3;
+		reg_read_m(RTL837x_L2_DATA_OUT_A);
+		sfr_data_copy(l2_buf.mac + 2);
+
+		reg_read_m(RTL837x_L2_DATA_OUT_C);
+		l2_buf.is_static = sfr_data[1] & 0x1;
+		l2_buf.port |= (sfr_data[3] & 0x3) << 2;
+	}
+
+	// the next-index field is read for a valid entry as well as for an empty slot
+	reg_read_m(RTL837x_TBL_DATA_0);
+	l2_buf.idx = (((uint16_t)sfr_data[2] & 0x0f) << 8) | sfr_data[3];
+	return valid;
+}
+
+
+uint8_t l2_entry_delete(uint16_t idx) __banked
+{
+	wait_table_ready();
+	// First, search for the entry based on the index
+	reg_read_m(RTL837x_TBL_DATA_0);
+	sfr_data[1] &= 0xfc;
+	sfr_data[2] |= (TBL_LUTREAD_NEXT_L2UC << 6);
+	reg_write_m(RTL837x_TBL_DATA_0);
+
+	REG_WRITE(RTL837X_TBL_CTRL, (idx >> 8) & 0xf, idx, TBL_L2_UNICAST, TBL_EXECUTE);
+	wait_table_ready();
+	reg_read_m(RTL837x_L2_DATA_OUT_B);
+	if (!(SFR_DATA_24 & 0x20))
+		return 0;
+
+	__bit is_our_mac_addr = uip_ethaddr.addr[0] == SFR_DATA_8 && uip_ethaddr.addr[1] == SFR_DATA_0;
+	sfr_data[0] &= 0x3f; // Clear SPA
+	reg_write_m(RTL837x_TBL_DATA_IN_B);
+
+	// Second half of MAC is copied
+	reg_read_m(RTL837x_L2_DATA_OUT_A);
+	if (is_our_mac_addr && uip_ethaddr.addr[2] == SFR_DATA_24 && uip_ethaddr.addr[3] == SFR_DATA_16
+	    && uip_ethaddr.addr[4] == SFR_DATA_8 && uip_ethaddr.addr[5] == SFR_DATA_0)
+		return 0; // the switch's own entry keeps management reachable
+	reg_write_m(RTL837x_TBL_DATA_IN_A);
+
+	reg_read_m(RTL837x_L2_DATA_OUT_C);
+	sfr_data[3] &= 0xc0; // Clear age, auth and second part of ports
+	sfr_data[1] &= 0xfe; // Clear nosalearn
+	reg_write_m(RTL837x_TBL_DATA_IN_C);
+
+	reg_read_m(RTL837x_TBL_DATA_0);
+	sfr_data[2] = TBL_L2_UNICAST;
+	reg_write_m(RTL837x_TBL_DATA_0);
+
+	REG_WRITE(RTL837X_TBL_CTRL, idx >> 8, idx, TBL_L2_UNICAST, TBL_WRITE | TBL_EXECUTE);
+	wait_table_ready();
+	return 1;
 }
 
 

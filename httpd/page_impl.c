@@ -313,8 +313,8 @@ void send_vlan(uint16_t vlan)
 	dbg_string("sending VLAN\n");
 	//{"members":"0x00060011"}
 	slen += strtox(outbuf + slen, "{\"members\":\"0x");
-	vlan_get(vlan);
-	hex_to_html(sfr_data, 8);
+	vlan_entry_get(vlan);
+	hex_to_html(port_buf, 8);
 	slen += strtox(outbuf + slen, "\",\"name\":\"");
 	__xdata uint16_t n = vlan_name(vlan);
 	if (n== 0xffff) {
@@ -375,10 +375,6 @@ void send_l2(uint16_t idx)
 	dbg_short(idx);
 	__xdata uint8_t entries_left = L2_MAX_TRANSFER;
 
-	do {
-		reg_read_m(RTL837X_TBL_CTRL);
-	} while (sfr_data[3] & TBL_EXECUTE);
-
 	/* The L2 table in the ASIC can hold up to 4096 (0x1000) entries, which
 	 * are accessed using an index. The index is the hash of the MAC address
 	 * and forwarding ID (basically VID). The hash-table is 4-way associative,
@@ -391,24 +387,14 @@ void send_l2(uint16_t idx)
 	 * entry. The indices are sorted, so if an entry has a smaller index than
 	 * the previous one, we know that we have wrapped around the entire table.
 	 */
-	__xdata uint16_t entry = idx & 0xfff;
 	__xdata uint16_t first_entry = 0xffff; // An illegal entry index
 	__bit first = true;
+	l2_buf.idx = idx & 0xfff;
 	char_to_html('[');
 	while (1) {
 		entries_left--;
-		uint8_t port = 0;
 		uint8_t lag;
-		reg_read_m(RTL837x_TBL_DATA_0);
-		REG_WRITE(RTL837x_TBL_DATA_0, sfr_data[0], sfr_data[1] & 0xfc, sfr_data[2] | (TBL_LUTREAD_NEXT_L2UC << 6), sfr_data[3]);
-
-		REG_WRITE(RTL837X_TBL_CTRL, entry >> 8, entry, TBL_L2_UNICAST, TBL_EXECUTE);
-		do {
-			reg_read_m(RTL837X_TBL_CTRL);
-		} while (sfr_data[3] & TBL_EXECUTE);
-
-		reg_read_m(RTL837x_L2_DATA_OUT_B);
-		__bit valid = (sfr_data[0] & 0x20) != 0;
+		__bit valid = l2_entry_next();
 		if (valid) {
 			/* separator + 74-byte worst-case entry + closing "]" */
 			if (slen + 76 > TCP_OUTBUF_SIZE)
@@ -417,51 +403,38 @@ void send_l2(uint16_t idx)
 				char_to_html(',');
 			first = false;
 
-			// VLAN, taken from the read above instead of reading the register twice
 			slen += strtox(outbuf + slen, "{\"vlan\":\"");
-			charhex_to_html(sfr_data[0] & 0x0f);
-			byte_to_html(sfr_data[1]);
+			charhex_to_html(l2_buf.vid >> 8);
+			byte_to_html(l2_buf.vid);
 
-			// MAC
 			slen += strtox(outbuf + slen, "\",\"mac\":\"");
-			byte_to_html(sfr_data[2]); char_to_html(':');
-			byte_to_html(sfr_data[3]); char_to_html(':');
-			port = (sfr_data[0] >> 6) & 0x3;
-			reg_read_m(RTL837x_L2_DATA_OUT_A);
-			byte_to_html(sfr_data[0]); char_to_html(':');
-			byte_to_html(sfr_data[1]); char_to_html(':');
-			byte_to_html(sfr_data[2]); char_to_html(':');
-			byte_to_html(sfr_data[3]);
+			for (uint8_t i = 0; i < 6; i++) {
+				if (i)
+					char_to_html(':');
+				byte_to_html(l2_buf.mac[i]);
+			}
 
-			// type
-			reg_read_m(RTL837x_L2_DATA_OUT_C);
-			if (sfr_data[1] & 0x1)
+			if (l2_buf.is_static)
 				slen += strtox(outbuf + slen, "\",\"type\":\"s\",\"port\":");
 			else
 				slen += strtox(outbuf + slen, "\",\"type\":\"l\",\"port\":");
 
-			port |= (sfr_data[3] & 0x3) << 2;
-			itoa_html(port);
+			itoa_html(l2_buf.port);
 			slen += strtox(outbuf + slen, ",\"lag\":");
-			lag = port_lag_of(port);
+			lag = port_lag_of(l2_buf.port);
 			itoa_html(lag == PORT_LAG_NONE ? 0 : lag + 1);
-		}
 
-		// Index
-		reg_read_m(RTL837x_TBL_DATA_0);
-		entry = (((uint16_t)sfr_data[2] & 0x0f) << 8) | sfr_data[3];
-		if (valid) {
 			slen += strtox(outbuf + slen, ",\"idx\":\"");
-			byte_to_html(entry >> 8);
-			byte_to_html(entry);
+			byte_to_html(l2_buf.idx >> 8);
+			byte_to_html(l2_buf.idx);
 			char_to_html('"');
 			char_to_html('}');
 		}
-		entry += 1; // We want the next entry following after the current entry
+		l2_buf.idx += 1; // We want the next entry following after the current entry
 
 		if (first_entry == 0xffff)
-			first_entry = entry;
-		else if (first_entry == entry || !entries_left)
+			first_entry = l2_buf.idx;
+		else if (first_entry == l2_buf.idx || !entries_left)
 			break;
 	}
 	char_to_html(']');
@@ -473,54 +446,8 @@ void l2_delete(uint16_t idx)
 	slen = strtox(outbuf, HTTP_RESPONCE_JSON);
 	dbg_string("L2 DELETE\n");
 	dbg_short(idx);
-	do {
-		reg_read(RTL837X_TBL_CTRL);
-	} while (SFR_DATA_0 & TBL_EXECUTE);
 	slen += strtox(outbuf + slen, "{\"result\":");
-	// First, search for the entry based on the index
-	reg_read_m(RTL837x_TBL_DATA_0);
-	sfr_data[1] &= 0xfc;
-	sfr_data[2] |= (TBL_LUTREAD_NEXT_L2UC << 6);
-	reg_write_m(RTL837x_TBL_DATA_0);
-
-	REG_WRITE(RTL837X_TBL_CTRL, (idx >> 8) & 0xf, idx, TBL_L2_UNICAST, TBL_EXECUTE);
-	do {
-		reg_read(RTL837X_TBL_CTRL);
-	} while (SFR_DATA_0 & 0x1);
-	reg_read_m(RTL837x_L2_DATA_OUT_B);
-	if (!(SFR_DATA_24 & 0x20)) {
-		char_to_html('0');
-	} else {
-		__bit is_our_mac_addr = uip_ethaddr.addr[0] == SFR_DATA_8 && uip_ethaddr.addr[1] == SFR_DATA_0;
-		sfr_data[0] &= 0x3f; // Clear SPA
-		reg_write_m(RTL837x_TBL_DATA_IN_B);
-
-		// Second half of MAC is copied
-		reg_read_m(RTL837x_L2_DATA_OUT_A);
-		if (is_our_mac_addr && uip_ethaddr.addr[2] == SFR_DATA_24 && uip_ethaddr.addr[3] == SFR_DATA_16
-		    && uip_ethaddr.addr[4] == SFR_DATA_8 && uip_ethaddr.addr[5] == SFR_DATA_0) {
-			// the switch's own entry keeps management reachable
-			char_to_html('0');
-		} else {
-			reg_write_m(RTL837x_TBL_DATA_IN_A);
-
-			reg_read_m(RTL837x_L2_DATA_OUT_C);
-			sfr_data[3] &= 0xc0; // Clear age, auth and second part of ports
-			sfr_data[1] &= 0xfe; // Clear nosalearn
-			reg_write_m(RTL837x_TBL_DATA_IN_C);
-
-			reg_read_m(RTL837x_TBL_DATA_0);
-			sfr_data[2] = TBL_L2_UNICAST;
-			reg_write_m(RTL837x_TBL_DATA_0);
-
-			REG_WRITE(RTL837X_TBL_CTRL, idx >> 8, idx, TBL_L2_UNICAST, TBL_WRITE | TBL_EXECUTE);
-			do {
-				reg_read(RTL837X_TBL_CTRL);
-			} while (SFR_DATA_0 & TBL_EXECUTE);
-
-			char_to_html('1');
-		}
-	}
+	char_to_html('0' + l2_entry_delete(idx));
 	char_to_html('}');
 }
 
@@ -1119,8 +1046,7 @@ void send_vlanlist(void)
 	slen += strtox(outbuf + slen, ",\"vlan\":[");
 
 	for (i = 1; i < 4095; i++) {
-		vlan_get(i);
-		if (!(sfr_data[0] & 0x02)) /* bit 1: VLAN table entry valid */
+		if (!vlan_entry_get(i))
 			continue;
 
 		if (slen + 141 > TCP_OUTBUF_SIZE) /* comma + 138-byte worst-case entry + closing "]}" */

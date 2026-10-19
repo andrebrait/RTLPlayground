@@ -72,5 +72,31 @@ int main(void)
 		return 1;
 	}
 	printf("ok: send_storm reports the storm controls through platform.h\n");
+
+	send_vlan(10);
+	outbuf[slen < TCP_OUTBUF_SIZE ? slen : TCP_OUTBUF_SIZE - 1] = 0;
+	if (!strstr((const char *)outbuf, "{\"members\":\"0x2001c15\"")) {
+		printf("FAIL: send_vlan: no \"members\":\"0x2001c15\" in:\n%s\n", outbuf);
+		return 1;
+	}
+	printf("ok: send_vlan reports the VLAN entry through platform.h\n");
+
+	send_l2(0);
+	outbuf[slen < TCP_OUTBUF_SIZE ? slen : TCP_OUTBUF_SIZE - 1] = 0;
+	if (!strstr((const char *)outbuf, "[{\"vlan\":\"001\",\"mac\":\"00:11:22:33:44:01\",\"type\":\"l\",\"port\":5,")
+	    || !strstr((const char *)outbuf, "{\"vlan\":\"00a\",\"mac\":\"00:11:22:33:44:02\",\"type\":\"s\",\"port\":9,")
+	    || !strstr((const char *)outbuf, "\"idx\":\"0020\"}")) {
+		printf("FAIL: send_l2: entries not in:\n%s\n", outbuf);
+		return 1;
+	}
+	printf("ok: send_l2 lists the entries through platform.h\n");
+
+	l2_delete(0x010);
+	outbuf[slen < TCP_OUTBUF_SIZE ? slen : TCP_OUTBUF_SIZE - 1] = 0;
+	if (!strstr((const char *)outbuf, "{\"result\":1}")) {
+		printf("FAIL: l2_delete: no {\"result\":1} in:\n%s\n", outbuf);
+		return 1;
+	}
+	printf("ok: l2_delete reports the platform's result\n");
 	return 0;
 }

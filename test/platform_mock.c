@@ -94,3 +94,29 @@ void storm_get(uint8_t port) __banked
 		port_buf[11 + 4 * t] = 0x23 + t;
 	}
 }
+
+/* VLAN entry: valid (bit 25), untagged 0x007 (bits 19..10), members 0x015 (bits 9..0):
+ * word 0x02001c15. VLAN 20 is not a table entry. */
+bool vlan_entry_get(uint16_t vlan) __banked
+{
+	static const uint8_t v[4] = { 0x02, 0x00, 0x1c, 0x15 };
+	for (uint8_t i = 0; i < 4; i++)
+		port_buf[i] = v[i];
+	return vlan != 20;
+}
+
+/* Two entries: slot 0x010 learned on port 5, slot 0x020 static on port 9. */
+__xdata struct l2_entry l2_buf;
+
+bool l2_entry_next(void) __banked
+{
+	static const struct l2_entry t[2] = {
+		{ 0x010, 1,  { 0x00, 0x11, 0x22, 0x33, 0x44, 0x01 }, 5, false },
+		{ 0x020, 10, { 0x00, 0x11, 0x22, 0x33, 0x44, 0x02 }, 9, true },
+	};
+	const struct l2_entry *e = l2_buf.idx > 0x010 && l2_buf.idx <= 0x020 ? &t[1] : &t[0];
+	l2_buf = *e;
+	return true;
+}
+
+uint8_t l2_entry_delete(uint16_t idx) __banked { return idx == 0x010; }

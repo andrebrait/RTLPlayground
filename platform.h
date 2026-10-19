@@ -119,11 +119,22 @@ struct vlan_settings {
 	uint16_t tagged;
 };
 
+/* One unicast entry of the L2 table (see l2_entry_next). idx is the table slot:
+ * on a call it is where the search starts, on return the slot of the entry found. */
+struct l2_entry {
+	uint16_t idx;
+	uint16_t vid;
+	uint8_t mac[6];
+	uint8_t port;		// logical port, 0..15
+	bool is_static;
+};
+
 #define PORT_LAG_NONE 0xff
 
 extern __code const struct machine machine;
 
 extern __xdata struct vlan_settings vlan_settings;
+extern __xdata struct l2_entry l2_buf;
 extern __xdata char port_names[9][PORT_NAME_SIZE];
 extern __xdata uint16_t lldp_logical_port_status;
 
@@ -245,6 +256,20 @@ void bandwidth_get(uint8_t port, __xdata uint8_t egress) __banked;
 void storm_get(uint8_t port) __banked;
 void port_isolate(uint8_t port, __xdata uint16_t pmask) __banked;
 uint16_t port_isolation_get(uint8_t port) __banked;
+/* VLAN table entry of a VLAN -> port_buf[0..3] as the 32-bit big-endian word the table
+ * holds: bit 25 = entry valid (port_buf[0] & 0x02), bits 19..10 = ports that
+ * egress untagged, bits 9..0 = member ports (the page's "members" is the word in hex).
+ * Returns the valid bit. VLAN 4095 is not a table entry: port_buf then repeats the
+ * last register read and the return value is not meaningful. */
+bool vlan_entry_get(uint16_t vlan) __banked;
+/* Reads the first unicast L2 entry at or after slot l2_buf.idx (the search wraps at the
+ * end of the table) and sets l2_buf.idx to that slot. Returns true and fills the rest
+ * of l2_buf for a valid entry; false when the slot is empty, then only l2_buf.idx is
+ * meaningful. */
+bool l2_entry_next(void) __banked;
+/* Deletes the unicast entry found at or after slot idx.
+ * 1 = deleted, 0 = nothing deleted (no entry, or the switch's own MAC, which is kept). */
+uint8_t l2_entry_delete(uint16_t idx) __banked;
 void port_l2_static_mgmt(__xdata uint8_t *mac, __xdata uint16_t vlan, __xdata bool remove_entry) __banked;
 
 #endif

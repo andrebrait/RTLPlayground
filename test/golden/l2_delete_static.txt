@@ -1,0 +1,9 @@
+HTTP/1.1 200 OK
+Connection: close
+Content-Type: application/json
+
+{"result":1}idx 0010 a 22334401 b 20010011 c 00000000
+idx 0020 a 22334402 b 600a0011 c 00000000
+idx 0400 a 223344fe b aabc0011 c 00010003
+idx 08f0 a 22334403 b 20010011 c 00000000
+regs ctrl 08f00402 d0 000018f0 ina 22334403 inb 20010011 inc 00000000

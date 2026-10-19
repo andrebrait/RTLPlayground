@@ -236,10 +236,8 @@ static void p_mirror_asym(void) { mirror_asym(); send_mirror(); }
 static void p_storm_mixed(void) { storm_mixed(); send_storm(); }
 static void p_l2(void)       { send_l2(0); }
 
-static void p_l2_delete(void)
+static void append_table(void)
 {
-	l2_delete(0x020);
-	/* the page says nothing; what it did is the table that is left */
 	char tbl[512];
 	int n = 0;
 	for (int i = 0; i < hw_l2_count(); i++) {
@@ -248,6 +246,64 @@ static void p_l2_delete(void)
 	}
 	memcpy(outbuf + slen, tbl, n);
 	slen += n;
+}
+
+static void p_l2_delete(void)
+{
+	l2_delete(0x020);
+	/* the page says nothing; what it did is the table that is left */
+	append_table();
+}
+
+/* The static entry sits at slot 0x8f0 with port 9 and the static flag, so its delete
+ * clears flag, port and age bits that the learned entry has not set; the engine
+ * registers show which slot and which table operation the page asked for. The
+ * entry at 0x400 is what a search with a mangled index 0x0f0 would hit instead. */
+static void p_l2_delete_static(void)
+{
+	put(0x400, 0xfe, 0xabc, 14, true);	/* a slot between the search index and the entry's own bits */
+	l2_delete(0x8f0);
+	append_table();
+	char regs[160];
+	int n = snprintf(regs, sizeof regs, "regs ctrl %08x d0 %08x ina %08x inb %08x inc %08x\n",
+			 hw_reg_get(RTL837X_TBL_CTRL), hw_reg_get(RTL837x_TBL_DATA_0), hw_reg_get(RTL837x_TBL_DATA_IN_A),
+			 hw_reg_get(RTL837x_TBL_DATA_IN_B), hw_reg_get(RTL837x_TBL_DATA_IN_C));
+	memcpy(outbuf + slen, regs, n);
+	slen += n;
+}
+
+static void p_l2_delete_empty(void)
+{
+	hw_reset();
+	l2_delete(5);
+}
+
+/* An entry in VLAN 0xabc on port 14 (both port fields set), and a scan that starts mid-table and wraps. */
+static void p_l2_high(void)
+{
+	put(0x400, 0xfe, 0xabc, 14, true);
+	send_l2(0x011);
+}
+
+/* The switch's own MAC must survive l2_delete: the page says 0 and the table keeps the entry. */
+static void l2_delete_keeps_own_mac(void)
+{
+	fixture_load();
+	hw_l2_put(0x030, uip_ethaddr.addr, 1, CPU_PORT, true);
+	const struct hw_l2 *e = hw_l2_find(uip_ethaddr.addr, 1);
+	struct hw_l2 before = *e;
+	slen = 0;
+	l2_delete(before.idx);
+	outbuf[slen] = 0;
+	e = hw_l2_find(uip_ethaddr.addr, 1);
+	tests_run++;
+	if (!strstr((const char *)outbuf, "{\"result\":0}") || !e ||
+	    e->a != before.a || e->b != before.b || e->c != before.c) {
+		printf("  FAIL: l2_delete_keeps_own_mac\n");
+		failed++;
+		return;
+	}
+	printf("  ok:   l2_delete_keeps_own_mac\n");
 }
 
 static void cmd_with(const char *name, const char *line, void (*pre)(void))
@@ -283,6 +339,10 @@ int main(void)
 	page("send_vlanlist", send_vlanlist);
 	page("send_l2", p_l2);
 	page("l2_delete", p_l2_delete);
+	l2_delete_keeps_own_mac();
+	page("send_l2_high", p_l2_high);
+	page("l2_delete_static", p_l2_delete_static);
+	page("l2_delete_empty", p_l2_delete_empty);
 	page("send_mirror", send_mirror);
 	page("send_mirror_asym", p_mirror_asym);
 	page("send_lag", send_lag);
