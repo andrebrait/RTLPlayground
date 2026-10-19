@@ -18,6 +18,7 @@
 #include "rtl837x_regs.h"
 #include "rtl837x_port.h"
 #include "rtl837x_lacp.h"
+#include "rtl837x_stp.h"
 #include "machine.h"
 #include "page_impl.h"
 #include "phy.h"
@@ -39,6 +40,8 @@ extern char     port_names[9][PORT_NAME_SIZE];
 extern bool     stp_enabled, lldp_enabled;
 extern uint16_t lldp_logical_port_status;
 extern uint8_t  lacpEnabled;
+extern uint8_t  stp_ent_of[];
+extern uint16_t stp_lag_mask[];
 extern uint16_t lacp_lag_ports[];
 extern uint8_t  lacp_agg_valid[];
 extern uint8_t  lacp_port_lag[];
@@ -228,6 +231,19 @@ static void p_basic_info_frac(void)
 }
 static void p_vlan(void)     { send_vlan(10); }
 
+/* MSTP states 0..3 in a mix across the ports, with ports 1 and 2 forming STP lag 1
+ * (their entities fold into the lag, which reports its first member's state). */
+static void p_stp_states(void)
+{
+	hw_reg_set(RTL837X_MSTP_STATES, 0x2a1b4c93);
+	stp_ent_of[1] = stp_ent_of[2] = STP_LAG_BASE;
+	stp_lag_mask[0] = 0x0006;
+	send_stp();
+	stp_ent_of[1] = 1;
+	stp_ent_of[2] = 2;
+	stp_lag_mask[0] = 0;
+}
+
 /* Mirroring with RX mask 0003 and TX mask 0001, and storm control on port 1
  * with bcast enabled in pps and ucast in kbps, so RX != TX and enabled != pps. */
 static void mirror_asym(void) { cli("mirror 9 1 2r"); env_reset(); }
@@ -347,6 +363,7 @@ int main(void)
 	page("send_mirror_asym", p_mirror_asym);
 	page("send_lag", send_lag);
 	page("send_stp", send_stp);
+	page("send_stp_states", p_stp_states);
 	page("send_lacp", send_lacp);
 	page("send_lldp", send_lldp);
 	page("send_eee", send_eee);

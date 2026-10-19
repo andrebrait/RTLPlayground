@@ -183,6 +183,12 @@ uint8_t  stp_pflags[STP_ENTITIES];
 uint8_t  stp_pp2p[STP_ENTITIES];
 uint8_t  stp_pprio[STP_ENTITIES];
 uint8_t  stp_prio = 0x80, stp_root_port = 0xff, stp_rstp = 1, stp_txhold = 6;
+/* copied verbatim from rtl837x_stp.c */
+uint8_t stp_port_state_get(uint8_t log_port)
+{
+	reg_read_m(RTL837X_MSTP_STATES);
+	return (sfr_data[3 - (log_port >> 2)] >> ((log_port << 1) & 0x7)) & 0x3;
+}
 
 /* ---- SFP: no module present, reads fail ---- */
 uint8_t sfp_buf[16];

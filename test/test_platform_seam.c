@@ -98,5 +98,15 @@ int main(void)
 		return 1;
 	}
 	printf("ok: l2_delete reports the platform's result\n");
+
+	for (uint8_t i = 0; i < STP_PORTS; i++)
+		stp_ent_of[i] = i;
+	send_stp();
+	outbuf[slen < TCP_OUTBUF_SIZE ? slen : TCP_OUTBUF_SIZE - 1] = 0;
+	if (!strstr((const char *)outbuf, "{\"on\":1,") || !strstr((const char *)outbuf, "\"st\":3,")) {
+		printf("FAIL: send_stp: no \"on\":1 and \"st\":3 in:\n%s\n", outbuf);
+		return 1;
+	}
+	printf("ok: send_stp reports the STP state through platform.h\n");
 	return 0;
 }

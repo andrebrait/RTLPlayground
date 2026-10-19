@@ -120,3 +120,28 @@ bool l2_entry_next(void) __banked
 }
 
 uint8_t l2_entry_delete(uint16_t idx) __banked { return idx == 0x010; }
+
+/* Protocol state: STP on with every port forwarding, LACP and LLDP off. */
+__xdata struct uip_eth_addr uip_ethaddr;
+__xdata bool stp_enabled = true;
+__xdata bool lldp_enabled;
+__xdata uint16_t lldp_logical_port_status;
+__xdata uint8_t lacpEnabled;
+__xdata uint8_t stp_prio, stp_hello_s, stp_maxage_s, stp_fwddelay_s, stp_rstp, stp_txhold;
+__xdata uint8_t stp_pflags[STP_ENTITIES], stp_pprio[STP_ENTITIES], stp_pp2p[STP_ENTITIES];
+__xdata uint32_t stp_pcost[STP_ENTITIES], stp_dcost[STP_ENTITIES];
+__xdata uint8_t stp_ent_of[STP_PORTS];
+__xdata uint16_t stp_lag_mask[STP_LAG_COUNT];
+__xdata struct bridge stp_dbridge[STP_ENTITIES];
+__xdata uint16_t stp_dpid[STP_ENTITIES], stp_bpdu_age[STP_ENTITIES];
+__xdata struct bridge root_bridge;
+__xdata uint32_t root_bridge_cost;
+__xdata uint8_t stp_root_port = 0xff;
+__xdata uint16_t stp_tc_count;
+__xdata uint8_t lacp_actor_state[10], lacp_partner_state[10], lacp_rx_state[10], lacp_port_lag[10];
+__xdata uint8_t lacp_partner_sys[10][MAC_ADDR_LEN];
+__xdata uint16_t lacp_rx_count[10], lacp_lag_ports[LACP_NUM_LAGS], lacp_members_last[LACP_NUM_LAGS];
+__xdata uint8_t lacp_agg_sys[LACP_NUM_LAGS][MAC_ADDR_LEN], lacp_agg_valid[LACP_NUM_LAGS];
+
+/* Every port is forwarding (state 3). */
+uint8_t stp_port_state_get(uint8_t log_port) __banked { return 3; }

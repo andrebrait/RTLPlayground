@@ -10,7 +10,6 @@
 #include "uip/uip.h"
 #include "machine.h"
 
-extern __xdata bool lldp_enabled;
 extern __code const struct machine machine;
 
 __xdata uint16_t lldp_ticks;

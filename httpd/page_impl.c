@@ -13,8 +13,6 @@
 #include "phy.h"
 #include "version.h"
 #include "machine.h"
-#include "rtl837x_stp.h"
-#include "rtl837x_lacp.h"
 #include "page_impl.h"
 #include "syslog.h"
 
@@ -49,9 +47,6 @@ extern __xdata char sfp_module_vendor[2][17];
 extern __xdata char sfp_module_model[2][17];
 extern __xdata char sfp_module_serial[2][17];
 extern __xdata uint8_t sfp_options[2];
-
-extern __xdata uint16_t lldp_logical_port_status;
-extern __xdata bool lldp_enabled;
 
 __code const uint8_t * __code const HTTP_RESPONCE_JSON = "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: application/json\r\n\r\n";
 __code const uint8_t * __code const HTTP_RESPONCE_TXT = "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: text/plain\r\n\r\n";
@@ -537,6 +532,7 @@ void send_stp(void)
 	uint8_t i, j, st, dsg;
 
 	dbg_string("send_stp called\n");
+	stp_status_refresh();
 	slen = strtox(outbuf, HTTP_RESPONCE_JSON);
 
 	slen += strtox(outbuf + slen, "{\"on\":");
@@ -583,7 +579,6 @@ void send_stp(void)
 	byte_to_html(stp_tc_count >> 8);
 	byte_to_html(stp_tc_count);
 	slen += strtox(outbuf + slen, "\",\"ports\":[");
-	reg_read_m(RTL837X_MSTP_STATES);
 	for (i = 0; i < STP_ENTITIES; i++) {
 		if (i < STP_LAG_BASE && (i < machine.min_port || i > machine.max_port))
 			continue;
@@ -606,7 +601,7 @@ void send_stp(void)
 			if (j >= STP_LAG_BASE)
 				j = 0;
 		}
-		st = (sfr_data[3 - (j >> 2)] >> ((j << 1) & 0x7)) & 0x3;
+		st = stp_port_state_get(j);
 		itoa_html(st);
 		slen += strtox(outbuf + slen, ",\"role\":");
 		if (!(stp_pflags[i] & STP_PF_ENABLED) || (stp_pflags[i] & STP_PF_TRIPPED))
@@ -649,6 +644,7 @@ void send_stp(void)
 void send_lacp(void)
 {
 	dbg_string("send_lacp called\n");
+	lacp_status_refresh();
 	slen = strtox(outbuf, HTTP_RESPONCE_JSON);
 
 	slen += strtox(outbuf + slen, "{\"on\":");
@@ -696,6 +692,7 @@ void send_lacp(void)
 void send_lldp(void)
 {
 	dbg_string("send_lldp called\n");
+	lldp_status_refresh();
 	slen = strtox(outbuf, HTTP_RESPONCE_JSON);
 
 	slen += strtox(outbuf + slen, "{\"on\":");

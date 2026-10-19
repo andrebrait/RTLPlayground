@@ -218,6 +218,11 @@ static void print_field(__code const char *txt, uint8_t idx, uint8_t width) __re
 		write_char(*txt++);
 }
 
+/* The 2-bit state of a port in the MSTP register last read into sfr_data. */
+static uint8_t stp_state_of(uint8_t port)
+{
+	return (sfr_data[3 - (port >> 2)] >> ((port << 1) & 0x7)) & 0x3;
+}
 
 static void stp_status(void)
 {
@@ -268,7 +273,7 @@ static void stp_status(void)
 			if (stp_st_of >= STP_PORTS)
 				stp_st_of = 0;
 		}
-		print_field(stp_state_txt, (sfr_data[3 - (stp_st_of >> 2)] >> ((stp_st_of << 1) & 0x7)) & 0x3, 5);
+		print_field(stp_state_txt, stp_state_of(stp_st_of), 5);
 		write_char(' ');
 		print_field(stp_role_txt, stp_i == stp_root_port ? 1 : 0, 4);
 		write_char(' ');
@@ -502,7 +507,7 @@ void stp_cnf_send(uint8_t port) __reentrant
 		reg_read_m(RTL837X_MSTP_STATES);
 		stp_scratch = stp_state_port(port);
 		STP_O->flags = port == stp_root_port ? BPDU_ROLE_ROOT : BPDU_ROLE_DESIGNATED;
-		if (((sfr_data[3 - (stp_scratch >> 2)] >> ((stp_scratch << 1) & 0x7)) & STP_ST_MASK) == STP_ST_FORWARDING)
+		if (stp_state_of(stp_scratch) == STP_ST_FORWARDING)
 			STP_O->flags |= BPDU_FLAG_LEARNING | BPDU_FLAG_FORWARDING;
 	} else {
 		STP_O->msg_len = HTONS(BPDU_LEN_CONFIG);
@@ -1134,4 +1139,10 @@ void stp_parse(void) __banked __reentrant
 err:
 	err_status = ERR_INVALID_ARGUMENT;
 	print_string("Error: stp on|off|status | prio <0-15> | hello <1-10> | maxage <6-40> | fwd <4-30> | txhold <1-10> | version rstp|stp | port <1-9>|lag <1-4> on|off|edge|cost|prio|guard|filter ...\n");
+}
+
+uint8_t stp_port_state_get(uint8_t log_port) __banked
+{
+	reg_read_m(RTL837X_MSTP_STATES);
+	return stp_state_of(log_port);
 }
