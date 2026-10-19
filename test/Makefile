@@ -76,6 +76,24 @@ $(BUILDDIR)/test_lacp: test_lacp.c $(SRCROOT)/rtl837x_lacp.c | $(BUILDDIR)
 $(BUILDDIR)/test_httpd_tx: test_httpd_tx.c $(SRCROOT)/httpd/httpd.c $(SRCROOT)/uip/uip.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@ $(LDFLAGS)
 
+# The seam check: the three shared files (cmd_parser.c, cmd_editor.c,
+# httpd/page_impl.c) compiled with seam_stub/ ahead of every other include
+# path, so the register and SFR headers are poisoned (#error), and linked
+# against platform_mock.c only. It builds once the shared files reach the
+# hardware solely through platform.h. Not part of `run` until that holds.
+# The files are compiled from a copy: a quoted #include is looked up next to
+# the including file before any -I, so in place cmd_parser.c would find the
+# real ../rtl837x_regs.h and never see the poison.
+SEAM_SHARED = $(SRCROOT)/cmd_parser.c $(SRCROOT)/cmd_editor.c $(SRCROOT)/httpd/page_impl.c
+SEAMDIR     = $(BUILDDIR)/seam
+$(BUILDDIR)/test_platform_seam: test_platform_seam.c platform_mock.c $(SEAM_SHARED) $(SRCROOT)/platform.h | $(BUILDDIR)
+	mkdir -p $(SEAMDIR) && cp $(SEAM_SHARED) $(SEAMDIR)/
+	$(CC) -Iseam_stub $(CFLAGS) -Wno-parentheses -Wno-misleading-indentation -Wno-incompatible-pointer-types \
+		test_platform_seam.c platform_mock.c $(addprefix $(SEAMDIR)/,$(notdir $(SEAM_SHARED))) -o $@ $(LDFLAGS)
+
+seam_check: $(BUILDDIR)/test_platform_seam
+	$<
+
 run: $(TESTS)
 	@fail=0; for t in $(TESTS); do \
 		echo "=== $$t ==="; \
@@ -87,4 +105,4 @@ run: $(TESTS)
 clean:
 	rm -rf $(BUILDDIR)
 
-.PHONY: all run clean
+.PHONY: all run clean seam_check

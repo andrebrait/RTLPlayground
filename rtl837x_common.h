@@ -4,8 +4,7 @@
 #include "uip/uip-conf.h"
 #include <stdint.h>
 #include <stdbool.h>
-
-#define SYS_TICK_HZ 200
+#include "platform.h"
 
 /* Timers of the main loop count system ticks, not loop passes: a pass is as
  * long as the packets it handles, and since #483 the loop no longer sleeps
@@ -15,56 +14,20 @@
  * running the timer 64 times to catch up. */
 #define TICKS_DUE(last, period)	((uint8_t)((uint8_t)ticks - (last)) >= (period))
 
-#define CPU_PORT        9
-#define MAC_ADDR_LEN    6
 #define PORT_BIT(p)     ((uint16_t)1 << (p))
-#define NUL			'\0'
 
 // Define Port-masks for 9-port devices and 6-port devices
 #define PMASK_9		0x1ff
 #define PMASK_6		0x1f8
-#define PMASK_CPU	((uint16_t)(1 << CPU_PORT))
 
 // Defines a port mask for dropping all packets on Lookup-miss
 #define LOOKUP_MISS_DROP_6  0x00015540
 #define LOOKUP_MISS_DROP_9  0x00015555
 #define LOOKUP_MISS_FLOOD   0x00000000
 
-/* Buffer for serial input, SBUF_SIZE must be power of 2 < 256
- * Writing to this buffer is under the sole control of the serial ISR
- * Note that key-presses such as <cursor-left> can create multiple
- * keys (3 to 4) being sent via the serial line, so this must be
- * sufficiently large */
-#define SBUF_SIZE 16
-#define SBUF_MASK (SBUF_SIZE - 1)
-
-extern __xdata volatile uint8_t sbuf_ptr;
-extern __xdata uint8_t sbuf[SBUF_SIZE];
-
-// Define the command buffer size, Must be 2^x and <= 128
-#define CMD_BUF_SIZE 128
-
-// Size of the TCP Output buffer
-#define TCP_OUTBUF_SIZE 2500
-
 // Appended when a captured command wrote more than the output buffer holds,
 // so a clipped listing is visibly clipped instead of silently short.
 #define CMD_TRUNCATED "\n[output truncated]\n"
-
-// Size of the port name, including the terminating null byte
-#define PORT_NAME_SIZE 32
-
-// Size of the memory area dedicated to VLAN-names
-#define VLAN_NAMES_SIZE 1024
-
-// Size of the flash buffer used for writing to flash, must be a multiple of the flash page size (0x100)
-#define FLASH_BUF_SIZE 512
-
-// Errors for commands
-#define ERR_OK			0
-#define ERR_TOO_MANY_ARGUMENTS	1
-#define ERR_CMD_TOO_LONG	2
-#define ERR_INVALID_ARGUMENT	3
 
 // For RX data, a propriatary RTL FRAME is inserted. Instead of 0x0800 for IPv4,
 // the RTL_FRAME_TAG_ID is used as part of an 8-byte tag. When VLAN is activated,
@@ -99,66 +62,19 @@ struct vlan_tag {
 #define ETHER_HEADER_SIZE	14
 
 #define DEFAULT_CONFIG_START 0x6f000
-#define CONFIG_START 0x70000
-#define CONFIG_LEN 0x1000
 #define CODE0_SIZE 0x4000
 #define CODE_BANK_SIZE 0xc000
 
 // Store update image after running image
 #define FIRMWARE_UPLOAD_START 0x80000
 
-// Constants for the circular command buffer, the size must be 2^n
-#define CMD_HISTORY_SIZE 0x800
-#define CMD_HISTORY_MASK (CMD_HISTORY_SIZE - 1)
-
-enum sfp_speeds {
-	SFP_SPEED_AUTO = 0,
-	SFP_SPEED_100M,
-	SFP_SPEED_1G,
-	SFP_SPEED_2G5,
-	SFP_SPEED_5G,
-	SFP_SPEED_10G
-};
-
-/**
- * Representation of a 48-bit Ethernet address.
- */
-struct uip_eth_addr {
-   uint8_t addr[6];
-};
-
-struct flash_region_t {
-    uint32_t addr;
-    uint16_t len;
-};
-
-extern __xdata char port_names[9][PORT_NAME_SIZE];
-extern __xdata uint16_t lldp_logical_port_status;
-
-extern __xdata bool stp_enabled;
-
-/* System hostname (device identity). Set via `hostname <text>` and the System
- * Settings page, reported in /information.json. Other modules (e.g. LLDP, which
- * advertises it as the System Name TLV) read it from here. */
-extern __xdata char hostname[24];
-
 extern __xdata uint8_t uip_buf[UIP_CONF_BUFFER_SIZE+2];
-extern __xdata struct uip_eth_addr uip_ethaddr;
 
 // Headers for calls in the common code area (HOME/BANK0)
 void print_string_no_syslog(__code const char *p);
 void print_string_newline_no_syslog(__code const char *p);
-void print_string(__code const char *p);
-void print_string_x(__xdata char *p);
-void print_long(uint32_t a);
-void print_short(uint16_t a);
-void print_byte(uint8_t a);
-void itoa(uint8_t v);
-void itoa_short(uint16_t v);
 void print_sfr_data(void);
 void print_phy_data(void);
-void print_cmd_prompt(void);
-void print_phys_port(uint8_t port);
 void phy_write_mask(uint16_t phy_mask, uint8_t dev_id, uint16_t reg, uint16_t v);
 void phy_write(uint8_t phy_id, uint8_t dev_id, uint16_t reg, uint16_t v);
 void phy_read(uint8_t phy_id, uint8_t dev_id, uint16_t reg);
@@ -171,32 +87,14 @@ void sds_read(uint8_t sds_id, uint8_t page, uint8_t reg);
 void sds_write_v(uint8_t sds_id, uint8_t page, uint8_t reg, uint16_t v);
 void delay(uint16_t t);
 void write_char_no_syslog(char c);
-void write_char(char c);
 void print_reg(uint16_t reg);
-bool sfp_read_block(uint8_t slot, uint8_t reg, uint8_t len) __banked __reentrant;
-extern __xdata uint8_t sfp_buf[16];
 void reg_bit_set(uint16_t reg_addr, char bit);
 void reg_bit_clear(uint16_t reg_addr, char bit);
 uint8_t reg_bit_test(uint16_t reg_addr, char bit);
 void sfr_mask_data(uint8_t n, uint8_t mask, uint8_t set);
 void sfr_set_zero(void);
-void reset_chip(void);
-/* Firmware implementations that shadow libc names. Host unit-test builds
- * (RTLP_HOST_TEST) hide these prototypes so they don't clash with glibc;
- * argument order matches libc, so on-host callers transparently use the
- * C library. See test/. */
-#ifndef RTLP_HOST_TEST
-void sleep(uint16_t t);
-void memcpy(__xdata void * __xdata dst, __xdata const void * __xdata src, uint16_t len);
-void memset(__xdata uint8_t *dst, __xdata uint8_t v, uint8_t len);
-int memcmp(__xdata const void *a, __xdata const void *b, uint16_t len);
-uint16_t strlen(__code const char *s);
-uint16_t strcpy(__xdata uint8_t *dst, const char *s);
-char strcmp(__xdata const uint8_t *a, __code const uint8_t *b);
-#endif
 void memcpyc(__xdata uint8_t *dst, __code const uint8_t *src, uint16_t len);
 uint16_t strlen_x(__xdata const char *s);
-uint16_t strtox(__xdata uint8_t *dst, __code const char *s);
 bool strstart(__xdata const uint8_t *a, __code const uint8_t *b);
 bool strstart_x(__xdata const uint8_t *a, __xdata const uint8_t *b);
 void tcpip_output(void);
