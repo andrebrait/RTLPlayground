@@ -200,10 +200,15 @@ void hex_to_html(__xdata uint8_t *p, __xdata uint8_t n)
 }
 
 
-// One '0'/'1' per bit of v, from mask m down to bit 0
-static void bits_to_html(uint8_t v, uint8_t m)
+// One '0'/'1' per bit of v below its highest set bit (a marker the caller ORs in).
+// Single parameter: a second one on a static function costs a byte of internal RAM.
+static void bits_to_html(uint8_t v)
 {
-	for (; m; m >>= 1)
+	uint8_t m = 0x80;
+
+	while (!(v & m))
+		m >>= 1;
+	while (m >>= 1)
 		bool_to_html(v & m);
 }
 
@@ -809,9 +814,9 @@ void send_eee(void)
 			slen += strtox(outbuf + slen, ",\"isSFP\":1");
 		} else {
 			slen += strtox(outbuf + slen, ",\"isSFP\":0,\"eee\":\"");
-			bits_to_html(port_eee_adv_get(i), 4);
+			bits_to_html(port_eee_adv_get(i) | 8);
 			slen += strtox(outbuf + slen, "\",\"eee_lp\":\"");
-			bits_to_html(port_eee_lp_get(i), 4);
+			bits_to_html(port_eee_lp_get(i) | 8);
 			slen += strtox(outbuf + slen, "\",\"active\":");
 			bool_to_html(port_eee_active(i));
 		}
@@ -1016,7 +1021,7 @@ void send_status(void)
 			slen += strtox(outbuf + slen, ",\"isSFP\":0,\"enabled\":");
 			bool_to_html(port_phy_enabled(i));
 			slen += strtox(outbuf + slen, ",\"adv\":\"");
-			bits_to_html(port_phy_adv_get(i), 0x20);
+			bits_to_html(port_phy_adv_get(i) | 0x40);
 			char_to_html('"');
 		}
 

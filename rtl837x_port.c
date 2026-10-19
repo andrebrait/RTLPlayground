@@ -819,24 +819,16 @@ uint8_t port_phy_adv_get(uint8_t port) __banked
 {
 	uint8_t r = 0;
 	phy_read(port, PHY_MMD_AN, PHY_ANEG_MGBASE_CTRL);
-	uint16_t w = SFR_DATA_U16;
-	if (w & 0x80)		// 2500BaseN-Full
+	if (SFR_DATA_0 & 0x80)		// 2500BaseN-Full
 		r |= 0x20;
 	phy_read(port, PHY_MMD31, PHY_MMD31_GBCR);
-	w = SFR_DATA_U16;
-	if (w & 0x0200)		// 1000Base-Full
+	if (SFR_DATA_8 & 0x02)		// 1000Base-Full (0x0200)
 		r |= 0x10;
 	phy_read(port, PHY_MMD_AN, PHY_ANEG_ADV);
-	w = SFR_DATA_U16;
-	if (w & 0x0100)		// 100Base-Full
+	if (SFR_DATA_8 & 0x01)		// 100Base-Full (0x0100)
 		r |= 0x08;
-	if (w & 0x80)		// 100Base-Half
-		r |= 0x04;
-	if (w & 0x40)		// 10Base-Full
-		r |= 0x02;
-	if (w & 0x20)		// 10Base-Half
-		r |= 0x01;
-	return r;
+	// 100Base-Half 0x80, 10Base-Full 0x40, 10Base-Half 0x20 -> bits 2..0
+	return r | ((SFR_DATA_0 >> 5) & 7);
 }
 
 
@@ -844,16 +836,13 @@ uint8_t port_phy_adv_get(uint8_t port) __banked
 static uint8_t eee_bits(uint8_t port, __xdata uint8_t reg2, __xdata uint8_t reg1)
 {
 	uint8_t r = 0;
-	uint16_t v;
 	phy_read(port, PHY_MMD_AN, reg2);
-	v = SFR_DATA_U16;
-	if (v & PHY_EEE_BIT_2G5)
+	if (SFR_DATA_0 & PHY_EEE_BIT_2G5)
 		r |= 4;
 	phy_read(port, PHY_MMD_AN, reg1);
-	v = SFR_DATA_U16;
-	if (v & PHY_EEE_BIT_1G)
+	if (SFR_DATA_0 & PHY_EEE_BIT_1G)
 		r |= 2;
-	if (v & PHY_EEE_BIT_100M)
+	if (SFR_DATA_0 & PHY_EEE_BIT_100M)
 		r |= 1;
 	return r;
 }
