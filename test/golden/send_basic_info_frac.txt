@@ -1,0 +1,5 @@
+HTTP/1.1 200 OK
+Connection: close
+Content-Type: application/json
+
+{"ip_address":"192.168.1.2","ip_gateway":"192.168.1.1","ip_netmask":"255.255.255.0","syslog_server":"192.168.1.9:514","session_timeout":200,"mac_address":"02:11:22:33:44:55","hostname":"hosttest","sw_ver":"host-test","build_date":"1970-01-01 00:00:00","hw_ver":"HOSTTEST","chip_temp":"53.5 C","flash_size":"2M","sfp_slot_0":""}

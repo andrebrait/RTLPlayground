@@ -140,7 +140,9 @@ void flash_read_bulk(uint8_t *dst)
 }
 const char *get_flash_size_str(void) { return "2M"; }
 uint8_t  sfp_read_reg(uint8_t slot, uint8_t reg) { (void)slot; (void)reg; return 0; }
-bool     gpio_pin_test(uint8_t pin) { (void)pin; return false; }
+/* Pins read high (an SFP slot's detect pin high = no module) unless a test drives them low. */
+uint64_t gpio_pins_low;
+bool     gpio_pin_test(uint8_t pin) { return !((gpio_pins_low >> (pin & 63)) & 1); }
 /* PHY registers a test has set; every other register reads 0. */
 static struct { uint32_t key; uint16_t val; } phy_regs[32];
 static uint8_t n_phy_regs;

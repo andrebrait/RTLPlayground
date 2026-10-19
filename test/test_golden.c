@@ -45,6 +45,7 @@ extern uint8_t  lacp_port_lag[];
 extern uint8_t  lacp_actor_state[];
 extern struct syslog_state syslog_state;
 extern const char *flash_config;
+extern uint64_t gpio_pins_low;
 void phy_mock_reset(void);
 void phy_mock_set(uint8_t phy_id, uint8_t dev_id, uint16_t reg, uint16_t val);
 
@@ -152,7 +153,8 @@ static void fixture_load(void)
 	/* link state and speed, temperature, EEE */
 	hw_reg_set(RTL837X_REG_LINKS_STS, 0x00030000);
 	hw_reg_set(RTL837X_REG_LINKS, 0x00000025);
-	hw_reg_set(RTL837X_TM_RESULT, 0x00001a80);
+	hw_reg_set(RTL837X_TM_RESULT, 0x00001a80);	/* 53.0 C */
+	gpio_pins_low = 0;				/* every SFP slot empty */
 	hw_reg_set(RTL8373_PHY_EEE_ABLTY, 0x00000003);
 	for (uint8_t p = 0; p < 2; p++) {
 		phy_mock_set(p, PHY_MMD31, 0xa610, 0x2000);
@@ -164,7 +166,7 @@ static void fixture_load(void)
 		phy_mock_set(p, PHY_MMD_AN, PHY_EEE_LP_ABILITY2, p ? 0 : PHY_EEE_BIT_2G5);
 		phy_mock_set(p, PHY_MMD_AN, PHY_EEE_LP_ABILITY, PHY_EEE_BIT_1G);
 	}
-	hw_reg_set(0x7b20, 0x00c0ffee);
+	hw_reg_set(0x0abc, 0x00c0ffee);
 	hw_reg_set(RTL837X_REG_SDS_MODES, 0x00000a05);
 	hw_reg_set(RTL837X_RAND_NUM0, 0x89abcdef);
 	hw_reg_set(RTL837X_RAND_NUM1, 0x00001234);
@@ -178,9 +180,12 @@ static void fixture_load(void)
 		hw_counter_set(0, c, 0x1000 + c * 7);
 		hw_counter_set(1, c, 0x20 + c);
 	}
+	/* 64-bit packet counters: each high-word byte is set on its own somewhere,
+	 * so a reader that drops one byte of the high word changes an output */
 	hw_counter_set(0, STAT_COUNTER_TX_PKTS, 0x123456789ULL);
-	hw_counter_set(0, STAT_COUNTER_RX_PKTS, 0x00000000deadbeefULL);
-	hw_counter_set(1, STAT_COUNTER_TX_PKTS, 0x4d2);
+	hw_counter_set(0, STAT_COUNTER_RX_PKTS, 0x01000000deadbeefULL);
+	hw_counter_set(1, STAT_COUNTER_TX_PKTS, 0x00000100000004d2ULL);
+	hw_counter_set(1, STAT_COUNTER_RX_PKTS, 0x000100000000004fULL);
 	hw_counter_set(1, STAT_COUNTER_ERR_PKTS, 0x0000000500000003ULL);
 
 	/* L2: two learned, one static */
@@ -216,6 +221,11 @@ static void page(const char *name, void (*fn)(void))
 }
 
 static void p_counters(void) { send_counters(1); }
+static void p_basic_info_frac(void)
+{
+	hw_reg_set(RTL837X_TM_RESULT, 0x00001ac0);	/* 53.5 C: the fraction digit */
+	send_basic_info();
+}
 static void p_vlan(void)     { send_vlan(10); }
 static void p_l2(void)       { send_l2(0); }
 
@@ -233,9 +243,11 @@ static void p_l2_delete(void)
 	slen += n;
 }
 
-static void cmd(const char *name, const char *line)
+static void cmd_with(const char *name, const char *line, void (*pre)(void))
 {
 	fixture_load();
+	if (pre)
+		pre();
 	cli(line);
 	if (out_len >= sizeof(out_buf) - 1) {
 		printf("  FAIL: %s: output exceeds the capture buffer\n", name);
@@ -245,6 +257,10 @@ static void cmd(const char *name, const char *line)
 	golden(name, out_buf, out_len);
 }
 
+static void sfp_inserted(void) { gpio_pins_low = 1; }	/* pin_detect of both slots is 0 */
+
+static void cmd(const char *name, const char *line) { cmd_with(name, line, NULL); }
+
 int main(void)
 {
 	update = getenv("GOLDEN_UPDATE") != NULL;
@@ -253,6 +269,7 @@ int main(void)
 	printf("== golden output: JSON pages and CLI ==\n");
 
 	page("send_basic_info", send_basic_info);
+	page("send_basic_info_frac", p_basic_info_frac);
 	page("send_status", send_status);
 	page("send_counters", p_counters);
 	page("send_vlan", p_vlan);
@@ -283,7 +300,8 @@ int main(void)
 	cmd("cli_vlan_show", "vlan show");
 	cmd("cli_l2", "l2");
 	cmd("cli_stat", "stat");
-	cmd("cli_regget", "regget 7b20");
+	cmd_with("cli_stat_sfp_in", "stat", sfp_inserted);
+	cmd("cli_regget", "regget 0abc");
 	cmd("cli_sds", "sds");
 	cmd("cli_gpio", "gpio");
 	cmd("cli_rnd", "rnd");
