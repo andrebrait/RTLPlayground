@@ -184,6 +184,25 @@ void flash_read_bulk(__xdata uint8_t *dst);
 __code const char* get_flash_size_str(void);
 
 // Ports and VLANs
+#define STAT_COUNTER_TX_PKTS	46
+#define STAT_COUNTER_RX_PKTS	47
+#define STAT_COUNTER_ERR_PKTS	48
+
+// 0 = link down, else the RTL837x speed code + 1 (what app.js reads)
+uint8_t port_link_get(uint8_t port) __banked;
+bool port_phy_enabled(uint8_t port) __banked;
+// bit 5..0 = 2500F, 1000F, 100F, 100H, 10F, 10H
+uint8_t port_phy_adv_get(uint8_t port) __banked;
+// 8 bytes, big-endian, of the 64-bit MIB counter
+void port_counter_get(uint8_t port, uint8_t counter, __xdata uint8_t *out8) __banked;
+// 4 bytes, big-endian
+void port_macs_learned_get(uint8_t port, __xdata uint8_t *out4) __banked;
+uint16_t port_mtu_get(uint8_t port) __banked;
+void port_mtu_set(uint8_t port, uint16_t mtu) __banked;
+// bit 2..0 = 2.5G, 1G, 100M
+uint8_t port_eee_adv_get(uint8_t port) __banked;
+uint8_t port_eee_lp_get(uint8_t port) __banked;
+bool port_eee_active(uint8_t port) __banked;
 uint8_t port_l2_forget(void) __banked;
 void port_l2_learned(void) __banked;
 void port_stats_print(void) __banked;

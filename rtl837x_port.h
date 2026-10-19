@@ -5,10 +5,6 @@
 #include "rtl837x_regs.h"
 #include "platform.h"
 
-#define STAT_COUNTER_TX_PKTS	46
-#define STAT_COUNTER_RX_PKTS	47
-#define STAT_COUNTER_ERR_PKTS	48
-
 #define STAT_GET(cnt, port) do { \
 	REG_WRITE(RTL837X_STAT_GET, 0x00, 0x00, cnt >> 3, (cnt << 5) | (port << 1) | 1); \
 	do { \

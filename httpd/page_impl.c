@@ -171,17 +171,17 @@ uint16_t port_status(void)
 }
 
 
-/* Converts sfr_data[] into raw hex string.
+/* Converts 4 big-endian bytes into raw hex string.
    Suppress leading zeros.
 */
-void sfr_data_to_html(void)
+void hex_to_html(__xdata uint8_t *p)
 {
  	uint8_t print_zeros = 0;
 	uint8_t val = 0;
 
 	for (uint8_t nibble = 0; nibble < 8; nibble++) {
 	  	if (!(nibble & 1))
-	        val = sfr_data[nibble>>1];
+	        val = p[nibble>>1];
 		// force the swap instruction, itohex() ignores the upper nibble.
 		val = (val << 4) | (val >> 4);
 		// when print_zeros is not zero, we know that a non-zero number has printed.
@@ -198,34 +198,32 @@ void sfr_data_to_html(void)
 }
 
 
-void reg_to_html(uint16_t reg)
+/* A 64-bit big-endian counter as one number: the low word keeps its
+ * leading zeros whenever the high word is set.
+ * Pages read counters and MAC counts into sfp_buf, which nothing else uses while a
+ * page is built; that saves a dedicated 8-byte XRAM buffer. */
+void counter_to_html(__xdata uint8_t *c)
 {
-	reg_read_m(reg);
-	sfr_data_to_html();
-}
+	uint8_t i;
+	uint8_t high = 0;
 
-
-void reg_to_html_long(uint16_t reg)
-{
-	reg_read_m(reg);
-	byte_to_html(sfr_data[0]);
-	byte_to_html(sfr_data[1]);
-	byte_to_html(sfr_data[2]);
-	byte_to_html(sfr_data[3]);
-}
-
-
-/* The 64-bit counter of the last STAT_GET as one number: the low word keeps
- * its leading zeros whenever the high word is set. */
-void counter_to_html(void)
-{
-	reg_read_m(RTL837X_STAT_V_HIGH);
-	if (SFR_DATA_24 | SFR_DATA_16 | SFR_DATA_8 | SFR_DATA_0) {
-		sfr_data_to_html();
-		reg_to_html_long(RTL837X_STAT_V_LOW);
+	for (i = 0; i < 4; i++)
+		high |= c[i];
+	if (high) {
+		hex_to_html(c);
+		for (i = 4; i < 8; i++)
+			byte_to_html(c[i]);
 	} else {
-		reg_to_html(RTL837X_STAT_V_LOW);
+		hex_to_html(c + 4);
 	}
+}
+
+
+// One '0'/'1' per bit of v, from mask m down to bit 0
+static void bits_to_html(uint8_t v, uint8_t m)
+{
+	for (; m; m >>= 1)
+		bool_to_html(v & m);
 }
 
 
@@ -330,7 +328,7 @@ void send_vlan(uint16_t vlan)
 	//{"members":"0x00060011"}
 	slen += strtox(outbuf + slen, "{\"members\":\"0x");
 	vlan_get(vlan);
-	sfr_data_to_html();
+	hex_to_html(sfr_data);
 	slen += strtox(outbuf + slen, "\",\"name\":\"");
 	__xdata uint16_t n = vlan_name(vlan);
 	if (n== 0xffff) {
@@ -367,9 +365,9 @@ bool send_counters(uint8_t phys_port)
 
 	char_to_html('[');
 	for (uint8_t counter = 0; counter < 0x37; counter++) {
-		STAT_GET(counter, log_port);
+		port_counter_get(log_port, counter, sfp_buf);
 		slen += strtox(outbuf + slen, "\"0x");
-		counter_to_html();
+		counter_to_html(sfp_buf);
 		char_to_html('\"');
 		if (counter != 0x36)
 			char_to_html(',');
@@ -592,7 +590,7 @@ void send_lag(void)
 		}
 		slen += strtox(outbuf + slen, "\",\"hash\":\"");
 		reg_read_m(RTL837X_TRK_HASH_CTRL_BASE + (l << 2));
-		sfr_data_to_html();
+		hex_to_html(sfr_data);
 		slen += strtox(outbuf + slen, "\"},");
 	}
 	slen -=1; // remove comma
@@ -821,9 +819,6 @@ void send_eee(void)
 	dbg_string("send_eee called\nsending EEE status\n");
 	slen = strtox(outbuf, HTTP_RESPONCE_JSON);
 
-	reg_read_m(RTL8373_PHY_EEE_ABLTY);
-	uint8_t eee_ablty = sfr_data[3];
-
 	char_to_html('[');
 	for (uint8_t i = machine.min_port; i <= machine.max_port; i++) {
 		slen += strtox(outbuf + slen, "{\"portNum\":");
@@ -833,28 +828,11 @@ void send_eee(void)
 			slen += strtox(outbuf + slen, ",\"isSFP\":1");
 		} else {
 			slen += strtox(outbuf + slen, ",\"isSFP\":0,\"eee\":\"");
-			uint16_t v;
-			phy_read(i, PHY_MMD_AN, PHY_EEE_ADV2);
-			v = SFR_DATA_U16;
-			bool_to_html(v & PHY_EEE_BIT_2G5);
-
-			phy_read(i, PHY_MMD_AN, PHY_EEE_ADV);
-			v = SFR_DATA_U16;
-			bool_to_html(v & PHY_EEE_BIT_1G);
-			bool_to_html(v & PHY_EEE_BIT_100M);
-
-			phy_read(i, PHY_MMD_AN, PHY_EEE_LP_ABILITY2);
-			v = SFR_DATA_U16;
+			bits_to_html(port_eee_adv_get(i), 4);
 			slen += strtox(outbuf + slen, "\",\"eee_lp\":\"");
-			bool_to_html (v & PHY_EEE_BIT_2G5);
-
-			phy_read(i, PHY_MMD_AN, PHY_EEE_LP_ABILITY);
-			v = SFR_DATA_U16;
-			bool_to_html(v & PHY_EEE_BIT_1G);
-			bool_to_html(v & PHY_EEE_BIT_100M);
-
+			bits_to_html(port_eee_lp_get(i), 4);
 			slen += strtox(outbuf + slen, "\",\"active\":");
-			bool_to_html(eee_ablty & (1 << i));
+			bool_to_html(port_eee_active(i));
 		}
 		char_to_html('}');
 		if (i < machine.max_port)
@@ -974,8 +952,7 @@ void send_mtu(void)
 		slen += strtox(outbuf + slen, "{\"portNum\":");
 		itoa_html(machine.log_to_phys_port[i]);
 		slen += strtox(outbuf + slen, ",\"mtu\":\"0x");
-		reg_read_m(RTL8373_REG_MAC_L2_PORT_MAX_LEN + ((uint16_t) i << 8));
-		uint16_t mtu = SFR_DATA_U16 & 0x3fff;
+		uint16_t mtu = port_mtu_get(i);
 		byte_to_html(mtu >> 8);
 		byte_to_html(mtu & 0xff);
 		char_to_html('"');
@@ -1056,64 +1033,35 @@ void send_status(void)
 			}
 		} else {
 			slen += strtox(outbuf + slen, ",\"isSFP\":0,\"enabled\":");
-			phy_read(i, PHY_MMD31, 0xa610);
-			bool_to_html(SFR_DATA_8 == 0x20);
+			bool_to_html(port_phy_enabled(i));
 			slen += strtox(outbuf + slen, ",\"adv\":\"");
-			phy_read(i, PHY_MMD_AN, PHY_ANEG_MGBASE_CTRL);
-			uint16_t w = SFR_DATA_U16;
-			bool_to_html(!!(w & 0x80));		// 2500BaseN-Full
-			phy_read(i, PHY_MMD31, PHY_MMD31_GBCR);
-			w = SFR_DATA_U16;
-			bool_to_html(!!(w & 0x0200));		// 1000Base-Full
-			phy_read(i, PHY_MMD_AN, PHY_ANEG_ADV);
-			w = SFR_DATA_U16;
-			bool_to_html(!!(w & 0x0100));		// 100Base-Full
-			bool_to_html(!!(w & 0x80));		// 100Base-Half
-			bool_to_html(!!(w & 0x40));		// 10Base-Full
-			bool_to_html(!!(w & 0x20));		// 10Base-Half
+			bits_to_html(port_phy_adv_get(i), 0x20);
 			char_to_html('"');
 		}
 
 		slen += strtox(outbuf + slen, ",\"link\":");
 		
-		uint8_t b = 0;
-		// Determine link state
-		reg_read_m(RTL837X_REG_LINKS_STS);
-		if(!((sfr_data[(i / 8) + 1] >> (i % 8 ) & 1)))
-		{
-			b = 0; //link down
-		}
-		else
-		{
-				//Determine link speed
-				if (i < 8)
-					reg_read_m(RTL837X_REG_LINKS);
-				else
-					reg_read_m(RTL837X_REG_LINKS_89);
-				
-				b = sfr_data[3 - ((i & 7) >> 1)];
-				b = ((i & 1) ? b >> 4 : b & 0xf) + 1;
-		}
-		char_to_html('0' + b);
+		char_to_html('0' + port_link_get(i));
 
-		STAT_GET(STAT_COUNTER_TX_PKTS, i);
 		slen += strtox(outbuf + slen, ",\"txG\":\"0x");
-		counter_to_html();
+		port_counter_get(i, STAT_COUNTER_TX_PKTS, sfp_buf);
+		counter_to_html(sfp_buf);
 
 		slen += strtox(outbuf + slen, "\",\"txB\":\"0x");
-		STAT_GET(STAT_COUNTER_ERR_PKTS, i);
-		reg_to_html(RTL837X_STAT_V_LOW);	// 32 bit Tx Packet errors
+		port_counter_get(i, STAT_COUNTER_ERR_PKTS, sfp_buf);
+		hex_to_html(sfp_buf + 4);		// 32 bit Tx Packet errors
 
 		slen += strtox(outbuf + slen, "\",\"rxG\":\"0x");
-		STAT_GET(STAT_COUNTER_RX_PKTS, i);
-		counter_to_html();
+		port_counter_get(i, STAT_COUNTER_RX_PKTS, sfp_buf);
+		counter_to_html(sfp_buf);
 
 		slen += strtox(outbuf + slen, "\",\"rxB\":\"0x");
-		STAT_GET(STAT_COUNTER_ERR_PKTS, i);
-		reg_to_html(RTL837X_STAT_V_HIGH);	// 32bit RX packet errors
+		port_counter_get(i, STAT_COUNTER_ERR_PKTS, sfp_buf);
+		hex_to_html(sfp_buf);		// 32bit RX packet errors
 
 		slen += strtox(outbuf + slen, "\",\"macs\":\"0x");
-		reg_to_html(RTL837X_L2_LRN_PORT_CONSTRT_CNT + (i << 2));
+		port_macs_learned_get(i, sfp_buf);
+		hex_to_html(sfp_buf);
 		slen += strtox(outbuf + slen, "\"}");
 		if (i < machine.max_port)
 			char_to_html(',');

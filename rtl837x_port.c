@@ -528,24 +528,9 @@ void port_stats_print(void) __banked
 			}
 		}
 
-		uint8_t b = 0;
+		uint8_t b = port_link_get(i);
 
-		// Determine link state
-		reg_read_m(RTL837X_REG_LINKS_STS);
-		if(!((sfr_data[(i / 8) + 1] >> ( i % 8  ) & 1)))
-		{
-			b = 99;
-		}
-		else
-		{
-			if (i < 8)
-				reg_read_m(RTL837X_REG_LINKS);
-			else
-				reg_read_m(RTL837X_REG_LINKS_89);
-
-			b = sfr_data[3 - ((i & 7) >> 1)];	
-			b = (i & 1) ? b >> 4 : b & 0xf;
-		}
+		b = b ? b - 1 : 99;
 
 		switch (b) {
 		case 0:
@@ -589,6 +574,57 @@ void port_stats_print(void) __banked
 		itoa_short(SFR_DATA_U16 & L2_LRN_PORT_CNT_MASK);
 		print_string("\n");
 	}
+}
+
+
+uint8_t port_link_get(uint8_t port) __banked
+{
+	reg_read_m(RTL837X_REG_LINKS_STS);
+	if (!((sfr_data[(port / 8) + 1] >> (port % 8) & 1)))
+		return 0;
+	if (port < 8)
+		reg_read_m(RTL837X_REG_LINKS);
+	else
+		reg_read_m(RTL837X_REG_LINKS_89);
+	uint8_t b = sfr_data[3 - ((port & 7) >> 1)];
+	return ((port & 1) ? b >> 4 : b & 0xf) + 1;
+}
+
+
+// The 4 bytes of a register, big-endian
+static void reg_to_buf(uint16_t reg, __xdata uint8_t *out4)
+{
+	reg_read_m(reg);
+	for (uint8_t i = 0; i < 4; i++)
+		out4[i] = sfr_data[i];
+}
+
+
+void port_counter_get(uint8_t port, uint8_t counter, __xdata uint8_t *out8) __banked
+{
+	STAT_GET(counter, port);
+	reg_to_buf(RTL837X_STAT_V_HIGH, out8);
+	reg_to_buf(RTL837X_STAT_V_LOW, out8 + 4);
+}
+
+
+void port_macs_learned_get(uint8_t port, __xdata uint8_t *out4) __banked
+{
+	reg_to_buf(RTL837X_L2_LRN_PORT_CONSTRT_CNT + (port << 2), out4);
+}
+
+
+uint16_t port_mtu_get(uint8_t port) __banked
+{
+	reg_read_m(RTL8373_REG_MAC_L2_PORT_MAX_LEN + ((uint16_t) port << 8));
+	return SFR_DATA_U16 & 0x3fff;
+}
+
+
+void port_mtu_set(uint8_t port, uint16_t mtu) __banked
+{
+	REG_WRITE(RTL8373_REG_MAC_L2_PORT_MAX_LEN + ((uint16_t) port << 8), (mtu >> 10) & 0xf, (mtu >> 2) & 0xff,
+		  ((mtu & 0x3) << 6) | ((mtu >> 8) & 0x3f), mtu & 0xff);
 }
 
 
@@ -770,6 +806,76 @@ void port_eee_status(uint8_t port) __banked
 	else
 		print_string(" INACTIVE ");
 	write_char('\n');
+}
+
+
+bool port_phy_enabled(uint8_t port) __banked
+{
+	phy_read(port, PHY_MMD31, 0xa610);
+	return SFR_DATA_8 == 0x20;
+}
+
+
+uint8_t port_phy_adv_get(uint8_t port) __banked
+{
+	uint8_t r = 0;
+	phy_read(port, PHY_MMD_AN, PHY_ANEG_MGBASE_CTRL);
+	uint16_t w = SFR_DATA_U16;
+	if (w & 0x80)		// 2500BaseN-Full
+		r |= 0x20;
+	phy_read(port, PHY_MMD31, PHY_MMD31_GBCR);
+	w = SFR_DATA_U16;
+	if (w & 0x0200)		// 1000Base-Full
+		r |= 0x10;
+	phy_read(port, PHY_MMD_AN, PHY_ANEG_ADV);
+	w = SFR_DATA_U16;
+	if (w & 0x0100)		// 100Base-Full
+		r |= 0x08;
+	if (w & 0x80)		// 100Base-Half
+		r |= 0x04;
+	if (w & 0x40)		// 10Base-Full
+		r |= 0x02;
+	if (w & 0x20)		// 10Base-Half
+		r |= 0x01;
+	return r;
+}
+
+
+// bit 2..0 = 2.5G, 1G, 100M of the EEE register pair (reg2 holds 2.5G, reg1 1G and 100M)
+static uint8_t eee_bits(uint8_t port, uint8_t reg2, uint8_t reg1)
+{
+	uint8_t r = 0;
+	uint16_t v;
+	phy_read(port, PHY_MMD_AN, reg2);
+	v = SFR_DATA_U16;
+	if (v & PHY_EEE_BIT_2G5)
+		r |= 4;
+	phy_read(port, PHY_MMD_AN, reg1);
+	v = SFR_DATA_U16;
+	if (v & PHY_EEE_BIT_1G)
+		r |= 2;
+	if (v & PHY_EEE_BIT_100M)
+		r |= 1;
+	return r;
+}
+
+
+uint8_t port_eee_adv_get(uint8_t port) __banked
+{
+	return eee_bits(port, PHY_EEE_ADV2, PHY_EEE_ADV);
+}
+
+
+uint8_t port_eee_lp_get(uint8_t port) __banked
+{
+	return eee_bits(port, PHY_EEE_LP_ABILITY2, PHY_EEE_LP_ABILITY);
+}
+
+
+bool port_eee_active(uint8_t port) __banked
+{
+	reg_read_m(RTL8373_PHY_EEE_ABLTY);
+	return sfr_data[3] & (1 << port);
 }
 
 

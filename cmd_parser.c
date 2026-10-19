@@ -1020,8 +1020,7 @@ void parse_mtu(void)
 
 	if (cmd_compare(1, "show")) {
 		for (p = machine.min_port; p <= machine.max_port; p++) {
-			reg_read_m(RTL8373_REG_MAC_L2_PORT_MAX_LEN + ((uint16_t) p << 8));
-			uint16_t mtu = SFR_DATA_U16 & 0x3fff;
+			uint16_t mtu = port_mtu_get(p);
 			print_string("Port "); print_phys_port(p);
 			write_char(' '); print_short(mtu); write_char('\n');
 		}
@@ -1040,8 +1039,7 @@ void parse_mtu(void)
 		cmd_error("MTU must be 64..16383\n");
 		return;
 	}
-	REG_WRITE(RTL8373_REG_MAC_L2_PORT_MAX_LEN + ((uint16_t) p << 8), (atoi_results_short >> 10) & 0xf, (atoi_results_short >> 2) & 0xff,
-		  ((atoi_results_short & 0x3) << 6) | ((atoi_results_short >> 8) & 0x3f), atoi_results_short & 0xff);
+	port_mtu_set(p, atoi_results_short);
 	write_char('\n');
 	return;
 

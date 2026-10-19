@@ -23,5 +23,21 @@ int main(void)
 		return 1;
 	}
 	printf("ok: send_mtu reports MTU 1522 through platform.h\n");
+
+	send_status();
+	outbuf[slen < TCP_OUTBUF_SIZE ? slen : TCP_OUTBUF_SIZE - 1] = 0;
+	if (!strstr((const char *)outbuf, "\"link\":3")) {
+		printf("FAIL: send_status: no \"link\":3 in:\n%s\n", outbuf);
+		return 1;
+	}
+	printf("ok: send_status reports link code 3 through platform.h\n");
+
+	send_counters(1);
+	outbuf[slen < TCP_OUTBUF_SIZE ? slen : TCP_OUTBUF_SIZE - 1] = 0;
+	if (!strstr((const char *)outbuf, "\"0x100000002\"")) {
+		printf("FAIL: send_counters: no \"0x100000002\" in:\n%s\n", outbuf);
+		return 1;
+	}
+	printf("ok: send_counters prints the 64-bit counter through platform.h\n");
 	return 0;
 }
