@@ -13,6 +13,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Install dependencies
         run: |
@@ -28,3 +30,6 @@ jobs:
         run: make CI=1 MACHINE="KP_9000_9XHML_X_V3_1"
       - name: Make project with the health instrumentation
         run: make clean && make CI=1 MACHINE="KP_9000_6XHML_X2" HEALTH=1
+      - name: Size guard against merge base
+        if: github.event_name == 'pull_request'
+        run: tools/size_guard.sh $(git merge-base HEAD origin/main)
