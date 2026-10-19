@@ -386,8 +386,41 @@ bool l2_entry_next(void) __banked;
 uint8_t l2_entry_delete(uint16_t idx) __banked;
 void port_l2_static_mgmt(__xdata uint8_t *mac, __xdata uint16_t vlan, __xdata bool remove_entry) __banked;
 
-/* LLDP frames (01-80-C2-00-00-0E): on = trap them to the CPU, else forward them like any multicast. */
-void lldp_trap_set(uint8_t on) __banked;
+/* Reserved-multicast (RMA) handling. `rma` selects a slot, `act` what the switch does with the frames.
+ * Both are opaque platform tokens (the 8051 firmware takes them to be the slot's register address and
+ * its action field); rtl837x_trap.c checks that they match the register header. */
+#define RMA_LLDP	0x4ee8	/* 01-80-C2-00-00-0E */
+#define RMA_ACT_FORWARD	0x00
+#define RMA_ACT_TRAP	0x10	/* to the CPU */
+void trap_rma_set(uint16_t rma, uint8_t act) __banked;
+
+/* Port speed and duplex: the `port <n> speed|duplex` commands fill phy_settings, then call
+ * phy_set_speed()/phy_set_duplex(). phy_show() prints a port's PHY state. */
+#define PHY_SPEED_10M	0x2
+#define PHY_SPEED_100M	0x3
+#define PHY_SPEED_1G	0x4
+#define PHY_SPEED_2G5	0x5
+#define PHY_SPEED_5G	0x6
+#define PHY_SPEED_10G	0x7
+#define PHY_SPEED_AUTO	0x10
+#define PHY_OFF		0xff
+
+#define PHY_DUPLEX_HALF		0
+#define PHY_DUPLEX_FULL		1
+#define PHY_DUPLEX_BOTH		2
+
+struct phy_settings {
+	uint8_t duplex;
+	uint8_t port;
+	uint8_t speed;
+	uint8_t is10g_port;
+};
+
+extern __xdata struct phy_settings phy_settings;
+
+void phy_set_speed(void) __banked;
+void phy_set_duplex(void) __banked;
+void phy_show(uint8_t port) __banked;
 
 /* Console commands that only this platform has (raw registers, flash IDs, chip reset...).
  * cmd_parser() calls it with the tokenized line (cmd_buffer, cmd_words_b, cmd_words_len) for

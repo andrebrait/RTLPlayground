@@ -7,8 +7,6 @@
 
 #include "cmd_parser.h"
 #include "platform.h"
-#include "phy.h"
-#include "rtl837x_phy.h"
 #include "rtl837x_stp.h"
 #include "rtl837x_lacp.h"
 #include "rtl837x_igmp.h"
@@ -1677,11 +1675,11 @@ void cmd_parser(void) __banked
 			if (cmd_compare(1, "on")) {
 				print_string("LLDP enabled\n");
 				lldp_enabled = 1;
-				lldp_trap_set(1);
+				trap_rma_set(RMA_LLDP, RMA_ACT_TRAP);
 			} else {
 				print_string("LLDP disabled\n");
 				lldp_enabled = 0;
-				lldp_trap_set(0);
+				trap_rma_set(RMA_LLDP, RMA_ACT_FORWARD);
 			}
 		} else if (platform_cmd()) {
 			/* A platform command (reset, flash, sds, gpio, leds, regget...). None of its words

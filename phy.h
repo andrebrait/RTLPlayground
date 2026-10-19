@@ -1,6 +1,8 @@
 #ifndef _PHY_H_
 #define _PHY_H_
 
+#include "platform.h"
+
 /*
  * The RTL8272/RTL8273 appear to comprise an RTL8224 PHY
  * which in turn is a 4x RTL8221B PHY
@@ -54,10 +56,4 @@
  */
 #define PHY_CTRL_5	0x7582
 
-/*
- * Duplex settings
- */
-#define PHY_DUPLEX_HALF		0
-#define PHY_DUPLEX_FULL		1
-#define PHY_DUPLEX_BOTH		2
 #endif

@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-#include "rtl837x_common.h"
+#include "platform.h"
 
 extern __xdata uint8_t cmd_buffer[CMD_BUF_SIZE];
 extern __bit __at(0x03) cmd_available;

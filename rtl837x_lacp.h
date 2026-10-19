@@ -7,7 +7,7 @@
  */
 
 #include <stdint.h>
-#include "rtl837x_common.h"
+#include "platform.h"
 
 void lacp_init(void) __banked;
 void lacp_in(void) __banked;

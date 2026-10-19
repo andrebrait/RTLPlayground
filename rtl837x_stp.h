@@ -2,7 +2,7 @@
 #define _RTL837X_STP_H_
 
 #include <stdint.h>
-#include "rtl837x_common.h"
+#include "platform.h"
 void stp_in(void) __banked;
 void stp_setup(void) __banked;
 void stp_timers(void) __banked;

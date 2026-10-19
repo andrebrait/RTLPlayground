@@ -62,7 +62,8 @@ copies of the three files with `seam_stub/` first on the include path, where
 `platform_mock.c` alone, so a register access, or a call to a function the platform does not
 declare, fails to compile or link. A header that is included through another header slips past
 the stubs, so `gcc -MM` also lists every header the copies reach and the check fails
-if one of them is `rtl837x_regs.h`, `rtl837x_sfr.h` or `8051.h`. `sfp_pins_last` and the
+if one of them is `rtl837x_regs.h`, `rtl837x_sfr.h`, `8051.h`, `rtl837x_common.h` (the `reg_*`/`phy_*`/`sds_*`
+primitives), `rtl837x_port.h`, `rtl837x_phy.h`, `rtl837x_flash.h`, `sfp.h` or `phy.h` (register-level declarations). `sfp_pins_last` and the
 other `extern` variables in `platform.h` are state the platform provides, not register access:
 shared code may read and write them.
 

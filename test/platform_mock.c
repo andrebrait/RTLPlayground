@@ -188,7 +188,7 @@ bool platform_cmd(void) __banked { return false; }
 /* The rest of what cmd_parser.c links: the console, the ports, VLANs, SFP cages and
  * the protocol engines. The seam test renders pages and never runs a command, so these
  * only have to exist; each does nothing and returns zero. */
-void lldp_trap_set(uint8_t on) __banked { }
+void trap_rma_set(uint16_t rma, uint8_t act) __banked { }
 
 __xdata uint8_t sbuf[SBUF_SIZE];
 __xdata volatile uint8_t sbuf_ptr;
