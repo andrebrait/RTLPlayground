@@ -7,6 +7,18 @@
  */
 #include "platform.h"
 #include "rtl837x_flash.h"
+#include "rtl837x_phy.h"
+#include "rtl837x_igmp.h"
+#include "rtl837x_lacp.h"
+#include "rtl837x_cabletest.h"
+#include "rtl837x_bandwidth.h"
+#include "rtl837x_storm.h"
+#include "rtl837x_stp.h"
+#include "uip/uip.h"
+#include "dhcp.h"
+#include "dns.h"
+#include "ntp.h"
+#include "syslog.h"
 
 const struct machine machine = {
 	.machine_name = "SEAMTEST",
@@ -28,7 +40,6 @@ uint16_t strtox(uint8_t *dst, const char *s)
 	return dst - b;
 }
 
-__xdata char port_names[9][PORT_NAME_SIZE];
 __xdata uint8_t sfp_pins_last;
 
 /* Ports: fixed values the seam test looks for in the pages. */
@@ -173,3 +184,99 @@ void config_stream_rest(uint16_t offset, __xdata uint16_t len) __banked { }
 
 /* A platform with no console commands of its own: every unknown word stays unknown. */
 bool platform_cmd(void) __banked { return false; }
+
+/* The rest of what cmd_parser.c links: the console, the ports, VLANs, SFP cages and
+ * the protocol engines. The seam test renders pages and never runs a command, so these
+ * only have to exist; each does nothing and returns zero. */
+void lldp_trap_set(uint8_t on) __banked { }
+
+__xdata uint8_t sbuf[SBUF_SIZE];
+__xdata volatile uint8_t sbuf_ptr;
+bool cmd_available;
+__xdata char passwd[21];
+__xdata char hostname[24];
+__xdata uint16_t management_vlan = 1;
+__xdata uint16_t session_timeout;
+__xdata uint8_t flash_buf[FLASH_BUF_SIZE];
+const uint8_t * const hex = (const uint8_t *)"0123456789abcdef";
+__xdata uip_ipaddr_t uip_hostaddr, uip_netmask, uip_draddr;
+__xdata struct dhcp_state dhcp_state;
+__xdata struct syslog_state syslog_state;
+__xdata struct phy_settings phy_settings;
+__xdata struct vlan_settings vlan_settings;
+__xdata uint8_t sfp_buf[16], sfp_options[2], sfp_speed[2];
+__xdata char sfp_module_vendor[2][17], sfp_module_model[2][17], sfp_module_serial[2][17];
+
+void print_string(__code const char *p) { }
+void print_string_x(__xdata char *p) { }
+void print_byte(uint8_t a) { }
+void print_short(uint16_t a) { }
+void print_cmd_prompt(void) { }
+void print_phys_port(uint8_t port) { }
+void write_char(char c) { }
+void itoa(uint8_t v) { }
+void itoa_short(uint16_t v) { }
+__code const char* get_flash_size_str(void) { return ""; }
+
+bool sfp_read_block(uint8_t slot, uint8_t reg, uint8_t len) __banked { return false; }
+bool sfp_print_info(uint8_t sfp) __banked { return false; }
+void handle_sfp(void) __banked { }
+
+void port_eee_enable_all(__xdata uint8_t speed) __banked { }
+void port_eee_disable_all(void) __banked { }
+void port_eee_status_all(void) __banked { }
+void port_eee_enable(__xdata uint8_t port, __xdata uint8_t speed) __banked { }
+void port_eee_disable(uint8_t port) __banked { }
+void port_eee_status(uint8_t port) __banked { }
+uint8_t port_l2_forget(void) __banked { return 0; }
+void port_l2_learned(void) __banked { }
+void port_l2_static_mgmt(__xdata uint8_t *mac, __xdata uint16_t vlan, __xdata bool remove_entry) __banked { }
+void port_stats_print(void) __banked { }
+void port_media_show(uint8_t port) __banked { }
+void vlan_name_remove(uint16_t vlan) __banked { }
+__xdata uint16_t vlan_name(uint16_t vlan) __banked { return 0; }
+void port_pvid_set(uint8_t port, __xdata uint16_t pvid) __banked { }
+uint16_t port_pvid_get(uint8_t port) __banked { return 1; }
+void vlan_create(void) __banked { }
+void vlan_delete(uint16_t vlan) __banked { }
+void vlan_dump(void) __banked { }
+void port_mirror_set(uint8_t port, __xdata uint16_t rx_pmask, __xdata uint16_t tx_pmask) __banked { }
+void port_mirror_del(void) __banked { }
+bool port_ingress_filter(__xdata uint8_t port, __xdata vlan_ingress_mode_t type) __banked { return false; }
+uint16_t port_lag_members_get(uint8_t lag) __banked { return 0; }
+uint8_t port_lag_of(uint8_t port) __banked { return PORT_LAG_NONE; }
+void port_lag_members_set(__xdata uint8_t lag, __xdata uint16_t members) __banked { }
+void port_lag_hash_set(__xdata uint8_t lag, __xdata uint8_t hash) __banked { }
+void print_port_ingress_filter_mode(vlan_ingress_mode_t mode) __banked { }
+void port_isolate(uint8_t port, __xdata uint16_t pmask) __banked { }
+uint16_t port_isolation_get(uint8_t port) __banked { return 0; }
+
+void bandwidth_egress_disable(uint8_t port) __banked { }
+void bandwidth_egress_set(uint8_t port, __xdata uint32_t bw) __banked { }
+void bandwidth_ingress_disable(uint8_t port) __banked { }
+void bandwidth_ingress_drop(uint8_t port) __banked { }
+void bandwidth_ingress_fc(uint8_t port) __banked { }
+void bandwidth_ingress_set(uint8_t port, __xdata uint32_t bw) __banked { }
+void bandwidth_status(uint8_t port) __banked { }
+void storm_off(uint8_t port, __xdata uint8_t type) __banked { }
+void storm_set(uint8_t port, __xdata uint8_t type, __xdata uint32_t rate, __xdata uint8_t pps) __banked { }
+void storm_show(void) __banked { }
+
+void phy_set_speed(void) __banked { }
+void phy_set_duplex(void) __banked { }
+void phy_show(uint8_t port) __banked { }
+void igmp_setup(void) __banked { }
+void igmp_enable(void) __banked { }
+void igmp_show(void) __banked { }
+void lacp_off(void) __banked { }
+void lacp_show(void) __banked { }
+void lacp_lag_set(uint8_t lag, __xdata uint16_t ports) __banked { }
+void stp_parse(void) __banked __reentrant { }
+void cabletest_run(void) __banked { }
+void cabletest_show(void) __banked { }
+void dhcp_start(void) __banked { }
+void dhcp_stop(void) __banked { }
+void dns_parse(void) __banked __reentrant { }
+void ntp_parse(void) __banked __reentrant { }
+void syslog_start(void) __banked { }
+void syslog_stop(void) __banked { }

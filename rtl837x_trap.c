@@ -19,3 +19,8 @@ void trap_rma_set(uint16_t reg, uint8_t act) __banked
 	sfr_data[3] = (sfr_data[3] & ~RTL837X_RMA_ACT_MASK) | act;
 	reg_write_m(reg);
 }
+
+void lldp_trap_set(uint8_t on) __banked
+{
+	trap_rma_set(RTL837X_RMA0E_CONF, on ? RTL837X_RMA_ACT_TRAP : RTL837X_RMA_ACT_FORWARD);
+}

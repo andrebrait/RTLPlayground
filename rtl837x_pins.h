@@ -2,6 +2,7 @@
 #define _RTL837X_PINS_H_
 
 #include <stdint.h>
+#include "machine.h"
 
 #define GPIO0_LED0                0
 #define GPIO1_LED1                1
@@ -67,9 +68,6 @@
 #define GPIO61_SYNCELOCK0         61
 #define GPIO62_SYNCELOCK1         62
 #define GPIO63_MDIO               63
-
-/* Not available GPIO */
-#define GPIO_NA                   0xFF
 
 /*
  * Setup a GPIO pin as input

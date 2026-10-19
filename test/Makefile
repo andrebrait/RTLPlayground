@@ -30,7 +30,8 @@ TESTS = $(BUILDDIR)/test_cmd_editor \
         $(BUILDDIR)/test_httpd_tx \
         $(BUILDDIR)/test_tick_gate \
         $(BUILDDIR)/test_lacp \
-        $(BUILDDIR)/test_golden
+        $(BUILDDIR)/test_golden \
+        $(BUILDDIR)/test_platform_seam
 
 # The table tests link the register mock and one environment file; stub/
 # stands in for the two headers a firmware build generates.
@@ -79,20 +80,31 @@ $(BUILDDIR)/test_httpd_tx: test_httpd_tx.c $(SRCROOT)/httpd/httpd.c $(SRCROOT)/u
 # The seam check: the three shared files (cmd_parser.c, cmd_editor.c,
 # httpd/page_impl.c) compiled with seam_stub/ ahead of every other include
 # path, so the register and SFR headers are poisoned (#error), and linked
-# against platform_mock.c only. It builds once the shared files reach the
-# hardware solely through platform.h. Not part of `run` until that holds.
+# against platform_mock.c only. It builds only while the shared files reach the
+# hardware solely through platform.h.
 # The files are compiled from a copy: a quoted #include is looked up next to
 # the including file before any -I, so in place cmd_parser.c would find the
-# real ../rtl837x_regs.h and never see the poison.
+# real ../rtl837x_regs.h and never see the poison. For the same reason a shared
+# header that includes rtl837x_regs.h itself slips past the stubs; the -MM pass
+# lists every header the copies reach and rejects the hardware ones by path.
+# FORCE: edits to platform.h, the stubs or any header the copies include must
+# not leave a stale binary; the whole check takes about a second.
 SEAM_SHARED = $(SRCROOT)/cmd_parser.c $(SRCROOT)/cmd_editor.c $(SRCROOT)/httpd/page_impl.c
 SEAMDIR     = $(BUILDDIR)/seam
-$(BUILDDIR)/test_platform_seam: test_platform_seam.c platform_mock.c $(SEAM_SHARED) $(SRCROOT)/platform.h | $(BUILDDIR)
+SEAM_COPIES = $(addprefix $(SEAMDIR)/,$(notdir $(SEAM_SHARED)))
+SEAM_CFLAGS = -Iseam_stub $(CFLAGS) -Wno-parentheses -Wno-misleading-indentation -Wno-incompatible-pointer-types
+SEAM_HW     = rtl837x_(regs|sfr)\.h|8051\.h
+$(BUILDDIR)/test_platform_seam: test_platform_seam.c platform_mock.c $(SEAM_SHARED) FORCE | $(BUILDDIR)
 	mkdir -p $(SEAMDIR) && cp $(SEAM_SHARED) $(SEAMDIR)/
-	$(CC) -Iseam_stub $(CFLAGS) -Wno-parentheses -Wno-misleading-indentation -Wno-incompatible-pointer-types \
-		test_platform_seam.c platform_mock.c $(addprefix $(SEAMDIR)/,$(notdir $(SEAM_SHARED))) -o $@ $(LDFLAGS)
+	$(CC) -MM $(SEAM_CFLAGS) $(SEAM_COPIES) > $(SEAMDIR)/deps.txt
+	@if grep -E '$(SEAM_HW)' $(SEAMDIR)/deps.txt; then \
+		echo "seam_check: a shared file reaches a hardware header (listed above)"; exit 1; fi
+	$(CC) $(SEAM_CFLAGS) test_platform_seam.c platform_mock.c $(SEAM_COPIES) -o $@ $(LDFLAGS)
 
 seam_check: $(BUILDDIR)/test_platform_seam
 	$<
+
+FORCE:
 
 run: $(TESTS)
 	@fail=0; for t in $(TESTS); do \
@@ -105,4 +117,4 @@ run: $(TESTS)
 clean:
 	rm -rf $(BUILDDIR)
 
-.PHONY: all run clean seam_check
+.PHONY: all run clean seam_check FORCE

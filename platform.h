@@ -342,6 +342,17 @@ bool port_ingress_filter(__xdata uint8_t port, __xdata vlan_ingress_mode_t type)
 uint16_t port_lag_members_get(uint8_t lag) __banked;
 uint8_t port_lag_of(uint8_t port) __banked;
 void port_lag_members_set(__xdata uint8_t lag, __xdata uint16_t members) __banked;
+/* Bits of the lag hash selector (port_lag_hash_set/get, the `laghash` command). */
+#define LAG_HASH_SOURCE_PORT_NUMBER	0x01
+#define LAG_HASH_L2_SMAC		0x02
+#define LAG_HASH_L2_DMAC		0x04
+#define LAG_HASH_L3_SIP			0x08
+#define LAG_HASH_L3_DIP			0x10
+#define LAG_HASH_L4_SPORT		0x20
+#define LAG_HASH_L4_DPORT		0x40
+#define LAG_HASH_DEFAULT (LAG_HASH_L2_SMAC | LAG_HASH_L2_DMAC | LAG_HASH_L3_SIP | LAG_HASH_L3_DIP | LAG_HASH_L4_SPORT | LAG_HASH_L4_DPORT)
+#define LAG_HASH_RESET (LAG_HASH_SOURCE_PORT_NUMBER | LAG_HASH_L2_SMAC | LAG_HASH_L2_DMAC \
+			| LAG_HASH_L3_SIP | LAG_HASH_L3_DIP | LAG_HASH_L4_SPORT)
 void port_lag_hash_set(__xdata uint8_t lag, __xdata uint8_t hash) __banked;
 // the 32-bit hash control word -> port_buf[0..3], big-endian
 void port_lag_hash_get(uint8_t lag) __banked;
@@ -374,6 +385,9 @@ bool l2_entry_next(void) __banked;
  * 1 = deleted, 0 = nothing deleted (no entry, or the switch's own MAC, which is kept). */
 uint8_t l2_entry_delete(uint16_t idx) __banked;
 void port_l2_static_mgmt(__xdata uint8_t *mac, __xdata uint16_t vlan, __xdata bool remove_entry) __banked;
+
+/* LLDP frames (01-80-C2-00-00-0E): on = trap them to the CPU, else forward them like any multicast. */
+void lldp_trap_set(uint8_t on) __banked;
 
 /* Console commands that only this platform has (raw registers, flash IDs, chip reset...).
  * cmd_parser() calls it with the tokenized line (cmd_buffer, cmd_words_b, cmd_words_len) for

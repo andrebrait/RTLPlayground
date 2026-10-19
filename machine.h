@@ -29,6 +29,9 @@ struct high_leds {
 	uint8_t reserved : 2;
 };
 
+/* Not available GPIO: pin_* of a machine that does not have that pin */
+#define GPIO_NA                   0xFF
+
 struct sfp_port
 {
 	uint8_t pin_detect; // gpio number 0-63, 0xFF = don't have it?

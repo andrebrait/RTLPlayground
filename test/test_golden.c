@@ -339,6 +339,16 @@ static void cmd_with(const char *name, const char *line, void (*pre)(void))
 	golden(name, out_buf, out_len);
 }
 
+/* "lldp on|off" sets only the action field of the RMA 01-80-C2-00-00-0E register; the rest must survive. */
+static void lldp_cmd(const char *name, const char *line)
+{
+	fixture_load();
+	hw_reg_set(RTL837X_RMA0E_CONF, 0x000000cf | 0x300);
+	cli(line);
+	out_len += snprintf(out_buf + out_len, sizeof out_buf - out_len, "rma0e %08x\n", hw_reg_get(RTL837X_RMA0E_CONF));
+	golden(name, out_buf, out_len);
+}
+
 static void sfp_inserted(void) { gpio_pins_low = 1; }	/* pin_detect of both slots is 0 */
 
 /* Both temperature registers set, current one below zero in the _neg variants (the sign branch). */
@@ -543,6 +553,8 @@ int main(void)
 	cmd("cli_flash_x", "flash x");
 	cmd("cli_flash_bare", "flash");
 	cmd("cli_leds", "leds");
+	lldp_cmd("cli_lldp_on", "lldp on");
+	lldp_cmd("cli_lldp_off", "lldp off");
 	cmd("cli_reset", "reset");
 	cmd_with("cli_gpio_changed", "gpio", gpio_changed);
 

@@ -50,6 +50,28 @@ fires — so it drops straight into CI.
 | `test_httpd_tx` | `httpd/httpd.c` + `uip/uip.c` | a GET of a static file against a client that moves its receive window: ACK accounting, continuation chunks out of flash, retransmission |
 | `test_lacp` | `rtl837x_lacp.c` | state machines against a simulated 802.3ad partner: convergence, mis-cabling, expiry, re-election, two groups, delivery by trap |
 | `test_golden` | `cmd_parser.c` + `httpd/page_impl.c` + `rtl837x_port.c`, bandwidth, storm, trap | every JSON page and a set of CLI commands on one register fixture, byte-compared with `golden/*.txt`. Subsystems not linked (PHY, SFP, flash, IGMP, STP, LACP, ...) are stubs in `golden_env.c` that print `[stub:<name>]`. `GOLDEN_UPDATE=1 build/test_golden` rewrites the goldens; review the diff before committing it |
+| `test_platform_seam` | `cmd_parser.c` + `cmd_editor.c` + `httpd/page_impl.c` | the platform seam, see below |
+
+## The platform seam
+`cmd_parser.c`, `cmd_editor.c` and `httpd/page_impl.c` are shared code: they reach
+the hardware only through `../platform.h` (plus their own headers, `httpd.h`, C
+headers and the hardware-free module headers such as `rtl837x_stp.h`).
+`make` runs `test_platform_seam` (`make seam_check` runs just it). It compiles
+copies of the three files with `seam_stub/` first on the include path, where
+`rtl837x_regs.h`, `rtl837x_sfr.h` and `8051.h` are `#error`, and links them with
+`platform_mock.c` alone, so a register access, or a call to a function the platform does not
+declare, fails to compile or link. A header that is included through another header slips past
+the stubs, so `gcc -MM` also lists every header the copies reach and the check fails
+if one of them is `rtl837x_regs.h`, `rtl837x_sfr.h` or `8051.h`. `sfp_pins_last` and the
+other `extern` variables in `platform.h` are state the platform provides, not register access:
+shared code may read and write them.
+
+To add a platform function: declare it in `platform.h` (a `__banked` function takes the first
+argument in the usual way and every further one `__xdata`; a result wider than a byte comes
+back in `port_buf`), implement it in an `rtl837x_*.c` module, add a do-nothing or fixed-value
+definition to `platform_mock.c`, and, if its output matters to a page, a check to
+`test_platform_seam.c`. Never include a register header from a shared file; if a constant is
+needed, move it into `platform.h`.
 
 ## Adding a test for another module
 1. Write `test_<module>.c` with `main()` driving the module's entry points and

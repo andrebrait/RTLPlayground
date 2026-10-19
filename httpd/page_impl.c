@@ -1,18 +1,10 @@
 // #define REGDBG 1
 
-#include "rtl837x_sfr.h"
-#include "rtl837x_common.h"
-#include "rtl837x_regs.h"
+#include "platform.h"
 #include "rtl837x_storm.h"
-#include "rtl837x_port.h"
-#include "rtl837x_flash.h"
-#include "rtl837x_pins.h"
 #include "uip.h"
 #include "html_data.h"
-#include <stdint.h>
-#include "phy.h"
 #include "version.h"
-#include "machine.h"
 #include "page_impl.h"
 #include "syslog.h"
 
@@ -32,7 +24,6 @@ extern __xdata uint16_t session_timeout;
 extern __code const uint8_t * __code const hex;
 extern __xdata uip_ipaddr_t uip_hostaddr, uip_draddr, uip_netmask;
 
-extern __xdata uint8_t sfr_data[4];
 extern __xdata uint8_t vlan_names[VLAN_NAMES_SIZE];
 
 extern __xdata uint8_t cmd_history[CMD_HISTORY_SIZE];
