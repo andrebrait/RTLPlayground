@@ -20,6 +20,9 @@
   - Replace the multi-page UI with a themed single-page app: light, dark and Selenized themes following the browser by default,
     English, Japanese and Chinese, save to flash merges the command log into the startup config and verifies the write,
     firmware images are checked in the browser before upload. #429
+- SNMP
+  - Bounded GETBULK walks, interface administrative state, aliases, error counters
+    and 32-bit multicast/broadcast counters for the optional read-only agent.
 
 ## Changed
 
@@ -46,6 +49,13 @@
 - Health
   - `HEALTH=1` builds no longer write past the phase timing arrays at the LLDP checkpoint, which
     corrupted the `link` slow counter and the DHCP client state. #658
+- Networking
+  - Wildcard UDP listeners reply to the current sender without retaining its
+    address or transmitting stale replies during periodic polls.
+- SNMP
+  - Valid requests exceeding the stored varbind limit return tooBig instead of timing out.
+  - A transient hardware timeout no longer disables monitoring until reboot;
+    reads resume once the SFR engine and statistics selector are idle.
 - Config
   - A startup configuration line longer than the command buffer no longer stops the replay:
     the offending line is skipped and the following lines are still applied.
