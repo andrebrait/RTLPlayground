@@ -198,9 +198,13 @@ static bool sfp_module_read(uint8_t sfp)
 void handle_sfp(void) __banked
 {
 	for (uint8_t sfp = 0; sfp < machine.n_sfp; sfp++) {
-		if (!gpio_pin_test(machine.sfp_port[sfp].pin_detect)) {
-			if (sfp_pins_last & (0x1 << (sfp << 2))) {
-				sfp_pins_last &= ~(0x01 << (sfp << 2));
+		// this slot's bits of sfp_pins_last, see sfp_present() and sfp_los() below
+		uint8_t absent = sfp ? 0x10 : 0x01;
+		uint8_t los = absent << 1;
+
+		if (sfp_present_live(sfp)) {
+			if (sfp_pins_last & absent) {
+				sfp_pins_last &= ~absent;
 				print_string("\n<MODULE INSERTED>  Slot: "); write_char('1' + sfp);
 				sfp_wake_at[sfp] = ticks;
 				sfp_wake_pending[sfp] = 1;
@@ -209,27 +213,40 @@ void handle_sfp(void) __banked
 				sfp_wake_pending[sfp] = 0;
 				if (!sfp_module_read(sfp)) {
 					print_string("SFP: an I2C read failed, retrying on the next poll\n");
-					sfp_pins_last |= 0x01 << (sfp << 2);
+					sfp_pins_last |= absent;
 				}
 			}
 		} else {
-			if (!(sfp_pins_last & (0x1 << (sfp << 2)))) {
-				sfp_pins_last |= 0x01 << (sfp << 2);
+			if (!(sfp_pins_last & absent)) {
+				sfp_pins_last |= absent;
 				sfp_wake_pending[sfp] = 0;
 				print_string("\n<MODULE REMOVED>  Slot: "); write_char('1' + sfp); write_char('\n');
 			}
 		}
 
 		if (!gpio_pin_test(machine.sfp_port[sfp].pin_los)) {
-			if (sfp_pins_last & (0x2 << (sfp << 2))) { // 0x2 0x08
-				sfp_pins_last &= ~(0x02 << (sfp << 2));
+			if (sfp_pins_last & los) {
+				sfp_pins_last &= ~los;
 				print_string("\n<SFP-RX OK>  Slot: "); write_char('1' + sfp); write_char('\n');
 			}
 		} else {
-			if (!(sfp_pins_last & 0x2 << (sfp << 2))) {
-				sfp_pins_last |= 0x02 << (sfp << 2);
+			if (!(sfp_pins_last & los)) {
+				sfp_pins_last |= los;
 				print_string("\n<SFP-RX LOS>  Slot: "); write_char('1' + sfp); write_char('\n');
 			}
 		}
 	}
+}
+
+
+// sfp_pins_last holds one nibble per slot (two slots): bit 0 = no module, bit 1 = loss of signal
+bool sfp_present(uint8_t slot) __banked
+{
+	return !(sfp_pins_last & (slot ? 0x10 : 0x01));
+}
+
+
+bool sfp_los(uint8_t slot) __banked
+{
+	return sfp_pins_last & (slot ? 0x20 : 0x02);
 }

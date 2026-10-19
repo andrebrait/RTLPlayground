@@ -61,8 +61,8 @@ extern __xdata uint8_t sbuf[SBUF_SIZE];
 #define ERR_CMD_TOO_LONG	2
 #define ERR_INVALID_ARGUMENT	3
 
-#define CONFIG_START 0x70000
-#define CONFIG_LEN 0x1000
+// The shared code reads the startup configuration in pages of this size (a uint8_t index walks one)
+#define CONFIG_PAGE_SIZE 0x100
 
 // Constants for the circular command buffer, the size must be 2^n
 #define CMD_HISTORY_SIZE 0x800
@@ -272,6 +272,12 @@ char strcmp(__xdata const uint8_t *a, __code const uint8_t *b);
 bool sfp_read_block(uint8_t slot, uint8_t reg, uint8_t len) __banked __reentrant;
 bool sfp_print_info(uint8_t sfp) __banked;
 void handle_sfp(void) __banked;
+/* SFP cage state. sfp_present() and sfp_los() report the snapshot handle_sfp() keeps in
+ * sfp_pins_last, as the status page shows it. sfp_present_live() reads the detect pin
+ * itself, as the `sfp` command does, so a module pulled since the last poll shows at once. */
+bool sfp_present(uint8_t slot) __banked;
+bool sfp_los(uint8_t slot) __banked;
+bool sfp_present_live(uint8_t slot);
 
 // Flash
 void flash_read_uid(void);
@@ -279,6 +285,17 @@ void flash_read_jedecid(void);
 void flash_read_security(void);
 void flash_read_bulk(__xdata uint8_t *dst);
 __code const char* get_flash_size_str(void);
+
+// Chip temperature, raw in 1/128 C. sensor 0 = now, 1 = at power-on
+int16_t chip_temp_get(uint8_t sensor) __banked;
+
+/* The startup configuration: a NUL-terminated text in a flash area of CONFIG_LEN bytes.
+ * config_read() copies up to len bytes from offset into buf and returns how many it
+ * read: len, clamped to the end of the area. */
+uint16_t config_read(uint16_t offset, __xdata uint8_t * __xdata buf, __xdata uint16_t len) __banked;
+/* Queues len bytes of the area from offset on for the web server to stream after the
+ * packet being built (what did not fit the TCP buffer). */
+void config_stream_rest(uint16_t offset, __xdata uint16_t len) __banked;
 
 // Ports and VLANs
 #define STAT_COUNTER_TX_PKTS	46

@@ -6,6 +6,7 @@
  * Each task that moves hardware access behind platform.h adds its mock here.
  */
 #include "platform.h"
+#include "rtl837x_flash.h"
 
 const struct machine machine = {
 	.machine_name = "SEAMTEST",
@@ -145,3 +146,27 @@ __xdata uint8_t lacp_agg_sys[LACP_NUM_LAGS][MAC_ADDR_LEN], lacp_agg_valid[LACP_N
 
 /* Every port is forwarding (state 3). */
 uint8_t stp_port_state_get(uint8_t log_port) __banked { return 3; }
+
+/* Chip temperature reads raw 0x1a80 = 53.0 C. */
+int16_t chip_temp_get(uint8_t sensor) __banked { return 0x1a80; }
+
+/* An SFP slot holds a module, with receive loss at the last poll. */
+bool sfp_present(uint8_t slot) __banked { return true; }
+bool sfp_los(uint8_t slot) __banked { return true; }
+bool sfp_present_live(uint8_t slot) { return true; }
+
+/* The configuration area holds one line, zeros after it. */
+static const char config_text[] = "hostname seam\n";
+
+uint16_t config_read(uint16_t offset, __xdata uint8_t * __xdata buf, __xdata uint16_t len) __banked
+{
+	if (offset >= CONFIG_LEN)
+		return 0;
+	if (len > CONFIG_LEN - offset)
+		len = CONFIG_LEN - offset;
+	for (uint16_t i = 0; i < len; i++)
+		buf[i] = offset + i < sizeof config_text - 1 ? config_text[offset + i] : 0;
+	return len;
+}
+
+void config_stream_rest(uint16_t offset, __xdata uint16_t len) __banked { }

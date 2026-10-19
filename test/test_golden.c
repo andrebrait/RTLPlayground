@@ -16,6 +16,7 @@
 
 #include "rtl837x_common.h"
 #include "rtl837x_regs.h"
+#include "rtl837x_flash.h"
 #include "rtl837x_port.h"
 #include "rtl837x_lacp.h"
 #include "rtl837x_stp.h"
@@ -48,6 +49,8 @@ extern uint8_t  lacp_port_lag[];
 extern uint8_t  lacp_actor_state[];
 extern struct syslog_state syslog_state;
 extern const char *flash_config;
+extern uint16_t cont_len;
+extern uint32_t cont_addr;
 extern uint64_t gpio_pins_low;
 void phy_mock_reset(void);
 void phy_mock_set(uint8_t phy_id, uint8_t dev_id, uint16_t reg, uint16_t val);
@@ -338,6 +341,78 @@ static void cmd_with(const char *name, const char *line, void (*pre)(void))
 
 static void sfp_inserted(void) { gpio_pins_low = 1; }	/* pin_detect of both slots is 0 */
 
+/* Both temperature registers set, current one below zero in the _neg variants (the sign branch). */
+static void temp_set(void) { hw_reg_set(RTL837X_TM_RESULT, 0x00001a80); hw_reg_set(RTL837X_TM_RESULT_POWERON, 0x00000a40); }
+static void temp_neg(void) { hw_reg_set(RTL837X_TM_RESULT, 0x0000f5c0); hw_reg_set(RTL837X_TM_RESULT_POWERON, 0x0000f600); }
+static void p_basic_info_neg(void) { temp_neg(); send_basic_info(); }
+
+/* The status page with a module in the slot, with and without receive loss, and with the slot empty
+ * but no loss (sfp_pins_last bit 0 = no module, bit 1 = loss; the page reads this debounced snapshot). */
+static void p_status_sfp(uint8_t pins)
+{
+	uint8_t saved = sfp_pins_last;
+	sfp_pins_last = pins;
+	send_status();
+	sfp_pins_last = saved;
+}
+static void p_status_sfp_ok(void)  { p_status_sfp(0x00); }
+static void p_status_sfp_los(void) { p_status_sfp(0x02); }
+static void p_status_sfp_gone(void) { p_status_sfp(0x01); }
+
+/* A config of `nonnul` non-NUL bytes (lines of "igmp show", padded with blank lines), NUL after it.
+ * send_config must send exactly those bytes, streaming what does not fit the TCP buffer through
+ * cont_addr/cont_len; execute_config must run one command per "igmp show" line. The two
+ * configs sit on the edges of the NUL scan: the NUL is the first byte of the second 256-byte
+ * read, and there is no NUL at all. */
+static char cfg_text[CONFIG_LEN + 1];
+static int count_stubs(const char *s)
+{
+	int n = 0;
+	for (; (s = strstr(s, "[stub:igmp_show]")); s++)
+		n++;
+	return n;
+}
+
+static void config_case(const char *name, size_t nonnul)
+{
+	size_t n = 0;
+	while (n + 10 <= nonnul) {
+		memcpy(cfg_text + n, "igmp show\n", 10);
+		n += 10;
+	}
+	while (n < nonnul)
+		cfg_text[n++] = '\n';
+	cfg_text[n] = 0;
+
+	fixture_load();
+	flash_config = "";
+	slen = 0;
+	send_config();
+	uint16_t hdr = slen;
+
+	flash_config = cfg_text;
+	cont_len = 0;
+	cont_addr = 0;
+	slen = 0;
+	send_config();
+	size_t room = TCP_OUTBUF_SIZE - hdr;
+	size_t sent = nonnul < room ? nonnul : room;
+	bool ok = slen == hdr + sent && !memcmp(outbuf + hdr, cfg_text, sent)
+		&& cont_len == nonnul - sent && (!cont_len || cont_addr == CONFIG_START + sent);
+
+	out_reset();
+	execute_config();
+	int cmds = count_stubs(out_buf);
+	tests_run++;
+	if (!ok || cmds != (int)(nonnul / 10)) {
+		printf("  FAIL: %s: slen %u cont_len %u cont_addr %lx, %d commands (want %zu, cont %zu)\n", name,
+		       slen, cont_len, (unsigned long)cont_addr, cmds, hdr + sent, nonnul - sent);
+		failed++;
+		return;
+	}
+	printf("  ok:   %s (%u bytes sent, %u streamed, %d commands)\n", name, slen, cont_len, cmds);
+}
+
 static void cmd(const char *name, const char *line) { cmd_with(name, line, NULL); }
 
 int main(void)
@@ -350,6 +425,10 @@ int main(void)
 	page("send_basic_info", send_basic_info);
 	page("send_basic_info_frac", p_basic_info_frac);
 	page("send_status", send_status);
+	page("send_basic_info_neg", p_basic_info_neg);
+	page("send_status_sfp_ok", p_status_sfp_ok);
+	page("send_status_sfp_los", p_status_sfp_los);
+	page("send_status_sfp_gone", p_status_sfp_gone);
 	page("send_counters", p_counters);
 	page("send_vlan", p_vlan);
 	page("send_vlanlist", send_vlanlist);
@@ -373,6 +452,8 @@ int main(void)
 	page("send_isolation", send_isolation);
 	page("send_mtu", send_mtu);
 	page("send_config", send_config);
+	config_case("config_nul_on_boundary", 256);
+	config_case("config_full_no_nul", CONFIG_LEN);
 
 	cmd("cli_mtu_show", "mtu show");
 	cmd("cli_mirror_status", "mirror status");
@@ -389,6 +470,10 @@ int main(void)
 	cmd("cli_l2", "l2");
 	cmd("cli_stat", "stat");
 	cmd_with("cli_stat_sfp_in", "stat", sfp_inserted);
+	cmd_with("cli_temp", "temp", temp_set);
+	cmd_with("cli_temp_neg", "temp", temp_neg);
+	cmd("cli_sfp", "sfp");
+	cmd_with("cli_sfp_in", "sfp", sfp_inserted);
 	cmd("cli_regget", "regget 0abc");
 	cmd("cli_sds", "sds");
 	cmd("cli_gpio", "gpio");

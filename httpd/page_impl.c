@@ -29,19 +29,14 @@ extern __xdata uint8_t outbuf[TCP_OUTBUF_SIZE];
 extern __xdata uint16_t slen;
 extern __xdata uint16_t management_vlan;
 extern __xdata uint16_t session_timeout;
-extern __xdata uint16_t cont_len;
-extern __xdata uint32_t cont_addr;
 extern __code const uint8_t * __code const hex;
 extern __xdata uip_ipaddr_t uip_hostaddr, uip_draddr, uip_netmask;
 
 extern __xdata uint8_t sfr_data[4];
-extern __xdata uint8_t sfp_pins_last;
 extern __xdata uint8_t vlan_names[VLAN_NAMES_SIZE];
 
 extern __xdata uint8_t cmd_history[CMD_HISTORY_SIZE];
 extern __xdata uint16_t cmd_history_ptr;
-
-extern __xdata struct flash_region_t flash_region;
 
 extern __xdata char sfp_module_vendor[2][17];
 extern __xdata char sfp_module_model[2][17];
@@ -137,10 +132,8 @@ void string_to_html(__code const char *s)
 
 static void temp_to_html(void)
 {
-	int16_t v;
+	int16_t v = chip_temp_get(0);
 
-	reg_read(RTL837X_TM_RESULT);
-	v = SFR_DATA_U16;
 	if (v < 0) {
 		char_to_html('-');
 		v = -v;
@@ -880,7 +873,7 @@ void send_status(void)
 		if (machine.is_sfp[i]) {
 			uint8_t sfp = machine.is_sfp[i] - 1;
 			slen += strtox(outbuf + slen, ",\"isSFP\":1,\"enabled\":");
-			if (!(sfp_pins_last & (0x1 << (sfp << 2)))) {
+			if (sfp_present(sfp)) {
 				bool_to_html(1);
 				slen += strtox(outbuf + slen,",\"sfp_options\":\"0x");
 				byte_to_html(sfp_options[sfp]);
@@ -921,7 +914,7 @@ void send_status(void)
 				if (machine.sfp_port[sfp].pin_los == GPIO_NA) {
 					slen += strtox(outbuf + slen,"null");
 				} else {
-					bool_to_html(sfp_pins_last & (0x2 << (sfp << 2)));
+					bool_to_html(sfp_los(sfp));
 				}
 			} else {
 				bool_to_html(0);
@@ -969,44 +962,36 @@ void send_status(void)
 void send_config(void)
 {
 	dbg_string("send_config called\n");
-	__xdata uint32_t pos = CONFIG_START;
 	__xdata uint16_t valid_len = 0;
-	__xdata uint16_t len_left = CONFIG_LEN;
-	__xdata uint8_t flash_buf[256];
-	
+	__xdata uint16_t n;
+	__xdata uint8_t i;
+	__xdata uint8_t flash_buf[CONFIG_PAGE_SIZE];
+
 	slen = strtox(outbuf, HTTP_RESPONCE_TXT);
-	
-	// Scan through config to find the end of valid data (null terminator)
-	do {
-		flash_region.addr = pos;
-		flash_region.len = (len_left > 256) ? 256 : len_left;
-		flash_read_bulk(flash_buf);
-		
-		// Look for null terminator in this chunk
-		for (uint16_t i = 0; i < flash_region.len; i++) {
+
+	// Scan through config to find the end of valid data (null terminator).
+	// config_read() returns whole pages (CONFIG_LEN is a multiple), which the uint8_t index walks.
+	while (config_read(valid_len, flash_buf, CONFIG_PAGE_SIZE)) {
+		i = 0;
+		do {
 			if (flash_buf[i] == 0) {
 				// Found end of valid data
 				valid_len += i;
 				goto found_end;
 			}
-		}
-		
-		valid_len += flash_region.len;
-		len_left -= flash_region.len;
-		pos += flash_region.len;
-	} while (len_left > 0);
-	
+		} while (++i);
+		valid_len += CONFIG_PAGE_SIZE;
+	}
+
 found_end:
 	// Now send the valid data
 	if (valid_len > (TCP_OUTBUF_SIZE - slen)) {
-		cont_len = valid_len - (TCP_OUTBUF_SIZE - slen);
-		valid_len = TCP_OUTBUF_SIZE - slen;
-		cont_addr = CONFIG_START + valid_len;
+		n = TCP_OUTBUF_SIZE - slen;
+		config_stream_rest(n, valid_len - n);
+		valid_len = n;
 	}
-	
-	flash_region.addr = CONFIG_START;
-	flash_region.len = valid_len;
-	flash_read_bulk(outbuf + slen);
+
+	config_read(0, outbuf + slen, valid_len);
 	slen += valid_len;
 }
 

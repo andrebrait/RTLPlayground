@@ -11,6 +11,7 @@
 #include "rtl837x_common.h"
 #include "rtl837x_port.h"
 #include "machine.h"
+#include "rtl837x_regs.h"
 #include "uip.h"
 #include "rtl837x_flash.h"
 #include "syslog.h"
@@ -143,6 +144,51 @@ uint8_t  sfp_read_reg(uint8_t slot, uint8_t reg) { (void)slot; (void)reg; return
 /* Pins read high (an SFP slot's detect pin high = no module) unless a test drives them low. */
 uint64_t gpio_pins_low;
 bool     gpio_pin_test(uint8_t pin) { return !((gpio_pins_low >> (pin & 63)) & 1); }
+
+/* copied verbatim from rtlplayground.c */
+int16_t chip_temp_get(uint8_t sensor)
+{
+	reg_read(sensor ? RTL837X_TM_RESULT_POWERON : RTL837X_TM_RESULT);
+	return SFR_DATA_U16;
+}
+
+/* copied verbatim from sfp.c */
+bool sfp_present(uint8_t slot)
+{
+	return !(sfp_pins_last & (slot ? 0x10 : 0x01));
+}
+bool sfp_los(uint8_t slot)
+{
+	return sfp_pins_last & (slot ? 0x20 : 0x02);
+}
+
+/* copied verbatim from rtlplayground.c */
+bool sfp_present_live(uint8_t slot)
+{
+	return !gpio_pin_test(machine.sfp_port[slot].pin_detect);
+}
+
+/* copied verbatim from rtl837x_flash.c */
+uint16_t config_read(uint16_t offset, uint8_t *buf, uint16_t len)
+{
+	uint16_t room;
+
+	if (offset >= CONFIG_LEN)
+		return 0;
+	room = CONFIG_LEN - offset;
+	if (len > room)
+		len = room;
+	flash_region.addr = CONFIG_START + offset;
+	flash_region.len = len;
+	flash_read_bulk(buf);
+	return len;
+}
+void config_stream_rest(uint16_t offset, uint16_t len)
+{
+	cont_addr = CONFIG_START + offset;
+	cont_len = len;
+}
+
 /* PHY registers a test has set; every other register reads 0. */
 static struct { uint32_t key; uint16_t val; } phy_regs[32];
 static uint8_t n_phy_regs;

@@ -1,0 +1,5 @@
+temp
+
+Chip temperature: 53.0 C
+At power-on:      20.5 C
+> 

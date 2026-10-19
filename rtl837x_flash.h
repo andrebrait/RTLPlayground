@@ -12,6 +12,13 @@
 #error "FLASH_SECTOR_SIZE must be a multiple of FLASH_PAGE_SIZE"
 #endif
 
+// The startup configuration area in the flash; config_read() reads it.
+#define CONFIG_START 0x70000
+#define CONFIG_LEN 0x1000
+#if CONFIG_LEN % CONFIG_PAGE_SIZE
+#error "CONFIG_LEN not a multiple of CONFIG_PAGE_SIZE"
+#endif
+
 
 void flash_init(uint8_t enable_dio);
 void flash_dump(uint8_t len);

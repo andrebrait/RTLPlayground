@@ -1145,6 +1145,19 @@ bool gpio_pin_test(uint8_t pin)
 }
 
 
+int16_t chip_temp_get(uint8_t sensor) __banked
+{
+	reg_read(sensor ? RTL837X_TM_RESULT_POWERON : RTL837X_TM_RESULT);
+	return SFR_DATA_U16;
+}
+
+
+bool sfp_present_live(uint8_t slot)
+{
+	return !gpio_pin_test(machine.sfp_port[slot].pin_detect);
+}
+
+
 void flash_default_config(void)
 {
 	__xdata uint32_t source = DEFAULT_CONFIG_START;

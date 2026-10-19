@@ -108,5 +108,21 @@ int main(void)
 		return 1;
 	}
 	printf("ok: send_stp reports the STP state through platform.h\n");
+
+	send_basic_info();
+	outbuf[slen < TCP_OUTBUF_SIZE ? slen : TCP_OUTBUF_SIZE - 1] = 0;
+	if (!strstr((const char *)outbuf, "\"chip_temp\":\"53.0 C\"")) {
+		printf("FAIL: send_basic_info: no \"chip_temp\":\"53.0 C\" in:\n%s\n", outbuf);
+		return 1;
+	}
+	printf("ok: send_basic_info reports the chip temperature through platform.h\n");
+
+	send_config();
+	outbuf[slen < TCP_OUTBUF_SIZE ? slen : TCP_OUTBUF_SIZE - 1] = 0;
+	if (!strstr((const char *)outbuf, "\r\n\r\nhostname seam\n") || slen != strlen((const char *)outbuf)) {
+		printf("FAIL: send_config: no config text, exactly, in:\n%s\n", outbuf);
+		return 1;
+	}
+	printf("ok: send_config reads the configuration through platform.h\n");
 	return 0;
 }

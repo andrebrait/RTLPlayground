@@ -1076,7 +1076,7 @@ void parse_sfp(void)
 	if (cmd_words_len == 1) {
 		for (slot = 0; slot < machine.n_sfp; slot++) {
 			print_string("\nSlot "); write_char('1' + slot);
-			if (gpio_pin_test(machine.sfp_port[slot].pin_detect)) {
+			if (!sfp_present_live(slot)) {
 				print_string(" - empty\n");
 				continue;
 			}
@@ -1210,12 +1210,11 @@ err:
 }
 
 
-static void print_temperature(uint16_t reg)
+static void print_temperature(uint8_t sensor)
 {
 	int16_t v;
 
-	reg_read(reg);
-	v = SFR_DATA_U16;
+	v = chip_temp_get(sensor);
 	if (v < 0) {
 		write_char('-');
 		v = -v;
@@ -1230,9 +1229,9 @@ static void print_temperature(uint16_t reg)
 void parse_temp(void)
 {
 	print_string("\nChip temperature: ");
-	print_temperature(RTL837X_TM_RESULT);
+	print_temperature(0);
 	print_string("At power-on:      ");
-	print_temperature(RTL837X_TM_RESULT_POWERON);
+	print_temperature(1);
 }
 
 
@@ -2115,16 +2114,11 @@ void clear_command_history(void) __banked
 }
 
 
-#define FLASH_READ_BURST_SIZE 0x100
 #define PASSWORD "1234"
 
-#if CONFIG_LEN % FLASH_READ_BURST_SIZE
-	#error "CONFIG_LEN not a multiple of FLASH_READ_BURST_SIZE"
-#endif
 void execute_config(void) __banked
 {
-	__xdata uint32_t pos = CONFIG_START;
-	__xdata uint8_t pages_left = CONFIG_LEN / FLASH_READ_BURST_SIZE;
+	__xdata uint16_t offset = 0;
 
 	// Set default password, it can be overwritten in the configuration file
 	strtox(passwd, PASSWORD);
@@ -2132,11 +2126,7 @@ void execute_config(void) __banked
 
 	uint8_t cmd_idx = 0;
 	uint8_t skipping = 0;
-	do {
-		flash_region.addr = pos;
-		flash_region.len = FLASH_READ_BURST_SIZE;
-		flash_read_bulk(flash_buf);
-
+	while (config_read(offset, flash_buf, CONFIG_PAGE_SIZE)) {
 		__xdata uint8_t cfg_idx = 0;
 		uint8_t c = 0;
 		do {
@@ -2172,9 +2162,8 @@ void execute_config(void) __banked
 			}
 		} while (cfg_idx);
 
-		pages_left--;
-		pos += FLASH_READ_BURST_SIZE;
-	} while(pages_left);
+		offset += CONFIG_PAGE_SIZE;
+	}
 
 config_done:
 	// Start saving commands to cmd_history
