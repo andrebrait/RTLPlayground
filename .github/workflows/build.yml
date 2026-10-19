@@ -12,9 +12,16 @@ jobs:
       image: debian:trixie
 
     steps:
+      # debian:trixie has no git; without it actions/checkout falls back to a
+      # tarball (no .git, fetch-depth ignored) and size_guard cannot run.
+      - name: Install git
+        run: apt-get update && apt-get install -y git
+
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+      - name: Trust the workspace for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Install dependencies
         run: |
@@ -32,4 +39,4 @@ jobs:
         run: make clean && make CI=1 MACHINE="KP_9000_6XHML_X2" HEALTH=1
       - name: Size guard against merge base
         if: github.event_name == 'pull_request'
-        run: tools/size_guard.sh $(git merge-base HEAD origin/main)
+        run: tools/size_guard.sh "$(git merge-base HEAD origin/main)"
