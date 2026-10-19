@@ -26,6 +26,7 @@
 #include "uip.h"
 #include "syslog.h"
 #include "cmd_parser.h"
+#include "sfp.h"
 #include "support.h"
 #include "hw_mock.h"
 
@@ -351,6 +352,27 @@ static void lldp_cmd(const char *name, const char *line)
 
 static void sfp_inserted(void) { gpio_pins_low = 1; }	/* pin_detect of both slots is 0 */
 
+/* handle_sfp() polled `polls` times from the snapshot `pins`, the detect and LOS pins driven low (module
+ * in, signal ok) by bit 0 of `low`; ticks advance by the wake delay between polls, the I2C read fails. */
+extern volatile uint32_t ticks;
+extern uint8_t sfp_wake_pending[2];
+static void sfp_poll(const char *name, uint8_t pins, uint64_t low, int polls)
+{
+	uint8_t saved = sfp_pins_last;
+	fixture_load();
+	sfp_pins_last = pins;
+	sfp_wake_pending[0] = 0;
+	gpio_pins_low = low;
+	ticks = 0;
+	for (int i = 0; i < polls; i++) {
+		handle_sfp();
+		out_len += snprintf(out_buf + out_len, sizeof out_buf - out_len, "pins %02x\n", sfp_pins_last);
+		ticks += SFP_WAKE_TICKS;
+	}
+	golden(name, out_buf, out_len);
+	sfp_pins_last = saved;
+}
+
 /* Both temperature registers set, current one below zero in the _neg variants (the sign branch). */
 static void temp_set(void) { hw_reg_set(RTL837X_TM_RESULT, 0x00001a80); hw_reg_set(RTL837X_TM_RESULT_POWERON, 0x00000a40); }
 static void temp_neg(void) { hw_reg_set(RTL837X_TM_RESULT, 0x0000f5c0); hw_reg_set(RTL837X_TM_RESULT_POWERON, 0x0000f600); }
@@ -498,6 +520,8 @@ int main(void)
 	page("send_lag", send_lag);
 	page("send_stp", send_stp);
 	page("send_stp_states", p_stp_states);
+	sfp_poll("handle_sfp_insert", 0xff, 1, 3);
+	sfp_poll("handle_sfp_remove", 0x00, 0, 2);
 	page("send_lacp", send_lacp);
 	page("send_lldp", send_lldp);
 	page("send_eee", send_eee);

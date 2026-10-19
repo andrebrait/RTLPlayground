@@ -340,11 +340,6 @@ uint8_t reg_bit_test(uint16_t addr, char bit)
 	return (sfr_data[3 - (bit >> 3)] >> (bit & 7)) & 1;
 }
 
-void sfr_data_copy(__xdata uint8_t *dst)
-{
-	memcpy(dst, sfr_data, 4);
-}
-
 void sfr_mask_data(uint8_t n, uint8_t mask, uint8_t set)
 {
 	sfr_data[3 - n] = (sfr_data[3 - n] & ~mask) | set;

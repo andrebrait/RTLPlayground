@@ -14,10 +14,6 @@ __xdata struct flash_region_t flash_region;
 __xdata uint32_t flash_size;
 __xdata uint8_t flash_capacity_code;
 
-// Where the web server continues streaming after the packet it is building (httpd.c)
-extern __xdata uint16_t cont_len;
-extern __xdata uint32_t cont_addr;
-
 // For the flash commands, see e.g. Windbond W25Q32JV datasheet
 #define CMD_WRITE_STATUS	0x01
 #define CMD_PAGE_PROGRAM	0x02
@@ -360,27 +356,4 @@ void flash_write_bytes(__xdata uint8_t *ptr)
     
     while (flash_read_status() & STATUS_REG_BUSY_MASK);
     flash_configure_mmio();
-}
-
-
-uint16_t config_read(uint16_t offset, __xdata uint8_t * __xdata buf, __xdata uint16_t len) __banked
-{
-	__xdata uint16_t room;
-
-	if (offset >= CONFIG_LEN)
-		return 0;
-	room = CONFIG_LEN - offset;
-	if (len > room)
-		len = room;
-	flash_region.addr = CONFIG_START + offset;
-	flash_region.len = len;
-	flash_read_bulk(buf);
-	return len;
-}
-
-
-void config_stream_rest(uint16_t offset, __xdata uint16_t len) __banked
-{
-	cont_addr = CONFIG_START + offset;
-	cont_len = len;
 }

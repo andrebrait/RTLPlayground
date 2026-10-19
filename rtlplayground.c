@@ -704,19 +704,6 @@ void sfr_set_zero(void) {
 
 
 /*
- * Copies the 4 sfr data bytes to dst
- */
-void sfr_data_copy(__xdata uint8_t *dst)
-{
-	uint8_t idx = 4;
-	while (idx) {
-		idx -= 1;
-		dst[idx] = sfr_data[idx];
-	}
-}
-
-
-/*
  * Create 32 random number in sfr_data
  */
 void get_random_32(void)
@@ -1142,19 +1129,6 @@ bool gpio_pin_test(uint8_t pin)
 {
 	reg_read_m(RTL837X_REG_GPIO_00_31_INPUT + (pin > 31 ? 4 : 0));
 	return sfr_data[3-((pin >> 3) & 3)] & (1 << (pin & 7));
-}
-
-
-int16_t chip_temp_get(uint8_t sensor) __banked
-{
-	reg_read(sensor ? RTL837X_TM_RESULT_POWERON : RTL837X_TM_RESULT);
-	return SFR_DATA_U16;
-}
-
-
-bool sfp_present_live(uint8_t slot)
-{
-	return !gpio_pin_test(machine.sfp_port[slot].pin_detect);
 }
 
 

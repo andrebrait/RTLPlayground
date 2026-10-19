@@ -18,6 +18,7 @@
 #include "rtl837x_phy.h"
 #include "support.h"
 #include "rtl837x_lacp.h"
+#include "rtl837x_stp.h"
 #include "hw_mock.h"
 #include "rtl837x_sfr.h"
 
@@ -111,11 +112,7 @@ uint16_t cont_len;
 uint32_t cont_addr;
 uint8_t  vlan_names[VLAN_NAMES_SIZE];
 uint16_t vlan_ptr;
-uint8_t  sfp_pins_last = 0xff;
-uint8_t  sfp_options[2];
-char     sfp_module_vendor[2][17];
-char     sfp_module_model[2][17];
-char     sfp_module_serial[2][17];
+extern uint8_t sfp_pins_last;
 char     hostname[24] = "hosttest";
 char     port_names[9][PORT_NAME_SIZE];
 struct flash_region_t flash_region;
@@ -127,6 +124,9 @@ uint16_t lldp_logical_port_status;
 
 uip_ipaddr_t uip_hostaddr, uip_draddr, uip_netmask;
 struct uip_eth_addr uip_ethaddr = { .addr = { 0x02, 0x11, 0x22, 0x33, 0x44, 0x55 } };
+uint8_t  uip_buf[UIP_CONF_BUFFER_SIZE + 2];
+uint16_t uip_len;
+void tcpip_output(void) { }
 
 /* ---- leaf calls into subsystems not under test ---- */
 /* The flash holds the config text at CONFIG_START, NUL-terminated, zeros after it. */
@@ -144,50 +144,6 @@ uint8_t  sfp_read_reg(uint8_t slot, uint8_t reg) { (void)slot; (void)reg; return
 /* Pins read high (an SFP slot's detect pin high = no module) unless a test drives them low. */
 uint64_t gpio_pins_low;
 bool     gpio_pin_test(uint8_t pin) { return !((gpio_pins_low >> (pin & 63)) & 1); }
-
-/* copied verbatim from rtlplayground.c */
-int16_t chip_temp_get(uint8_t sensor)
-{
-	reg_read(sensor ? RTL837X_TM_RESULT_POWERON : RTL837X_TM_RESULT);
-	return SFR_DATA_U16;
-}
-
-/* copied verbatim from sfp.c */
-bool sfp_present(uint8_t slot)
-{
-	return !(sfp_pins_last & (slot ? 0x10 : 0x01));
-}
-bool sfp_los(uint8_t slot)
-{
-	return sfp_pins_last & (slot ? 0x20 : 0x02);
-}
-
-/* copied verbatim from rtlplayground.c */
-bool sfp_present_live(uint8_t slot)
-{
-	return !gpio_pin_test(machine.sfp_port[slot].pin_detect);
-}
-
-/* copied verbatim from rtl837x_flash.c */
-uint16_t config_read(uint16_t offset, uint8_t *buf, uint16_t len)
-{
-	uint16_t room;
-
-	if (offset >= CONFIG_LEN)
-		return 0;
-	room = CONFIG_LEN - offset;
-	if (len > room)
-		len = room;
-	flash_region.addr = CONFIG_START + offset;
-	flash_region.len = len;
-	flash_read_bulk(buf);
-	return len;
-}
-void config_stream_rest(uint16_t offset, uint16_t len)
-{
-	cont_addr = CONFIG_START + offset;
-	cont_len = len;
-}
 
 /* PHY registers a test has set; every other register reads 0. */
 static struct { uint32_t key; uint16_t val; } phy_regs[32];
@@ -209,35 +165,23 @@ void phy_read(uint8_t phy_id, uint8_t dev_id, uint16_t reg)
 }
 void     phy_write(uint8_t phy_id, uint8_t dev_id, uint16_t reg, uint16_t val) { phy_mock_set(phy_id, dev_id, reg, val); }
 void     phy_reset(uint8_t port) { (void)port; }
-uint8_t  stp_port_role(uint8_t port) { (void)port; return 0; }
-uint8_t  stp_port_state(uint8_t port) { (void)port; return 3; }
 
-/* ---- STP state send_stp() prints; the tree is not under test here ---- */
-#include "rtl837x_stp.h"
-struct bridge root_bridge;
-struct bridge stp_dbridge[STP_ENTITIES];
-uint16_t stp_bpdu_age[STP_ENTITIES];
-uint16_t stp_dpid[STP_ENTITIES];
-uint16_t stp_lag_mask[STP_LAG_COUNT];
-uint16_t stp_tc_count;
-uint32_t root_bridge_cost;
-uint32_t stp_dcost[STP_ENTITIES];
-uint32_t stp_pcost[STP_ENTITIES];
-uint8_t  stp_ent_of[10] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
-uint8_t  stp_fwddelay_s = 15, stp_hello_s = 2, stp_maxage_s = 20;
-uint8_t  stp_pflags[STP_ENTITIES];
-uint8_t  stp_pp2p[STP_ENTITIES];
-uint8_t  stp_pprio[STP_ENTITIES];
-uint8_t  stp_prio = 0x80, stp_root_port = 0xff, stp_rstp = 1, stp_txhold = 6;
-/* copied verbatim from rtl837x_stp.c */
-uint8_t stp_port_state_get(uint8_t log_port)
+/* ---- STP, SFP and platform_hw.c are the real firmware units; what they call below themselves ---- */
+volatile uint32_t ticks;
+void sds_config(uint8_t sds, uint8_t mode) { (void)sds; (void)mode; }
+void gpio_input_setup(uint8_t pin) { (void)pin; }
+void gpio_output_setup(uint8_t pin, uint8_t initial_val) { (void)pin; (void)initial_val; }
+/* A firmware boot leaves these; the real units start zeroed, so set what the goldens were pinned against. */
+__attribute__((constructor)) static void firmware_state_init(void)
 {
-	reg_read_m(RTL837X_MSTP_STATES);
-	return (sfr_data[3 - (log_port >> 2)] >> ((log_port << 1) & 0x7)) & 0x3;
+	sfp_pins_last = 0xff;
+	for (uint8_t i = 0; i < STP_PORTS; i++)
+		stp_ent_of[i] = i;
+	stp_fwddelay_s = 15; stp_hello_s = 2; stp_maxage_s = 20;
+	stp_prio = 0x80; stp_root_port = 0xff; stp_rstp = 1; stp_txhold = 6;
 }
 
 /* ---- SFP: no module present, reads fail ---- */
-uint8_t sfp_buf[16];
 bool    sfp_read_block(uint8_t slot, uint8_t reg, uint8_t len) { (void)slot; (void)reg; (void)len; return false; }
 /* copied verbatim from rtlplayground.c */
 void print_phys_port(uint8_t port)

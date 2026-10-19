@@ -16,16 +16,15 @@ harness=r"""
 #define __banked
 #define CONFIG_START 0
 #define CONFIG_LEN 1024
-#define FLASH_READ_BURST_SIZE 256
+#define CONFIG_PAGE_SIZE 256
 #define CMD_BUF_SIZE 64
 #define ERR_OK 0
 #define NUL 0
 #define PASSWORD "test-default"
 uint8_t flash_buf[256],cmd_buffer[64],save_cmd,err_status;
 char passwd[32],image[1024],seen[16][64];int count;
-struct {uint32_t addr;uint16_t len;} flash_region;
 void strtox(char*d,const char*s){strcpy(d,s);}
-void flash_read_bulk(uint8_t*d){memcpy(d,image+flash_region.addr,256);}
+uint16_t config_read(uint16_t o,uint8_t*b,uint16_t n){if(o>=CONFIG_LEN)return 0;memcpy(b,image+o,n);return n;}
 void print_string(const char*s){(void)s;}
 void print_string_x(uint8_t*s){(void)s;}
 void write_char(char c){(void)c;}

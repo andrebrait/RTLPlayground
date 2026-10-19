@@ -1,0 +1,6 @@
+
+<MODULE REMOVED>  Slot: 1
+
+<SFP-RX LOS>  Slot: 1
+pins 03
+pins 03

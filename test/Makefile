@@ -37,6 +37,7 @@ TESTS = $(BUILDDIR)/test_cmd_editor \
 # stands in for the two headers a firmware build generates.
 TABLE_ENV = support.c hw_mock.c env_tables.c $(SRCROOT)/cmd_editor.c \
             $(SRCROOT)/rtl837x_port.c $(SRCROOT)/rtl837x_bandwidth.c $(SRCROOT)/rtl837x_storm.c \
+            $(SRCROOT)/platform_hw.c $(SRCROOT)/sfp.c $(SRCROOT)/rtl837x_stp.c \
             $(SRCROOT)/httpd/page_impl.c
 
 all: run
@@ -48,14 +49,15 @@ $(BUILDDIR):
 $(BUILDDIR)/test_cmd_editor: test_cmd_editor.c support.c $(SRCROOT)/cmd_editor.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
 
-# rtl837x_port.c, the bandwidth and storm units and httpd/page_impl.c are compiled UNMODIFIED from the firmware tree.
-$(BUILDDIR)/test_port_tables: test_port_tables.c $(TABLE_ENV) hw_mock.h | $(BUILDDIR)
+# The firmware units listed in TABLE_ENV are compiled UNMODIFIED from the firmware tree; cmd_env.c
+# only stands in for the command tokenizer rtl837x_stp.c links against (test_golden links the real one).
+$(BUILDDIR)/test_port_tables: test_port_tables.c $(TABLE_ENV) cmd_env.c hw_mock.h | $(BUILDDIR)
 	$(CC) $(CFLAGS) -Wno-incompatible-pointer-types $(filter %.c,$^) -o $@ $(LDFLAGS)
 
 $(BUILDDIR)/test_tick_gate: test_tick_gate.c support.c $(SRCROOT)/cmd_editor.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
 
-$(BUILDDIR)/test_page_json: test_page_json.c $(TABLE_ENV) hw_mock.h | $(BUILDDIR)
+$(BUILDDIR)/test_page_json: test_page_json.c $(TABLE_ENV) cmd_env.c hw_mock.h | $(BUILDDIR)
 	$(CC) $(CFLAGS) -Wno-incompatible-pointer-types $(filter %.c,$^) -o $@ $(LDFLAGS)
 
 # cmd_parser.c, the trap unit and the table environment are compiled UNMODIFIED; golden_env.c stubs what the parser
@@ -112,6 +114,9 @@ run: $(TESTS)
 		$$t || fail=1; \
 		echo; \
 	done; \
+	echo "=== test_startup_crlf.py ==="; \
+	python3 test_startup_crlf.py || fail=1; \
+	echo; \
 	if [ $$fail -ne 0 ]; then echo "TESTS FAILED"; exit 1; else echo "ALL TESTS PASSED"; fi
 
 clean:

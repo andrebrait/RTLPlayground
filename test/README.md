@@ -26,9 +26,14 @@ fires — so it drops straight into CI.
   Nothing ever reports busy, so a polling loop runs once. The header states the
   VLAN and L2 entry layouts independently of the firmware, so a test can hold
   what `rtl837x_port.c` writes against what `page_impl.c` reads.
-- **`env_tables.c`** carries the globals and leaf calls those two modules link
-  against; **`stub/`** stands in for the two headers only a firmware build
-  generates, so the harness needs no SDCC build first.
+- **`env_tables.c`** carries the globals and leaf calls the table, STP, SFP and
+  page modules link against (console, machine description, `flash_read_bulk`,
+  GPIO and PHY reads); the firmware units themselves (`rtl837x_stp.c`, `sfp.c`,
+  `platform_hw.c`) are compiled unmodified, never copied. `cmd_env.c` stands in
+  for the CLI tokenizer in the two table tests. `rtl837x_flash.c` cannot be linked
+  on the host (SFR flash controller), so `config_read`/`config_stream_rest` live in
+  `platform_hw.c`, which can. **`stub/`** stands in for the two headers only a
+  firmware build generates, so the harness needs no SDCC build first.
 - **`support.c` / `support.h`** mock the hardware edges: the 16-byte serial ring
   (`sbuf`), the command/history buffers, and the character-output sink
   (`write_char` etc.). Buffers are sized **exactly** as on target, so ASan
@@ -49,7 +54,8 @@ fires — so it drops straight into CI.
 | `test_page_json` | `httpd/page_impl.c` + `rtl837x_port.c` | `/vlan.json`, `/vlanlist`, `/l2.json` (walk, wrap marker, paging inside `outbuf`), 64-bit counters in `/status.json` and `/counters.json` |
 | `test_httpd_tx` | `httpd/httpd.c` + `uip/uip.c` | a GET of a static file against a client that moves its receive window: ACK accounting, continuation chunks out of flash, retransmission |
 | `test_lacp` | `rtl837x_lacp.c` | state machines against a simulated 802.3ad partner: convergence, mis-cabling, expiry, re-election, two groups, delivery by trap |
-| `test_golden` | `cmd_parser.c` + `httpd/page_impl.c` + `rtl837x_port.c`, bandwidth, storm, trap | every JSON page and a set of CLI commands on one register fixture, byte-compared with `golden/*.txt`. Subsystems not linked (PHY, SFP, flash, IGMP, STP, LACP, ...) are stubs in `golden_env.c` that print `[stub:<name>]`. `GOLDEN_UPDATE=1 build/test_golden` rewrites the goldens; review the diff before committing it |
+| `test_golden` | `cmd_parser.c` + `httpd/page_impl.c` + `rtl837x_port.c`, bandwidth, storm, trap, STP, SFP, `platform_hw.c` | every JSON page and a set of CLI commands on one register fixture, byte-compared with `golden/*.txt`, plus `handle_sfp()` insert/remove polls. Subsystems not linked (PHY, flash, IGMP, LACP, ...) are stubs in `golden_env.c` that print `[stub:<name>]`. `GOLDEN_UPDATE=1 build/test_golden` rewrites the goldens; review the diff before committing it |
+| `test_startup_crlf.py` | `cmd_parser.c` (`execute_config`, extracted and compiled with a mocked `config_read`) | CR, LF, CRLF, comments, NUL, overlong lines and flash-page boundaries in the startup config; `make` runs it after the binaries |
 | `test_platform_seam` | `cmd_parser.c` + `cmd_editor.c` + `httpd/page_impl.c` | the platform seam, see below |
 
 ## The platform seam

@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "rtl837x_flash.h"
 #include "rtl837x_common.h"
 #include "rtl837x_regs.h"
 #include "rtl837x_port.h"
@@ -166,6 +167,25 @@ static void t_lag(void)
 	CHECK((hw_reg_get(RTL837X_TRK_HASH_CTRL_BASE + 8) & 0xff) == 0x06, "a hash already set is kept");
 }
 
+extern const char *flash_config;
+extern struct flash_region_t flash_region;
+extern uint32_t cont_addr;
+extern uint16_t cont_len;
+
+static void t_config_read(void)
+{
+	uint8_t buf[256];
+	printf("[test] config_read: offset into the config area, cut at its end\n");
+	flash_config = "0123456789abcdef";
+	CHECK(config_read(4, buf, 8) == 8 && !memcmp(buf, "456789ab", 8), "reads from the given offset");
+	CHECK(flash_region.addr == CONFIG_START + 4 && flash_region.len == 8, "and asks the flash for exactly that region");
+	CHECK(config_read(CONFIG_LEN - 16, buf, 64) == 16 && flash_region.len == 16, "a read past the end is cut to the room left");
+	CHECK(config_read(CONFIG_LEN, buf, 8) == 0, "a read at the end returns nothing");
+	config_stream_rest(32, 100);
+	CHECK(cont_addr == CONFIG_START + 32 && cont_len == 100, "the web server continues at the offset it was given");
+	flash_config = "";
+}
+
 int main(void)
 {
 	printf("== rtl837x_port.c table tests ==\n");
@@ -176,6 +196,7 @@ int main(void)
 	t_static_mgmt();
 	t_flush();
 	t_lag();
+	t_config_read();
 	printf("\n%d checks, %d failed\n", tests_run, tests_failed);
 	return tests_failed ? 1 : 0;
 }

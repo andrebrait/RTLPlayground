@@ -1,8 +1,8 @@
 /*
  * golden_env.c - what cmd_parser.c links against beyond env_tables.c and the
  * register mock: the subsystems it dispatches into that are not under test
- * here (PHY, SFP, flash, IGMP, STP, LACP, cable test, LEDs, DHCP, DNS, NTP,
- * syslog). Each stub prints a fixed marker, so a golden still shows that a
+ * here (PHY, flash, IGMP, LACP, cable test, LEDs, DHCP, DNS, NTP, syslog; SFP
+ * and STP are the real units). Each stub prints a fixed marker, so a golden still shows that a
  * command reached its handler.
  */
 #include <stdint.h>
@@ -26,7 +26,6 @@ char                 passwd[21];
 uint8_t              flash_buf[FLASH_BUF_SIZE];
 struct dhcp_state    dhcp_state;
 struct phy_settings  phy_settings;
-uint8_t              sfp_speed[2];
 extern struct flash_region_t flash_region;
 
 static void mark(const char *name)
@@ -51,8 +50,6 @@ void flash_read_security(void)
 void phy_set_speed(void)               { mark("phy_set_speed"); }
 void phy_set_duplex(void)              { mark("phy_set_duplex"); }
 void phy_show(uint8_t port)            { mark("phy_show"); }
-bool sfp_print_info(uint8_t sfp)       { mark("sfp_print_info"); return false; }
-void handle_sfp(void)                  { mark("handle_sfp"); }
 /* the SerDes accessors print their arguments, so "sdsget"/"sdsset" pin what they pass on */
 void sds_read(uint8_t sds_id, uint8_t page, uint8_t reg)
 {
@@ -73,7 +70,6 @@ void lacp_lag_set(uint8_t lag, uint16_t ports) { mark("lacp_lag_set"); }
 void leds_dump(void)                   { mark("leds_dump"); }
 void cabletest_run(void)               { mark("cabletest_run"); }
 void cabletest_show(void)              { mark("cabletest_show"); }
-void stp_parse(void)                   { mark("stp_parse"); }
 void dhcp_start(void)                  { mark("dhcp_start"); }
 void dhcp_stop(void)                   { mark("dhcp_stop"); }
 void dns_parse(void)                   { mark("dns_parse"); }
