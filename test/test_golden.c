@@ -326,6 +326,33 @@ static void l2_delete_keeps_own_mac(void)
 	printf("  ok:   l2_delete_keeps_own_mac\n");
 }
 
+/* An entry that differs from the switch's MAC in exactly one byte is another station's: the page says 1 and
+ * the entry's port and static words are cleared (a delete rewrites the entry, it does not drop the slot). */
+static void l2_delete_near_miss(void)
+{
+	static const uint8_t pos[] = { 0, 3, 5 };
+	for (unsigned i = 0; i < sizeof pos; i++) {
+		uint8_t mac[6];
+		memcpy(mac, uip_ethaddr.addr, 6);
+		mac[pos[i]] ^= 0x10;	/* not bit 0: that is the multicast bit of byte 0 */
+		fixture_load();
+		hw_l2_put(0x030, mac, 1, CPU_PORT, true);
+		const struct hw_l2 *e = hw_l2_find(mac, 1);
+		struct hw_l2 before = *e;
+		slen = 0;
+		l2_delete(before.idx);
+		outbuf[slen] = 0;
+		e = hw_l2_find(mac, 1);
+		tests_run++;
+		if (!strstr((const char *)outbuf, "{\"result\":1}") || !e || e->b == before.b || e->c != 0) {
+			printf("  FAIL: l2_delete_near_miss: entry differing in byte %u was not deleted\n", pos[i]);
+			failed++;
+			return;
+		}
+	}
+	printf("  ok:   l2_delete_near_miss\n");
+}
+
 static void cmd_with(const char *name, const char *line, void (*pre)(void))
 {
 	fixture_load();
@@ -349,6 +376,41 @@ static void lldp_cmd(const char *name, const char *line)
 	out_len += snprintf(out_buf + out_len, sizeof out_buf - out_len, "rma0e %08x\n", hw_reg_get(RTL837X_RMA0E_CONF));
 	golden(name, out_buf, out_len);
 }
+
+/* A command's effect on one register, from a cleared register, against the word it must leave there. */
+static void reg_after(const char *name, const char *line, uint16_t reg, uint32_t want)
+{
+	fixture_load();
+	hw_reg_set(reg, 0);
+	cli(line);
+	tests_run++;
+	if (hw_reg_get(reg) != want) {
+		printf("  FAIL: %s: register %04x is %08x, want %08x\n", name, reg, hw_reg_get(reg), want);
+		failed++;
+		return;
+	}
+	printf("  ok:   %s\n", name);
+}
+
+/* One port per advertisement column pattern, so each of the six columns has its own
+ * signature over ports 1-3 and swapping any two of them changes some port's string:
+ * columns 2.5G 1G 100F 100H 10F 10H -> ports (A,B,C) 001 010 100 011 101 110. */
+static void adv_distinct(void)
+{
+	phy_mock_set(0, PHY_MMD_AN, PHY_ANEG_MGBASE_CTRL, 0x0000);
+	phy_mock_set(0, PHY_MMD31, PHY_MMD31_GBCR, 0x0000);
+	phy_mock_set(0, PHY_MMD_AN, PHY_ANEG_ADV, 0x0560);	/* 100F 10F 10H, pause bits as noise */
+	phy_mock_set(1, PHY_MMD_AN, PHY_ANEG_MGBASE_CTRL, 0x0000);
+	phy_mock_set(1, PHY_MMD31, PHY_MMD31_GBCR, 0x0200);
+	phy_mock_set(1, PHY_MMD_AN, PHY_ANEG_ADV, 0x00a0);	/* 1G 100H 10H */
+	phy_mock_set(2, PHY_MMD_AN, PHY_ANEG_MGBASE_CTRL, 0x0080);
+	phy_mock_set(2, PHY_MMD31, PHY_MMD31_GBCR, 0x0000);
+	phy_mock_set(2, PHY_MMD_AN, PHY_ANEG_ADV, 0x00c0);	/* 2.5G 100H 10F */
+}
+static void p_status_adv(void) { adv_distinct(); send_status(); }
+
+/* A trunk hash word with four distinct bytes, so a reader that drops or reorders one shows. */
+static void p_lag_hash_wide(void) { hw_reg_set(RTL837X_TRK_HASH_CTRL_BASE, 0x12345678); send_lag(); }
 
 static void sfp_inserted(void) { gpio_pins_low = 1; }	/* pin_detect of both slots is 0 */
 
@@ -502,6 +564,7 @@ int main(void)
 	page("send_basic_info", send_basic_info);
 	page("send_basic_info_frac", p_basic_info_frac);
 	page("send_status", send_status);
+	page("send_status_adv", p_status_adv);
 	page("send_basic_info_neg", p_basic_info_neg);
 	page("send_status_sfp_ok", p_status_sfp_ok);
 	page("send_status_sfp_los", p_status_sfp_los);
@@ -512,16 +575,20 @@ int main(void)
 	page("send_l2", p_l2);
 	page("l2_delete", p_l2_delete);
 	l2_delete_keeps_own_mac();
+	l2_delete_near_miss();
 	page("send_l2_high", p_l2_high);
 	page("l2_delete_static", p_l2_delete_static);
 	page("l2_delete_empty", p_l2_delete_empty);
 	page("send_mirror", send_mirror);
 	page("send_mirror_asym", p_mirror_asym);
 	page("send_lag", send_lag);
+	page("send_lag_hash_wide", p_lag_hash_wide);
 	page("send_stp", send_stp);
 	page("send_stp_states", p_stp_states);
 	sfp_poll("handle_sfp_insert", 0xff, 1, 3);
 	sfp_poll("handle_sfp_remove", 0x00, 0, 2);
+	reg_after("regset_readback", "regset 0abc 12345678", 0x0abc, 0x12345678);
+	reg_after("mtu_packing", "mtu 1 9003", RTL8373_REG_MAC_L2_PORT_MAX_LEN, 0x08cae32b);	/* 9003 = 0x232b: both low bits set */
 	page("send_lacp", send_lacp);
 	page("send_lldp", send_lldp);
 	page("send_eee", send_eee);
