@@ -71,8 +71,8 @@ void config_startup(void);
  * be stored (nothing changed). */
 bool config_save(const uint8_t *text, size_t len);
 
-/* Ports (ports.c): opens the broadcast/multicast frame counters of every port of the board and takes
- * the power-on chip temperature. Call once, before the startup configuration runs. */
+/* Ports (ports.c): takes the power-on chip temperature. Call once, before the startup
+ * configuration runs. */
 void ports_init(void);
 
 #endif

@@ -94,12 +94,18 @@ $(OUT)/version.h: FORCE | $(OUT)
 		"#endif" > $@.tmp
 	@cmp -s $@.tmp $@ && rm -f $@.tmp || mv $@.tmp $@
 
-# test_linkcode includes only linkcode.h: no board, no shared code.
+# The unit tests include only the pure headers (linkcode.h, mibmap.h, portlogic.h): no board, no
+# shared code, no NIC. test_linkcode is plain C; the others need platform.h and the shim.
+UNIT = test_linkcode test_mibmap test_portlogic
 $(OUT)/test_linkcode: test/test_linkcode.c linkcode.h | $(OUT)
 	$(CC) -std=gnu11 -O1 -Wall -Wextra -Werror -D_GNU_SOURCE -I. $< -o $@
+$(OUT)/test_mibmap: test/test_mibmap.c mibmap.h | $(OUT) $(OUT)/version.h
+	$(CC) $(CFLAGS) $< -o $@
+$(OUT)/test_portlogic: test/test_portlogic.c portlogic.h | $(OUT) $(OUT)/version.h
+	$(CC) $(CFLAGS) $< -o $@
 
-test: all $(OUT)/test_linkcode
-	$(OUT)/test_linkcode
+test: all $(addprefix $(OUT)/,$(UNIT))
+	@for t in $(UNIT); do $(OUT)/$$t || exit 1; done
 	sh test/console_test.sh
 
 clean:

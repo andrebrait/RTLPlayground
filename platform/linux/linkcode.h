@@ -4,6 +4,9 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+/* The names of the codes, as LINKS of html/app.js:735 has them. */
+static const char *const link_names[8] = { "Down", "10M", "100M", "1000M", "500M", "10G", "2.5G", "5G" };
+
 /* What port_link_get() returns, from the carrier and the ethtool speed in Mb/s (0xffffffff =
  * SPEED_UNKNOWN): 0 = down, else the index into LINKS of html/app.js:735
  * ["Down","10M","100M","1000M","500M","10G","2.5G","5G"]. A speed the UI has no name for (an
