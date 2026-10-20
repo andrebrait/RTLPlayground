@@ -50,28 +50,72 @@ function clearExtras(){
 }
 
 var VARIANTS={
-  // A: two columns, toggle plus live state; details stay in the port pop-up
+  // A: one column per feature: switch plus live state, advertised/partner flags underneath
   A:function(){
     setHead(BASE.map(function(s){return[s]}).concat([[t("nav_fc")],[t("nav_eee")],[""]]));
+    function sub(a,b){return h("div",{class:"small mut",style:"margin-top:3px;line-height:1.35",html:esc(t("e_adv"))+": "+esc(a)+"<br>"+esc(t("e_lp"))+": "+esc(b)})}
     S.ports.forEach(function(p){
+      var f=FC[p.portNum],e=EEE[p.portNum];
       baseRow($("ptable").tBodies[0],p,{before:function(tr){
-        cellWith(tr,p.isSFP?[badge(t("e_na"))," ",fcNeg(p)]:[sw(FC[p.portNum]&1)," ",fcNeg(p)]);
-        cellWith(tr,p.isSFP?[badge(t("e_na"))]:[sw(parseInt(EEE[p.portNum].adv,2))," ",eeeSt(p)]);
+        var c=cellWith(tr,p.isSFP?[badge(t("e_na"))," ",fcNeg(p)]:[sw(f&1)," ",fcNeg(p)]);
+        if(!p.isSFP)c.appendChild(sub(fcFlags(f&3),fcFlags(f>>2&3)));
+        c=cellWith(tr,p.isSFP?[badge(t("e_na"))]:[sw(parseInt(e.adv,2))," ",eeeSt(p)]);
+        if(!p.isSFP)c.appendChild(sub(eeeFlags(e.adv),eeeFlags(e.lp)));
       }});
     });
   },
-  // B: grouped header, separate state/enable sub-columns
+  // B: grouped headers, every flag in its own column (both current pages side by side)
   B:function(){
-    setHead(BASE.map(function(s){return[s,{rowspan:2}]}).concat([[t("nav_fc"),{colspan:2,style:"text-align:center;border-bottom:0"}],[t("nav_eee"),{colspan:2,style:"text-align:center;border-bottom:0"}],["",{rowspan:2}]]),
-      [t("fc_neg"),t("c_enabled"),t("e_active"),t("c_enabled")]);
+    var g={colspan:4,style:"text-align:center;border-bottom:0;border-left:1px solid var(--bd)"};
+    setHead(BASE.map(function(s){return[s,{rowspan:2}]}).concat([[t("nav_fc"),g],[t("nav_eee"),g],["",{rowspan:2}]]),
+      [t("e_adv"),t("e_lp"),t("fc_neg"),t("c_enabled"),t("e_adv"),t("e_lp"),t("e_active"),t("c_enabled")]);
+    var r2=$("ptable").tHead.rows[1].cells;r2[0].style.borderLeft=r2[4].style.borderLeft="1px solid var(--bd)";
     S.ports.forEach(function(p){
+      var f=FC[p.portNum],e=EEE[p.portNum],dash=function(){return h("span",{class:"mut",text:"-"})};
       baseRow($("ptable").tBodies[0],p,{before:function(tr){
+        cellWith(tr,[p.isSFP?"-":fcFlags(f&3)]).style.borderLeft="1px solid var(--bd)";
+        cellWith(tr,[p.isSFP?"-":fcFlags(f>>2&3)]);
         cellWith(tr,[fcNeg(p)]);
-        cellWith(tr,[p.isSFP?h("span",{class:"mut",text:"-"}):sw(FC[p.portNum]&1)]);
+        cellWith(tr,[p.isSFP?dash():sw(f&1)]);
+        cellWith(tr,[p.isSFP?"-":eeeFlags(e.adv)]).style.borderLeft="1px solid var(--bd)";
+        cellWith(tr,[p.isSFP?"-":eeeFlags(e.lp)]);
         cellWith(tr,[eeeSt(p)]);
-        cellWith(tr,[p.isSFP?h("span",{class:"mut",text:"-"}):sw(parseInt(EEE[p.portNum].adv,2))]);
+        cellWith(tr,[p.isSFP?dash():sw(parseInt(e.adv,2))]);
       }});
     });
+  },
+  // E: one card per port instead of a table row; aimed at phones
+  E:function(){
+    setHead(BASE.map(function(s){return[s]}).concat([[""]]));
+    var wrap=$("ptable").closest(".scrollx");wrap.style.display="none";
+    var list=h("div",{class:"mockx",style:"display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px"});
+    function kv(k,v){return[h("span",{class:"mut small",text:k}),typeof v==="string"?h("span",{html:v}):v]}
+    function grid(rows,cols){var g=h("div",{style:"display:grid;grid-template-columns:"+(cols||"auto 1fr")+";gap:6px 10px;align-items:center"});rows.forEach(function(r){kv(r[0],r[1]).forEach(function(e){g.appendChild(e)})});return g}
+    function sec(title,on,state,rows,sfp){
+      var body=h("div",{style:"line-height:1.35"});
+      rows.forEach(function(r){body.appendChild(h("div",{class:"mut small",text:r[0]}));body.appendChild(h("div",{style:"margin-bottom:4px",text:r[1]}))});
+      return h("div",{style:"min-width:0"},[
+        h("div",{style:"display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-weight:600;margin-bottom:4px"},[sfp?h("span",{html:badge(t("e_na"))}):sw(on),h("span",{text:title}),h("span",{html:state})]),
+        body]);
+    }
+    S.ports.forEach(function(p){
+      var i=p.portNum-1,f=FC[p.portNum],e=EEE[p.portNum];
+      var spd=h("select",{class:"in"});
+      (p.isSFP?SFPRATES:SPEEDS).forEach(function(o){spd.appendChild(h("option",{value:o[0],text:speedLabel(o[1])}))});
+      var mtu=h("input",{class:"in",type:"number",style:"width:100%;box-sizing:border-box",value:i%2?"1522":"16383"});
+      spd.style.width="100%";
+      list.appendChild(h("div",{style:"border:1px solid var(--bd);border-radius:8px;padding:10px 12px"},[
+        h("div",{style:"display:flex;gap:8px;align-items:center;margin-bottom:8px"},[
+          h("b",{style:"white-space:nowrap",text:t("c_port")+" "+p.portNum+(p.isSFP?" (SFP)":"")}),h("span",{html:linkBadge(p)}),
+          h("span",{class:"mut small",text:t("pt_conn")+": "+(parseInt(p.macs,16)&0x1fff)}),
+          h("span",{style:"flex:1"}),sw(p.enabled),h("button",{class:"ctl",text:t("c_apply")})]),
+        grid([[t("c_name"),h("input",{class:"in",style:"width:100%;box-sizing:border-box",placeholder:"-"})],[t("pt_speed"),spd],[t("pt_mtu"),mtu]]),
+        h("div",{style:"display:grid;grid-template-columns:1fr 1fr;gap:12px;border-top:1px solid var(--bd);padding-top:8px;margin-top:8px"},[
+          sec(t("nav_fc"),f&1,fcNeg(p),[[t("e_adv"),p.isSFP?"-":fcFlags(f&3)],[t("e_lp"),p.isSFP?"-":fcFlags(f>>2&3)]],p.isSFP),
+          sec(t("nav_eee"),parseInt(e.adv,2),eeeSt(p),[[t("e_adv"),p.isSFP?"-":eeeFlags(e.adv)],[t("e_lp"),p.isSFP?"-":eeeFlags(e.lp)]],p.isSFP)]),
+      ]));
+    });
+    wrap.after(list);
   },
   // C: Ports page keeps its table; a second card on the same page merges the EEE and flow control pages
   C:function(){
