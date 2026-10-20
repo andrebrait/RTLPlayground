@@ -9,9 +9,11 @@
 BIN=${RTLP_BIN:-$(dirname "$0")/../output/test/rtlplayground}	# the test build: --dump-state is one of its hooks
 TMP=$(mktemp -d) || exit 1
 # As root the daemon creates swbr and starts a DHCP client: it must run in a namespace of its own.
-# A root container therefore needs permission to unshare a network namespace.
+# Where a root container may not unshare a network namespace, it runs in the current one instead.
 ISOLATE=
-[ "$(id -u)" = 0 ] && ISOLATE="unshare -n"
+if [ "$(id -u)" = 0 ]; then
+	if unshare -n true 2>/dev/null; then ISOLATE="unshare -n"; else echo "note: cannot unshare a network namespace here; running in the current one" >&2; fi
+fi
 caller_bridge=$(ip -d -o link show swbr 2>/dev/null)
 trap 'rm -rf "$TMP"' EXIT
 fail=0
