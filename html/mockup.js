@@ -218,7 +218,7 @@ function detailsList(p,withSw){
   return d;
 }
 function toggleBtn(open,label){return h("button",{class:"ctl",style:"white-space:nowrap",text:(label?label+" ":"")+(open?"\u25b4":"\u25be")})}
-function advBtn(p){return h("button",{class:"ctl",text:"Advanced\u2026",onclick:function(){modal(t("c_port")+" "+p.portNum+": Advanced",detailsList(p,true),[h("button",{class:"pri",text:t("c_apply")})])}})}
+function advBtn(p){return h("button",{class:"ctl",text:"Advanced\u2026",onclick:function(){modal(t("c_port")+" "+p.portNum+": Advanced",detailsList(p,true),[h("button",{class:"ctl pri",text:t("c_apply")})])}})}
 // Phone card: one row per setting, label left of value
 function card(p,extra){
   var spd=h("select",{class:"in",style:"width:100%"});
@@ -256,7 +256,7 @@ VARIANTS.F=function(){
 VARIANTS.G=function(){
   setHead(BASE.map(function(s){return[s]}).concat([[""],[""]]));
   S.ports.forEach(function(p){baseRow($("ptable").tBodies[0],p,{before:function(tr){tr.insertCell().appendChild(advBtn(p))}})});
-  modal(t("c_port")+" 1: Advanced",(function(){var d=h("div");d.appendChild(detailsTable(S.ports[0],true));return d})(),[h("button",{class:"pri",text:t("c_apply")})]);
+  modal(t("c_port")+" 1: Advanced",(function(){var d=h("div");d.appendChild(detailsTable(S.ports[0],true));return d})(),[h("button",{class:"ctl pri",text:t("c_apply")})]);
 };
 // M: phone version of F: flow control and EEE as rows, details expand in the card
 VARIANTS.M=function(){
@@ -273,7 +273,7 @@ VARIANTS.M=function(){
 // N: phone version of G: Advanced button opens the modal
 VARIANTS.N=function(){
   cardList(function(p){return[h("div",{style:"border-top:1px solid var(--bd);padding-top:8px;margin-top:8px"},[advBtn(p)])]});
-  modal(t("c_port")+" 1: Advanced",detailsList(S.ports[0],true),[h("button",{class:"pri",text:t("c_apply")})]);
+  modal(t("c_port")+" 1: Advanced",detailsList(S.ports[0],true),[h("button",{class:"ctl pri",text:t("c_apply")})]);
 };
 // Link speed details: separate from flow control/EEE, behind an info button next to the link badge
 var LINKINFO=false;
@@ -332,7 +332,7 @@ function statusCells(tr,p){cellWith(tr,[fcNeg(p)]);cellWith(tr,[eeeSt(p)])}
 VARIANTS.G2=function(){
   statusHead();
   S.ports.forEach(function(p){baseRow($("ptable").tBodies[0],p,{before:function(tr){statusCells(tr,p);tr.insertCell().appendChild(advBtn(p))}})});
-  modal(t("c_port")+" 1: Advanced",(function(){var d=h("div");d.appendChild(detailsTable(S.ports[0],true));return d})(),[h("button",{class:"pri",text:t("c_apply")})]);
+  modal(t("c_port")+" 1: Advanced",(function(){var d=h("div");d.appendChild(detailsTable(S.ports[0],true));return d})(),[h("button",{class:"ctl pri",text:t("c_apply")})]);
 };
 VARIANTS.H2=function(){
   statusHead();
@@ -351,7 +351,7 @@ function statusRows(p){
 }
 VARIANTS.G2M=function(){
   cardList(function(p){return statusRows(p).concat([h("div",{style:"border-top:1px solid var(--bd);padding-top:8px;margin-top:6px"},[advBtn(p)])])});
-  modal(t("c_port")+" 1: Advanced",detailsList(S.ports[0],true),[h("button",{class:"pri",text:t("c_apply")})]);
+  modal(t("c_port")+" 1: Advanced",detailsList(S.ports[0],true),[h("button",{class:"ctl pri",text:t("c_apply")})]);
 };
 VARIANTS.H2M=function(){
   cardList(function(p,i){
@@ -462,7 +462,7 @@ function jBar(){
   return h("div",{class:"mockx",style:"position:sticky;bottom:0;z-index:5;display:flex;gap:12px;align-items:center;background:var(--panel);border-top:1px solid var(--bd);padding:10px 2px 2px;margin-top:8px"},[
     h("b",{id:"jcount",style:"white-space:nowrap",text:"No changes"}),
     h("span",{id:"jprev",class:"mono mut",style:"flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"}),
-    h("button",{class:"pri",id:"japply",text:t("c_apply")})]);
+    h("button",{class:"ctl pri",id:"japply",text:t("c_apply")})]);
 }
 // Edits shown in the screenshots: port 2 renamed, port 3 flow control off, port 5 MTU 9000
 function jDemo(){
