@@ -182,7 +182,6 @@ function feat(p){
   return[
     {name:t("nav_fc"),sw:fcSw(p),st:fcNeg(p),adv:p.isSFP?"-":fcFlags(f&3),lp:p.isSFP?"-":fcFlags(f>>2&3)},
     {name:t("nav_eee"),sw:eeeSw(p),st:eeeSt(p),adv:p.isSFP?"-":eeeFlags(e.adv),lp:p.isSFP?"-":eeeFlags(e.lp)},
-    {name:t("pt_speed"),sw:null,st:linkBadge(p),adv:p.isSFP?"-":advSpeeds(p),lp:""},
   ];
 }
 // Desktop details: one row per feature, labels in the header
@@ -226,7 +225,7 @@ function card(p,extra){
   });
   return h("div",{style:"border:1px solid var(--bd);border-radius:8px;padding:10px 12px"},[
     h("div",{style:"display:flex;gap:8px;align-items:center;margin-bottom:8px"},[
-      h("b",{style:"white-space:nowrap",text:t("c_port")+" "+p.portNum+(p.isSFP?" (SFP)":"")}),h("span",{html:linkBadge(p)}),
+      h("b",{style:"white-space:nowrap",text:t("c_port")+" "+p.portNum+(p.isSFP?" (SFP)":"")}),h("span",{style:"white-space:nowrap"},[h("span",{html:linkBadge(p)}),infoBtn(p)]),
       h("span",{style:"flex:1"}),sw(p.enabled),h("button",{class:"ctl",text:t("c_apply")})]),g].concat(extra));
 }
 function cardList(fn){
@@ -270,13 +269,36 @@ VARIANTS.N=function(){
   cardList(function(p){return[h("div",{style:"border-top:1px solid var(--bd);padding-top:8px;margin-top:8px"},[advBtn(p)])]});
   modal(t("c_port")+" 1: Advanced",detailsList(S.ports[0],true),[h("button",{class:"pri",text:t("c_apply")})]);
 };
+// Link speed details: separate from flow control/EEE, behind an info button next to the link badge
+var LINKINFO=false;
+function linkTable(p){
+  var d=h("div");
+  var b=parseInt(p.adv||"0",2),n=["10M "+t("c_half"),"10M "+t("c_full"),"100M "+t("c_half"),"100M "+t("c_full"),"1G","2.5G"];
+  var top=h("div",{style:"display:grid;grid-template-columns:7.5em 1fr;gap:6px 10px;margin-bottom:10px"},[
+    h("span",{class:"mut small",text:t("c_link")}),h("span",{html:linkBadge(p)})]);
+  d.appendChild(top);
+  if(p.isSFP){d.appendChild(h("p",{class:"small mut",text:"SFP ports do not advertise speeds."}));return d}
+  var tb=h("table",{class:"t",style:"width:auto"}),r=tb.createTHead().insertRow();
+  [t("pt_speed"),t("e_adv")].forEach(function(s){r.appendChild(h("th",{text:s}))});
+  var bd=tb.createTBody();
+  for(var i=n.length-1;i>=0;i--){var tr=bd.insertRow();tr.insertCell().textContent=n[i];tr.insertCell().innerHTML=(b&(1<<i))?badge("\u2713","ok"):'<span class="mut">-</span>'}
+  d.appendChild(tb);
+  return d;
+}
+function infoBtn(p){
+  return h("button",{title:"Link details",style:"background:none;border:0;padding:0 0 0 6px;cursor:pointer;color:var(--ac);font-size:15px;vertical-align:middle",text:"\u24d8",
+    onclick:function(){modal(t("c_port")+" "+p.portNum+": "+t("c_link"),linkTable(p))}});
+}
+["F","G","M","N"].forEach(function(v){var f=VARIANTS[v];VARIANTS[v]=function(){LINKINFO=true;f()}});
+VARIANTS.FL=function(){VARIANTS.F();modal(t("c_port")+" 1: "+t("c_link"),linkTable(S.ports[0]))};
+VARIANTS.ML=function(){VARIANTS.M();modal(t("c_port")+" 1: "+t("c_link"),linkTable(S.ports[0]))};
 function fcFlags(b){return["Pause","Asym"].filter(function(s,i){return b&(1<<i)}).join(", ")||"-"}
 function mockStatus(){
   fakeData();updateStrip();
   S.ports.forEach(function(p){
     var i=p.portNum-1,el=$("plink"+i),mc=$("pmac"+i);
     if(mc)mc.textContent=parseInt(p.macs,16)&0x1fff;
-    if(el)el.innerHTML=linkBadge(p);
+    if(el){el.innerHTML=linkBadge(p);if(LINKINFO)el.appendChild(infoBtn(p))}
   });
 }
 function mock(v){
