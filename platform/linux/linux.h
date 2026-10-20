@@ -87,6 +87,7 @@ void bridge_init(void);
  * not create and gives VLAN 1 the state of a booting 8051 unless the configuration decided it. */
 void bridge_commit(void);
 int bridge_mgmt_vlan(uint16_t vid, bool active);
+bool bridge_vid_reserved(uint16_t vid);	/* a parking VLAN of a board port: no user VLAN, no L2 entry */
 int bridge_mac_get(uint8_t mac[6]);
 int bridge_mac_set(const uint8_t mac[6]);
 

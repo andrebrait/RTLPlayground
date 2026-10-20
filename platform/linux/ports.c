@@ -483,12 +483,6 @@ void port_counter_get(uint8_t port, __xdata uint8_t counter) __banked
 		port_buf[i] = v >> (56 - 8 * i);
 }
 
-/* Learned MACs of the port: the bridge forwarding table is not read before Task 7 (L2 table). */
-void port_macs_learned_get(uint8_t port) __banked
-{
-	memset(port_buf, 0, 4);
-}
-
 void port_stats_print(void) __banked
 {
 

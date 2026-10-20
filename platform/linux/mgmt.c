@@ -492,10 +492,23 @@ void mgmt_init(const char *dhcp_script)
  * VLAN 1 (rtl837x_port.c:1162). */
 void port_l2_static_mgmt(__xdata uint8_t *mac, __xdata uint16_t vlan, __xdata bool remove_entry) __banked
 {
+	static uint16_t last_vlan = 1;	/* management_vlan as the last successful add left it */
 	int rc;
 
 	if (!vlan)
 		vlan = 1;
+	if (!remove_entry && bridge_vid_reserved(vlan)) {
+		/* the shared code has already removed the old entry and stored the new VLAN: undo both */
+		char w[80];
+
+		snprintf(w, sizeof w, "VLAN %u is reserved for a parked port, it cannot manage the switch\n", vlan);
+		cmd_error(w);
+		management_vlan = last_vlan;
+		rc = bridge_mgmt_vlan(last_vlan ? last_vlan : 1, true);
+		if (rc)
+			nl_error("cannot restore the management entry of " SWBR, rc);
+		return;
+	}
 	if (remove_entry) {
 		rc = bridge_mgmt_vlan(vlan, false);
 	} else {
@@ -510,6 +523,8 @@ void port_l2_static_mgmt(__xdata uint8_t *mac, __xdata uint16_t vlan, __xdata bo
 		/* the management entry is moved whatever became of the MAC: the console must not be left
 		 * without its VLAN because the address was refused */
 		rc = bridge_mgmt_vlan(vlan, true);
+		if (!rc)
+			last_vlan = management_vlan;
 		if (!rc)
 			rc = mac_rc;
 	}

@@ -37,7 +37,7 @@ SHARED_CFLAGS = -Wno-parentheses -Wno-misleading-indentation -Wno-incompatible-p
 # 8051 build instead of the Linux one (test/Makefile does the same for its seam check).
 SHARED = cmd_parser.c cmd_editor.c page_impl.c
 vpath %.c $(ROOT) $(ROOT)/httpd
-LOCAL  = main.c console.c state.c nl.c bridge.c mgmt.c ports.c http.c auth.c config.c cli_sock.c stubs_2a_pending.c stubs_2b.c boards/$(BOARD).c
+LOCAL  = main.c console.c state.c nl.c bridge.c mgmt.c ports.c fdb.c http.c auth.c config.c cli_sock.c stubs_2b.c boards/$(BOARD).c
 
 OBJS = $(addprefix $(OUT)/,$(LOCAL:.c=.o)) \
        $(addprefix $(OUT)/shared/,$(SHARED:.c=.o))

@@ -114,6 +114,11 @@ static bool reserved(uint16_t vid)
 	return vid <= VID_MAX && VID_MAX - vid < BOARD_PORTS && on_board(VID_MAX - vid);
 }
 
+bool bridge_vid_reserved(uint16_t vid)
+{
+	return reserved(vid);
+}
+
 static void report_port(const char *what, uint8_t port, int err)
 {
 	char w[100];
