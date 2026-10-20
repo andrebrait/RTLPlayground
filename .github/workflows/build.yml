@@ -44,3 +44,15 @@ jobs:
       - name: Size guard against merge base
         if: github.event_name == 'pull_request'
         run: tools/size_guard.sh "$(git merge-base HEAD origin/main)"
+
+  # Needs real namespaces (root, no container), so it is a separate job.
+  bench:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y gcc make libmnl-dev iproute2 busybox ethtool curl
+      - name: Build the Linux daemon
+        run: make PLATFORM=linux
+      - name: Run the namespace bench
+        run: sudo platform/linux/bench/run.sh
