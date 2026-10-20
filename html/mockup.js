@@ -572,6 +572,7 @@ function mockStatus(){
 }
 function mock(v){
   fakeData();clearExtras();VARIANTS[v]();mockStatus();loadMtu();
+  $("nv-eee").style.display="none"; // EEE moves into the Ports page, so its own page goes away
   tabHooks.ports.status=mockStatus;
   buildPorts=function(){};
 }
