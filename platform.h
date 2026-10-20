@@ -377,10 +377,8 @@ bool vlan_entry_get(uint16_t vlan) __banked;
  * was called with, minus one), and the rest of l2_buf is not meaningful. */
 bool l2_entry_next(void) __banked;
 /* Deletes the unicast entry of slot idx, an idx l2_entry_next returned for it.
- * 1 = deleted, 0 = nothing deleted (the slot holds no entry, or holds the switch's own
- * MAC, which is kept). For a slot that holds no entry the 8051 searches on from it (its
- * delete starts with the same next-entry lookup) and deletes the next entry; Linux
- * deletes nothing. */
+ * 1 = deleted. 0 = nothing deleted: the slot holds no entry, or holds the switch's own
+ * MAC (or the CPU entry), which is kept. */
 uint8_t l2_entry_delete(uint16_t idx) __banked;
 void port_l2_static_mgmt(__xdata uint8_t *mac, __xdata uint16_t vlan, __xdata bool remove_entry) __banked;
 
