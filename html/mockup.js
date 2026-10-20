@@ -452,11 +452,22 @@ function jUpdate(){
       tgt.style.outline=ch?"2px solid var(--ac)":"";tgt.style.outlineOffset=ch?"2px":"";
     });
     row.style.background=dirty?"var(--sel)":"";
+    if(r.apply)r.apply.disabled=!dirty;
     if(dirty){ports++;cmds=cmds.concat(jCmds(S.ports[i],b))}
   });
+  if(!$("jcount"))return;
   $("jcount").textContent=ports?ports+" port"+(ports>1?"s":"")+" changed":"No changes";
   $("jprev").textContent=cmds.join("  \u00b7  ");
   $("japply").disabled=!ports;
+}
+// ROWAPPLY: an Apply button per row (enabled only while that port has changes) instead of the page-wide bar
+var ROWAPPLY=false;
+function rowApply(r){r.apply=h("button",{class:"ctl",text:t("c_apply")});return r.apply}
+// Copper and SFP speed lists differ in length; give every Speed select the widest one's width
+function evenSelects(){
+  var s=J.rows.map(function(r){return r.spd}),w=0;
+  s.forEach(function(e){w=Math.max(w,e.offsetWidth)});
+  s.forEach(function(e){e.style.width=w+"px"});
 }
 function jBar(){
   return h("div",{class:"mockx",style:"position:sticky;bottom:0;z-index:5;display:flex;gap:12px;align-items:center;background:var(--panel);border-top:1px solid var(--bd);padding:10px 2px 2px;margin-top:8px"},[
@@ -472,7 +483,7 @@ function jDemo(){
 }
 VARIANTS.J=function(){
   J={orig:[],rows:[]};fitBadges();
-  setHead([[t("c_port")],[t("c_enabled")],[t("c_name")],[t("c_link")],[t("pt_speed")],[t("pt_mtu")],[t("nav_fc")],[t("nav_eee")]]);
+  setHead([[t("c_port")],[t("c_enabled")],[t("c_name")],[t("c_link")],[t("pt_speed")],[t("pt_mtu")],[t("nav_fc")],[t("nav_eee")]].concat(ROWAPPLY?[[""]]:[]));
   var tb=$("ptable").tBodies[0];
   S.ports.forEach(function(p){
     var i=p.portNum-1,r=jControls(p),tr=tb.insertRow();r.row=tr;
@@ -484,8 +495,10 @@ VARIANTS.J=function(){
     tr.insertCell().appendChild(r.mtu);
     tr.insertCell().appendChild(jFeat(r.fc,fcNeg(p),fcInfo,p));
     tr.insertCell().appendChild(jFeat(r.eee,eeeSt(p),eeeInfo,p));
+    if(ROWAPPLY)tr.insertCell().appendChild(rowApply(r));
   });
-  $("ptable").closest(".scrollx").after(jBar());
+  evenSelects();
+  if(!ROWAPPLY)$("ptable").closest(".scrollx").after(jBar());
   loadMtu().then(function(){jSnapshot();jUpdate();if(JDEMO)setTimeout(jDemo,300)});
 };
 // JM: phone cards with the same controls and the same page-wide Apply bar
@@ -502,17 +515,21 @@ VARIANTS.JM=function(){
       g.appendChild(h("span",{class:"mut small",text:kv[0]}));g.appendChild(h("div",null,[kv[1]]));
     });
     r.row=h("div",{style:"border:1px solid var(--bd);border-radius:8px;padding:10px 12px"},[
-      h("div",{style:"display:flex;gap:10px;align-items:center;margin-bottom:8px"},[h("b",{text:t("c_port")+" "+p.portNum+(p.isSFP?" (SFP)":"")}),r.en.parentNode]),g]);
+      h("div",{style:"display:flex;gap:10px;align-items:center;margin-bottom:8px"},[h("b",{text:t("c_port")+" "+p.portNum+(p.isSFP?" (SFP)":"")}),r.en.parentNode].concat(ROWAPPLY?[h("span",{style:"flex:1"}),rowApply(r)]:[])),g]);
     list.appendChild(r.row);
   });
   wrap.after(list);
-  list.after(jBar());
+  if(!ROWAPPLY)list.after(jBar());
   loadMtu().then(function(){jSnapshot();jUpdate();if(JDEMO)setTimeout(jDemo,300)});
 };
 // JDDE: same as JD in German, to show the badge widths follow the language
 VARIANTS.JDDE=function(){rtlLang="de";LANG.de.nav_fc="Flusskontrolle";i18nApply();VARIANTS.JD()};
 var JDEMO=false;
 ["J","JM"].forEach(function(v){var f=VARIANTS[v];VARIANTS[v]=function(){LINKINFO=true;f()};VARIANTS[v+"D"]=function(){JDEMO=true;VARIANTS[v]()}});
+VARIANTS.JRD=function(){ROWAPPLY=true;VARIANTS.JD()};
+VARIANTS.JRMD=function(){ROWAPPLY=true;VARIANTS.JMD()};
+// JRDC: per-row Apply with cell padding 8px -> 5px left/right, the change it takes to fit at 1100 px
+VARIANTS.JRDC=function(){document.head.appendChild(h("style",{text:"#ptable th,#ptable td{padding-left:5px;padding-right:5px}"}));VARIANTS.JRD()};
 VARIANTS.JFC=function(){VARIANTS.J();fcInfo(S.ports[2])};
 VARIANTS.JEEE=function(){VARIANTS.J();eeeInfo(S.ports[0])};
 VARIANTS.JL=function(){VARIANTS.J();linkModal(S.ports[2])};
