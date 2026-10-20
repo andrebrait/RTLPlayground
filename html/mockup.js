@@ -16,10 +16,10 @@ function sw(on,dis){
   l.firstChild.checked=!!on;if(dis)l.firstChild.disabled=true;
   return l;
 }
-// "-" = port or feature switched off; "Inactive" = switched on but not in use on this link
-function dash(){return'<span class="badge" style="background:none">-</span>'}
-// Paired labels share capitalisation: Active/Inactive for EEE; flow control shows the negotiated direction or Inactive
-LANG.en.e_inactive="Inactive";LANG.de.e_inactive="Inaktiv";
+// Off = port or feature switched off; Inactive = switched on but not in use on this link. Labels are capitalised alike.
+LANG.en.e_inactive="Inactive";LANG.de.e_inactive="Inaktiv";LANG.en.st_off="Off";LANG.de.st_off="Aus";LANG.en.st_down="Down";LANG.de.st_down="Getrennt";
+function dash(){return badge(t("st_off"))}
+// flow control shows the negotiated direction or Inactive
 function fcNeg(p){var f=FC[p.portNum],n=f>>4&3;return!p.enabled||(!p.isSFP&&!(f&1))?dash():n?badge(["","TX","RX","TX/RX"][n],"ok"):badge(t("e_inactive"))}
 function eeeSt(p){var e=EEE[p.portNum];return p.isSFP?badge(t("e_na")):!p.enabled||!parseInt(e.adv,2)?dash():e.active?badge(t("e_active"),"ok"):badge(t("e_inactive"))}
 function cellWith(tr,kids){var c=tr.insertCell();c.style.whiteSpace="nowrap";kids.forEach(function(k){typeof k==="string"?c.insertAdjacentHTML("beforeend",k):c.appendChild(k)});return c}
@@ -404,7 +404,7 @@ function jControls(p){
 // Every status badge in a column is as wide as the widest label that column can show in the current
 // language, so the ⓘ that follows lines up without right-aligning it
 function fitBadges(){
-  var sets={fitlink:LINKS.slice(1).concat([t("c_off"),t("c_down")]),fitfc:["TX","RX","TX/RX",t("e_inactive"),t("e_na")],fiteee:[t("e_active"),t("e_inactive"),t("e_na")]};
+  var sets={fitlink:LINKS.slice(1).concat([t("st_off"),t("st_down")]),fitfc:["TX","RX","TX/RX",t("e_inactive"),t("st_off"),t("e_na")],fiteee:[t("e_active"),t("e_inactive"),t("st_off"),t("e_na")]};
   var probe=h("div",{style:"position:absolute;visibility:hidden"});document.body.appendChild(probe);
   var css="";
   for(var k in sets){
@@ -527,7 +527,7 @@ function mockStatus(){
   S.ports.forEach(function(p){
     var i=p.portNum-1,el=$("plink"+i),mc=$("pmac"+i);
     if(mc)mc.textContent=parseInt(p.macs,16)&0x1fff;
-    if(el){el.innerHTML=LINKINFO&&!p.enabled?dash():linkBadge(p);if(LINKINFO){var w=h("span",{style:"display:inline-flex;align-items:center;white-space:nowrap"},[h("span",{class:"fitlink",html:el.innerHTML}),infoBtn(p)]);el.innerHTML="";el.appendChild(w)}}
+    if(el){el.innerHTML=!LINKINFO?linkBadge(p):!p.enabled?dash():p.link>0?linkBadge(p):badge(t("st_down"));if(LINKINFO){var w=h("span",{style:"display:inline-flex;align-items:center;white-space:nowrap"},[h("span",{class:"fitlink",html:el.innerHTML}),infoBtn(p)]);el.innerHTML="";el.appendChild(w)}}
   });
 }
 function mock(v){
