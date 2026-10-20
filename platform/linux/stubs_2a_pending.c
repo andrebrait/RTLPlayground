@@ -3,7 +3,6 @@
  * reports its feature as absent: getters return the off or empty state, commands say so.
  * The task that implements an entry deletes it from here.
  */
-#include <stdio.h>
 #include <string.h>
 
 #include "cmd_parser.h"
@@ -12,14 +11,6 @@
 #include "dhcp.h"
 
 #define UNSUPPORTED() cmd_error("Not supported on this platform yet\n")
-
-/* Configuration store: the startup configuration is empty and an uploaded one is dropped. */
-uint16_t config_read(uint16_t offset, __xdata uint8_t * __xdata buf, __xdata uint16_t len) __banked { return 0; }
-bool config_save(const uint8_t *text, size_t len)
-{
-	fprintf(stderr, "rtlplayground: configuration upload (%zu bytes) dropped: no configuration store yet\n", len);
-	return false;
-}
 
 /* Ports: every port reads as down and disabled, with nothing advertised or counted. */
 uint8_t port_link_get(uint8_t port) __banked { return 0; }

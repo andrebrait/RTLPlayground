@@ -82,8 +82,8 @@ assert_eq "/cmd with text/plain (what app.js sends)" "$(sw_cmd 'mtu show')" "$(s
 
 # ---- uploads ----
 printf 'hostname bench2\nmtu show\n' > "$RUN/cfg.txt"
-assert_eq "config upload: stored text is not available yet" 500 "$(status -b "$jar" -F uploadedfile=@"$RUN/cfg.txt" "$SW_URL/config")"
-assert_contains "the daemon took exactly the file's bytes" "(25 bytes) dropped" "$(cat "$RUN/daemon.log")"
+assert_eq "config upload is stored" 200 "$(status -b "$jar" -F uploadedfile=@"$RUN/cfg.txt" "$SW_URL/config")"
+cmp -s "$RUN/cfg.txt" "$SW_CFG/startup-config" || { echo "the daemon did not store exactly the file's bytes"; exit 1; }
 assert_eq "config upload without a file part" 400 "$(status -b "$jar" -F field=value "$SW_URL/config")"
 assert_eq "config upload needs a session" 401 "$(status -F uploadedfile=@"$RUN/cfg.txt" "$SW_URL/config")"
 head -c 3000000 /dev/zero > "$RUN/fw.bin"
@@ -117,7 +117,7 @@ rm -f "$RUN/www/favicon.ico" "$RUN/www/favicon.ico.gz" "$RUN/www/index.html.gz"
 ln -s /etc/passwd "$RUN/www/favicon.ico"	# a file anyone may fetch
 ln -s /etc/passwd "$RUN/www/evil.js"
 ln -s /etc/passwd "$RUN/www/index.html.gz"	# the compressed copy of the front page
-ip netns exec rtlp-sw "$BIN" --http 127.0.0.1:8081 --cli-socket "$RUN/cli2.sock" --www "$RUN/www" 2>>"$RUN/daemon2.log" &
+ip netns exec rtlp-sw "$BIN" --http 127.0.0.1:8081 --cli-socket "$RUN/cli2.sock" --www "$RUN/www" --cfg-dir "$RUN/cfg2" 2>>"$RUN/daemon2.log" &
 pid2=$!
 for _ in $(seq 50); do [[ -S $RUN/cli2.sock ]] && break; sleep 0.1; done
 "$SWCLI" -s "$RUN/cli2.sock" passwd sym-pw

@@ -15,7 +15,6 @@
 
 extern __xdata uint8_t cmd_history[CMD_HISTORY_SIZE];
 
-#define HASH_MAX 160
 #define SESSION_ID_LEN 32
 #define SESSION_TIMEOUT_DEFAULT 200	/* seconds, as httpd.c */
 
@@ -23,7 +22,7 @@ __xdata char passwd[21];
 /* Seconds of inactivity after which the session cookie stops validating (`session` command). */
 __xdata uint16_t session_timeout = SESSION_TIMEOUT_DEFAULT;
 
-static char hash[HASH_MAX];
+static char hash[AUTH_HASH_MAX];
 static char session_id[SESSION_ID_LEN + 1];
 static int64_t last_use_ms, login_blocked_until;
 
@@ -76,35 +75,52 @@ next:		;
 	}
 }
 
-/* Changing the password logs out whoever is logged in: the session is dropped here and by
- * `passwdhash` (safer than keeping a session that was granted for the old password). */
-bool auth_take_plain(void)
+bool auth_hash_password(const char *pw, char out[AUTH_HASH_MAX])
 {
 	static const char alphabet[] = "./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 	char salt[3 + 16 + 1] = "$6$";
 	unsigned char rnd[16];
 	const char *h;
 
+	if (getrandom(rnd, sizeof rnd, 0) != sizeof rnd) {
+		fprintf(stderr, "rtlplayground: no random bytes for a salt: password not changed\n");
+		return false;
+	}
+	for (int i = 0; i < 16; i++)
+		salt[3 + i] = alphabet[rnd[i] & 63];
+	h = crypt(pw, salt);
+	if (!h || h[0] == '*' || strlen(h) >= AUTH_HASH_MAX) {
+		fprintf(stderr, "rtlplayground: crypt failed: password not changed\n");
+		return false;
+	}
+	strcpy(out, h);
+	return true;
+}
+
+/* Changing the password logs out whoever is logged in: the session is dropped here and by
+ * `passwdhash` (safer than keeping a session that was granted for the old password). */
+bool auth_take_plain(void)
+{
 	if (!passwd[0])
 		return false;
 	scrub_history();
 	memset(cmd_buffer, 0, CMD_BUF_SIZE);
-	if (getrandom(rnd, sizeof rnd, 0) != sizeof rnd) {
-		fprintf(stderr, "rtlplayground: no random bytes for a salt: password not changed\n");
-		goto out;
-	}
-	for (int i = 0; i < 16; i++)
-		salt[3 + i] = alphabet[rnd[i] & 63];
-	h = crypt(passwd, salt);
-	if (!h || h[0] == '*' || strlen(h) >= sizeof hash) {
-		fprintf(stderr, "rtlplayground: crypt failed: password not changed\n");
-		goto out;
-	}
-	strcpy(hash, h);
-	session_id[0] = 0;	/* whoever was logged in with the old password is out */
-out:
+	if (auth_hash_password(passwd, hash))
+		session_id[0] = 0;	/* whoever was logged in with the old password is out */
 	memset(passwd, 0, sizeof passwd);
 	return true;
+}
+
+const char *auth_hash(void)
+{
+	return hash;
+}
+
+/* Unlike auth_take_plain this keeps the session: the caller is the logged-in user saving a
+ * configuration (POST /config), who must still be able to read it back. */
+void auth_set_hash(const char *h)
+{
+	strcpy(hash, h);
 }
 
 bool auth_check_password(const char *pw)
@@ -168,7 +184,7 @@ bool platform_cmd(void) __banked
 	n = strlen(arg);
 	/* $6$[rounds=N$]salt$ followed by the 86 characters of the digest */
 	last = strrchr(arg, '$');
-	if (strncmp(arg, "$6$", 3) || n >= HASH_MAX || last == arg + 2 || n - (last + 1 - arg) != 86 ||
+	if (strncmp(arg, "$6$", 3) || n >= AUTH_HASH_MAX || last == arg + 2 || n - (last + 1 - arg) != 86 ||
 	    strspn(arg + 3, "$./=0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz") != n - 3) {
 		cmd_error("not a SHA-512 crypt hash\n");
 		return true;

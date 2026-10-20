@@ -9,6 +9,7 @@ BIN=${RTLP_BIN:-$BENCH_DIR/../output/rtlplayground}
 SWCLI=${RTLP_SWCLI:-$(dirname "$BIN")/swcli}
 WWW=${RTLP_WWW:-$BENCH_DIR/../../../output/html_min}	# the web UI the daemon serves (--www)
 RUN=${RTLP_BENCH_RUN:-/run/rtlp-bench}
+SW_CFG=${SW_CFG:-$RUN/cfg}	# the daemon's --cfg-dir (inside $RUN, so teardown removes it)
 SW_URL=${SW_URL:-http://127.0.0.1}	# the web UI inside `rtlp-sw`
 SW_PASS=${SW_PASS:-benchpass}
 SW_TIMEOUT=${SW_TIMEOUT:-5}	# seconds without a console byte (or a CLI/HTTP answer) before giving up
@@ -22,9 +23,18 @@ sw_start() {
 	mkdir -p "$RUN" && mkfifo "$RUN/in" "$RUN/out" || die "cannot create $RUN fifos"
 	exec 3<>"$RUN/in" 4<>"$RUN/out"	# held read-write so neither end blocks or sees EOF
 	# fds 3/4 are closed in the daemon: it must not be a writer of its own input.
-	ip netns exec rtlp-sw "$BIN" --console --cli-socket "$RUN/cli.sock" --www "$WWW" <&3 >&4 2>>"$RUN/daemon.log" 3>&- 4>&- &
+	ip netns exec rtlp-sw "$BIN" --console --cli-socket "$RUN/cli.sock" --www "$WWW" --cfg-dir "$SW_CFG" <&3 >&4 2>>"$RUN/daemon.log" 3>&- 4>&- &
 	echo $! > "$RUN/pid"
 	_sw_read_prompt >/dev/null || die "daemon gave no prompt"
+}
+
+# sw_stop: kills the daemon sw_start ran and removes its fifos, so that sw_start can run again (a
+# restart on the same $SW_CFG). Exported variables before sw_start (VAR=x sw_start) reach the daemon.
+sw_stop() {
+	local pid; pid=$(cat "$RUN/pid") && kill -KILL "$pid" 2>/dev/null
+	wait "$pid" 2>/dev/null
+	exec 3>&- 4>&-
+	rm -f "$RUN/in" "$RUN/out" "$RUN/pid" "$RUN/cli.sock"
 }
 
 # _sw_read_prompt: reads console output up to the next prompt into $REPLY_RAW (CRs removed).

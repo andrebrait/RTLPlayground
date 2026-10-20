@@ -16,7 +16,6 @@
 #include "linux.h"
 
 extern __xdata char passwd[21];
-extern __xdata char save_cmd;
 
 #define TICK_MS 1000
 
@@ -45,7 +44,7 @@ static void tick(void)
 int main(int argc, char **argv)
 {
 	int console = 0, dump_state = 0;
-	const char *http = "[::]:80", *cli = "/run/rtlplayground.sock", *www = DEFAULT_WWW;
+	const char *http = "[::]:80", *cli = "/run/rtlplayground.sock", *www = DEFAULT_WWW, *cfg = "/cfg";
 
 	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "--console")) {
@@ -58,8 +57,10 @@ int main(int argc, char **argv)
 			cli = argv[++i];
 		} else if (i + 1 < argc && !strcmp(argv[i], "--www")) {
 			www = argv[++i];
+		} else if (i + 1 < argc && !strcmp(argv[i], "--cfg-dir")) {
+			cfg = argv[++i];
 		} else {
-			fprintf(stderr, "usage: %s [--console] [--http <addr:port>] [--cli-socket <path>] [--www <dir>]\n", argv[0]);
+			fprintf(stderr, "usage: %s [--console] [--http <addr:port>] [--cli-socket <path>] [--www <dir>] [--cfg-dir <dir>]\n", argv[0]);
 			return 2;
 		}
 	}
@@ -71,10 +72,10 @@ int main(int argc, char **argv)
 	if (http_open(http, www) || cli_open(cli))
 		return 1;
 	cmd_editor_init();
-	/* The shared parser records commands in the history once the startup configuration has been
-	 * run (execute_config); until the configuration store exists, record from the start. */
-	clear_command_history();
-	save_cmd = 1;
+	/* Runs the startup configuration (or the default); the shared parser records commands in the
+	 * history only from here on. */
+	config_open(cfg);
+	config_startup();
 	if (console) {
 		print_cmd_prompt();
 		console_flush();

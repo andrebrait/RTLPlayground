@@ -14,11 +14,15 @@ check() { # <what> <expected> <got>
 	if [ "$2" = "$3" ]; then echo "ok:   $1"; else echo "FAIL: $1 (expected $2, got $3)"; fail=1; fi
 }
 
+# A startup configuration with one command in it, so that the built-in default (which says "Not
+# supported" for each of its commands that is still a stub) does not add to the output counted below.
+mkdir "$TMP/cfg" && echo 'hostname console-test' > "$TMP/cfg/startup-config" || exit 1
+
 # run <input>: console output with CRs removed in $out, state dump included; the daemon's exit
 # status in $rc.
 run() {
 	printf "$1" > "$TMP/in"
-	timeout -s KILL 5 "$BIN" --console --dump-state --http 127.0.0.1:0 --www "$TMP" --cli-socket "$TMP/cli.sock" < "$TMP/in" > "$TMP/raw"
+	timeout -s KILL 5 "$BIN" --console --dump-state --http 127.0.0.1:0 --www "$TMP" --cli-socket "$TMP/cli.sock" --cfg-dir "$TMP/cfg" < "$TMP/in" > "$TMP/raw"
 	rc=$?
 	out=$(tr -d '\r' < "$TMP/raw")
 }
@@ -79,5 +83,14 @@ check "ESC Enter: line runs" 1 "$(count 'Unknown command')"
 run 'fo\033[Do\n'
 check "cursor-left: daemon exits 0" 0 "$rc"
 check "cursor-left: line runs" 1 "$(count 'Unknown command')"
+
+# No configuration file: the default runs the shared commands, and the 8051's default password is no login.
+rm -r "$TMP/cfg"
+run 'foo\n'
+check "no config: daemon exits 0" 0 "$rc"
+check "no config: the default sets the management VLAN" 1 "$(countx 'Management VLAN set to 0x0001')"
+check "no config: no password" 1 "$(countx 'has_password=0')"
+check "no config: no plaintext password left" 1 "$(countx 'passwd_plain_left=0')"
+check "no config: the directory was created" 700 "$(stat -c %a "$TMP/cfg")"
 
 exit $fail

@@ -84,7 +84,7 @@ mp() { # <Content-Type> <body>: POST /config with the session
 }
 assert_eq "multipart without a boundary parameter" "HTTP/1.1 400 Bad Request" "$(mp 'multipart/form-data' $'filename\r\n\r\nhello--')"
 assert_eq "multipart with an empty boundary" "HTTP/1.1 400 Bad Request" "$(mp 'multipart/form-data; boundary=' $'--\r\nContent-Disposition: form-data; name=a; filename=b\r\n\r\nhello\r\n----')"
-assert_eq "multipart with a boundary and a file part is taken (stored by the config store, not there yet: 500)" "HTTP/1.1 500 Internal Server Error" \
+assert_eq "multipart with a boundary and a file part is taken and stored" "HTTP/1.1 200 OK" \
 	"$(mp 'multipart/form-data; boundary=XX' $'--XX\r\nContent-Disposition: form-data; name=a; filename=b\r\n\r\nhello\r\n--XX--')"
 
 # ---- the connection table full: more clients wait in the kernel backlog, none is accepted and dropped ----
