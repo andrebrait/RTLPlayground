@@ -415,16 +415,10 @@ function fitBadges(){
     css+="."+k+" .badge{display:inline-block;box-sizing:border-box;text-align:center;min-width:"+Math.ceil(w)+"px}";
   }
   probe.remove();
-  // ORANGE: Off stays the plain grey badge, Inactive/Down turn orange; otherwise both follow the port strip tiles
-  css+=ORANGE
-    ?".badge.st-in{color:var(--warn);background:color-mix(in srgb,var(--warn) 12%,var(--panel2))}"
-    :".badge.st-off{opacity:.45;outline:1px dashed var(--fg2);outline-offset:-1px}.badge.st-in{outline:1px solid var(--bd);outline-offset:-1px}";
+  // Off and Inactive/Down follow the port strip tiles: disabled (faded, dashed) and no link (solid outline)
+  css+=".badge.st-off{opacity:.45;outline:1px dashed var(--fg2);outline-offset:-1px}.badge.st-in{outline:1px solid var(--bd);outline-offset:-1px}";
   var st=$("fitcss")||document.head.appendChild(h("style",{id:"fitcss"}));st.textContent=css;
 }
-// ORANGE: Inactive (and Down) in the warning colour instead of the outlined grey
-var ORANGE=false;
-VARIANTS.JDO=function(){ORANGE=true;VARIANTS.JD()};
-VARIANTS.JMDO=function(){ORANGE=true;VARIANTS.JMD()};
 function jFeat(ctl,st,info,p){
   // the n/a badge takes the switch's place, so it gets the switch's width
   return h("span",{style:"white-space:nowrap;display:inline-flex;gap:6px;align-items:center"},
