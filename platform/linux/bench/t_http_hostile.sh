@@ -77,6 +77,51 @@ assert_eq "unread upload body" "HTTP/1.1 501 Not Implemented" "$out"
 assert_eq "config upload that is not multipart" "HTTP/1.1 400 Bad Request" "$(printf 'POST /config HTTP/1.1\r\nContent-Type: text/plain\r\nContent-Length: 3\r\nCookie: session=%s\r\n\r\nabc' "$cookie" | raw 8 | first_line)"
 alive || { echo "daemon not responding after the big upload"; exit 1; }
 
+# ---- a multipart upload without a usable boundary is a bad request, not a parse of nothing ----
+# (the body is shaped so that a missing or empty boundary would still find a "filename" part)
+mp() { # <Content-Type> <body>: POST /config with the session
+	printf 'POST /config HTTP/1.1\r\nContent-Type: %s\r\nContent-Length: %d\r\nCookie: session=%s\r\n\r\n%s' "$1" "${#2}" "$cookie" "$2" | raw 8 | first_line
+}
+assert_eq "multipart without a boundary parameter" "HTTP/1.1 400 Bad Request" "$(mp 'multipart/form-data' $'filename\r\n\r\nhello--')"
+assert_eq "multipart with an empty boundary" "HTTP/1.1 400 Bad Request" "$(mp 'multipart/form-data; boundary=' $'--\r\nContent-Disposition: form-data; name=a; filename=b\r\n\r\nhello\r\n----')"
+assert_eq "multipart with a boundary and a file part is taken (stored by the config store, not there yet: 500)" "HTTP/1.1 500 Internal Server Error" \
+	"$(mp 'multipart/form-data; boundary=XX' $'--XX\r\nContent-Disposition: form-data; name=a; filename=b\r\n\r\nhello\r\n--XX--')"
+
+# ---- the connection table full: more clients wait in the kernel backlog, none is accepted and dropped ----
+# 7 of the 8 slots are held by silent clients; the daemon is stopped while 3 more connect and send a
+# request, so that it finds them pending together. They must all be served, as the holders time out.
+ip netns exec rtlp-sw python3 - "$(cat "$RUN/pid")" <<'PY' || exit 1
+import os, signal, socket, sys, time
+pid = int(sys.argv[1])
+def conn():
+    s = socket.create_connection(("127.0.0.1", 80)); return s
+holders = [conn() for _ in range(7)]
+time.sleep(0.5)
+os.kill(pid, signal.SIGSTOP)
+try:
+    clients = []
+    for _ in range(3):
+        s = conn(); s.sendall(b"GET /login.html HTTP/1.1\r\n\r\n"); clients.append(s)
+finally:
+    os.kill(pid, signal.SIGCONT)
+bad = 0
+for s in clients:
+    s.settimeout(12)
+    data = b""
+    try:
+        while True:
+            d = s.recv(65536)
+            if not d: break
+            data += d
+    except OSError:
+        pass
+    if not data.startswith(b"HTTP/1.1 200 OK"):
+        bad += 1
+if bad:
+    print("%d of 3 clients were not served while the table was full" % bad); sys.exit(1)
+PY
+alive || { echo "daemon not responding after the full table"; exit 1; }
+
 # ---- /cmd without a session: 401 ----
 assert_eq "cmd without a cookie" "HTTP/1.1 401 Unauthorized" "$(printf 'POST /cmd HTTP/1.1\r\nContent-Type: text/plain\r\nContent-Length: 8\r\n\r\nmtu show' | raw 8 | first_line)"
 assert_eq "cmd with a wrong cookie" "HTTP/1.1 401 Unauthorized" "$(printf 'POST /cmd HTTP/1.1\r\nContent-Type: text/plain\r\nContent-Length: 8\r\nCookie: session=%032d\r\n\r\nmtu show' 0 | raw 8 | first_line)"

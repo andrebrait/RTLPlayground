@@ -13,6 +13,8 @@
 #include "platform.h"
 #include "linux.h"
 
+extern __xdata uint8_t cmd_history[CMD_HISTORY_SIZE];
+
 #define HASH_MAX 160
 #define SESSION_ID_LEN 32
 #define SESSION_TIMEOUT_DEFAULT 200	/* seconds, as httpd.c */
@@ -23,7 +25,12 @@ __xdata uint16_t session_timeout = SESSION_TIMEOUT_DEFAULT;
 
 static char hash[HASH_MAX];
 static char session_id[SESSION_ID_LEN + 1];
-static int64_t last_use_ms;
+static int64_t last_use_ms, login_blocked_until;
+
+/* A failed login refuses every login (right or wrong) for this long, without running crypt:
+ * a brute force cannot keep the single-threaded loop busy in crypt() and is capped at one
+ * guess per second. */
+#define LOGIN_PAUSE_MS 1000
 
 bool auth_has_password(void)
 {
@@ -41,7 +48,37 @@ static bool same(const char *a, const char *b)
 	return !diff;
 }
 
-void auth_take_plain(void)
+/* Overwrites every `passwd <pw>` entry of the shared command history (the parser records each
+ * command, passwords included) with `passwd ****`. An entry starts after a '\n' or NUL. */
+static void scrub_history(void)
+{
+	for (unsigned q = 0; q < CMD_HISTORY_SIZE; q++) {
+		unsigned p = q, prev = (q - 1) & CMD_HISTORY_MASK;
+		static const char word[] = "passwd";
+
+		if (cmd_history[prev] != 0 && cmd_history[prev] != '\n')
+			continue;
+		while (cmd_history[p] == ' ')
+			p = (p + 1) & CMD_HISTORY_MASK;
+		for (size_t i = 0; i < sizeof word - 1; i++)
+			if (cmd_history[(p + i) & CMD_HISTORY_MASK] != word[i])
+				goto next;
+		p = (p + sizeof word - 1) & CMD_HISTORY_MASK;
+		if (cmd_history[p] != ' ')
+			continue;
+		while (cmd_history[p] == ' ')
+			p = (p + 1) & CMD_HISTORY_MASK;
+		for (unsigned n = 0; n < CMD_HISTORY_SIZE && cmd_history[p] != 0 && cmd_history[p] != '\n'; n++) {
+			cmd_history[p] = '*';
+			p = (p + 1) & CMD_HISTORY_MASK;
+		}
+next:		;
+	}
+}
+
+/* Changing the password logs out whoever is logged in: the session is dropped here and by
+ * `passwdhash` (safer than keeping a session that was granted for the old password). */
+bool auth_take_plain(void)
 {
 	static const char alphabet[] = "./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 	char salt[3 + 16 + 1] = "$6$";
@@ -49,7 +86,9 @@ void auth_take_plain(void)
 	const char *h;
 
 	if (!passwd[0])
-		return;
+		return false;
+	scrub_history();
+	memset(cmd_buffer, 0, CMD_BUF_SIZE);
 	if (getrandom(rnd, sizeof rnd, 0) != sizeof rnd) {
 		fprintf(stderr, "rtlplayground: no random bytes for a salt: password not changed\n");
 		goto out;
@@ -65,16 +104,22 @@ void auth_take_plain(void)
 	session_id[0] = 0;	/* whoever was logged in with the old password is out */
 out:
 	memset(passwd, 0, sizeof passwd);
+	return true;
 }
 
 bool auth_check_password(const char *pw)
 {
 	const char *h;
+	bool ok;
+	int64_t now = now_ms();
 
-	if (!hash[0])
+	if (!hash[0] || now < login_blocked_until)
 		return false;
 	h = crypt(pw, hash);
-	return h && h[0] != '*' && same(h, hash);
+	ok = h && h[0] != '*' && same(h, hash);
+	if (!ok)
+		login_blocked_until = now_ms() + LOGIN_PAUSE_MS;
+	return ok;
 }
 
 bool auth_login(char id[33])

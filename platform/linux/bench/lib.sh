@@ -7,6 +7,7 @@
 BENCH_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 BIN=${RTLP_BIN:-$BENCH_DIR/../output/rtlplayground}
 SWCLI=${RTLP_SWCLI:-$(dirname "$BIN")/swcli}
+WWW=${RTLP_WWW:-$BENCH_DIR/../../../output/html_min}	# the web UI the daemon serves (--www)
 RUN=${RTLP_BENCH_RUN:-/run/rtlp-bench}
 SW_URL=${SW_URL:-http://127.0.0.1}	# the web UI inside `rtlp-sw`
 SW_PASS=${SW_PASS:-benchpass}
@@ -21,7 +22,7 @@ sw_start() {
 	mkdir -p "$RUN" && mkfifo "$RUN/in" "$RUN/out" || die "cannot create $RUN fifos"
 	exec 3<>"$RUN/in" 4<>"$RUN/out"	# held read-write so neither end blocks or sees EOF
 	# fds 3/4 are closed in the daemon: it must not be a writer of its own input.
-	ip netns exec rtlp-sw "$BIN" --console --cli-socket "$RUN/cli.sock" <&3 >&4 2>>"$RUN/daemon.log" 3>&- 4>&- &
+	ip netns exec rtlp-sw "$BIN" --console --cli-socket "$RUN/cli.sock" --www "$WWW" <&3 >&4 2>>"$RUN/daemon.log" 3>&- 4>&- &
 	echo $! > "$RUN/pid"
 	_sw_read_prompt >/dev/null || die "daemon gave no prompt"
 }

@@ -41,19 +41,19 @@ static struct {
 	bool on, truncated;
 } cap;
 
-void console_capture_begin(void)
+static void console_capture_begin(void)
 {
 	cap.len = 0;
 	cap.truncated = false;
 	cap.on = true;
 }
 
-const char *console_capture_end(size_t *len, bool *truncated)
+static const char *console_capture_end(size_t *len, bool *truncated)
 {
 	cap.on = false;
 	*len = cap.len;
 	*truncated = cap.truncated;
-	return cap.buf;
+	return cap.buf ? cap.buf : "";	/* never NULL: callers memcpy from it, even when empty */
 }
 
 static void capture_char(char c)
@@ -70,6 +70,25 @@ static void capture_char(char c)
 		cap.cap = ncap;
 	}
 	cap.buf[cap.len++] = c;
+}
+
+/* Runs the commands of a web or CLI-socket client. The shared parser works in cmd_buffer, which
+ * is also the line the console user is typing: it is saved around the run and put back, so a
+ * half-typed console line survives a command from elsewhere. */
+const char *console_run(uint8_t *cmds, size_t *len, bool *truncated)
+{
+	uint8_t saved[CMD_BUF_SIZE];
+	bool took;
+
+	memcpy(saved, cmd_buffer, sizeof saved);
+	console_capture_begin();
+	execute_commands(cmds);
+	took = auth_take_plain();
+	if (took)
+		memset(cmds, 0, strlen((char *)cmds));	/* the caller's copy of `passwd <pw>` */
+	memcpy(cmd_buffer, saved, sizeof saved);
+	memset(saved, 0, sizeof saved);
+	return console_capture_end(len, truncated);
 }
 
 void write_char(char c)

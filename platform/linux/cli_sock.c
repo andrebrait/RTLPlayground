@@ -2,7 +2,10 @@
  * The CLI socket: an AF_UNIX stream socket (mode 0600) over which `swcli` runs one console command
  * per connection. The client sends one line; the daemon runs it as the web UI's POST /cmd does,
  * answers with the command's output and closes. The socket is for the local administrator, so
- * there is no login. Like the HTTP connections these are non-blocking and time out when idle.
+ * there is no login. Like the HTTP connections these are non-blocking, time out when idle and
+ * cannot live longer than LIFE_MS; after the reply the daemon shuts down its side and drains
+ * what the client still sends for a moment, so the client reads the reply even when it sent more
+ * than one line (an over-long one).
  */
 #include <errno.h>
 #include <stdio.h>
@@ -20,13 +23,16 @@
 
 #define MAX_CONNS (CLI_SLOTS - 1)
 #define IDLE_MS 5000
+#define LIFE_MS 10000
+#define LINGER_MS 2000
+#define LINGER_MAX (64 << 10)
 #define LINE_MAX_LEN 511
 
 struct conn {
 	int fd;
-	bool writing;
-	int64_t deadline;
-	size_t rlen, olen, ooff;
+	enum { READ, WRITE, LINGER } st;
+	int64_t deadline, born;
+	size_t rlen, olen, ooff, lingered;
 	char *out;
 	char line[LINE_MAX_LEN + 1];
 };
@@ -99,10 +105,8 @@ static void run_line(struct conn *c, int64_t now)
 		*nl = 0;
 	else
 		c->line[c->rlen] = 0;
-	console_capture_begin();
-	execute_commands((uint8_t *)c->line);
-	auth_take_plain();
-	o = console_capture_end(&n, &trunc);
+	o = console_run((uint8_t *)c->line, &n, &trunc);
+	memset(c->line, 0, sizeof c->line);
 	c->out = malloc(n + sizeof CMD_TRUNCATED);
 	if (c->out) {
 		memcpy(c->out, o, n);
@@ -112,7 +116,7 @@ static void run_line(struct conn *c, int64_t now)
 		}
 	}
 	c->olen = c->out ? n : 0;
-	c->writing = true;
+	c->st = WRITE;
 	c->deadline = now + IDLE_MS;
 }
 
@@ -126,12 +130,26 @@ static bool pump_write(struct conn *c, int64_t now)
 		c->ooff += n;
 		c->deadline = now + IDLE_MS;
 	}
-	return true;
+	shutdown(c->fd, SHUT_WR);
+	c->st = LINGER;
+	c->deadline = now + LINGER_MS;
+	return false;
 }
 
 static bool pump_read(struct conn *c, int64_t now)
 {
-	ssize_t n = read(c->fd, c->line + c->rlen, LINE_MAX_LEN - c->rlen);
+	ssize_t n;
+
+	if (c->st == LINGER) {
+		char junk[1024];
+
+		n = read(c->fd, junk, sizeof junk);
+		if (n < 0)
+			return errno != EAGAIN && errno != EINTR;
+		c->lingered += n;
+		return n == 0 || c->lingered >= LINGER_MAX;
+	}
+	n = read(c->fd, c->line + c->rlen, LINE_MAX_LEN - c->rlen);
 
 	if (n < 0)
 		return errno != EAGAIN && errno != EINTR;
@@ -147,6 +165,8 @@ static bool pump_read(struct conn *c, int64_t now)
 		return pump_write(c, now);
 	}
 	c->deadline = now + IDLE_MS;
+	if (c->deadline > c->born + LIFE_MS)
+		c->deadline = c->born + LIFE_MS;
 	return false;
 }
 
@@ -163,7 +183,7 @@ void cli_fill(struct pollfd *fds, int64_t now, int *wait_ms)
 			room = true;
 			continue;
 		}
-		fds[1 + i] = (struct pollfd){ .fd = c->fd, .events = c->writing ? POLLOUT : POLLIN };
+		fds[1 + i] = (struct pollfd){ .fd = c->fd, .events = c->st == WRITE ? POLLOUT : POLLIN };
 		left = c->deadline - now;
 		if (left < *wait_ms)
 			*wait_ms = left > 0 ? left : 0;
@@ -181,28 +201,32 @@ void cli_service(struct pollfd *fds, int64_t now)
 			continue;
 		if (fds[1 + i].revents & (POLLERR | POLLNVAL))
 			done = true;
-		else if (c->writing && (fds[1 + i].revents & (POLLOUT | POLLHUP)))
+		else if (c->st == WRITE && (fds[1 + i].revents & (POLLOUT | POLLHUP)))
 			done = pump_write(c, now);
-		else if (!c->writing && (fds[1 + i].revents & (POLLIN | POLLHUP)))
+		else if (c->st != WRITE && (fds[1 + i].revents & (POLLIN | POLLHUP)))
 			done = pump_read(c, now);
 		if (done || now >= c->deadline)
 			conn_close(&conns[i]);
 	}
 	if (fds[0].fd >= 0 && (fds[0].revents & POLLIN)) {
 		for (;;) {
-			int fd = accept4(listen_fd, NULL, NULL, SOCK_NONBLOCK | SOCK_CLOEXEC);
 			struct conn *c;
-			int i;
+			int i, fd;
 
-			if (fd < 0)
-				break;
+			/* no free slot: the rest waits in the kernel's backlog, not accepted-and-dropped */
 			for (i = 0; i < MAX_CONNS && conns[i]; i++)
 				;
-			if (i == MAX_CONNS || !(c = calloc(1, sizeof *c))) {
+			if (i == MAX_CONNS)
+				break;
+			fd = accept4(listen_fd, NULL, NULL, SOCK_NONBLOCK | SOCK_CLOEXEC);
+			if (fd < 0)
+				break;
+			if (!(c = calloc(1, sizeof *c))) {
 				close(fd);
 				break;
 			}
 			c->fd = fd;
+			c->born = now;
 			c->deadline = now + IDLE_MS;
 			conns[i] = c;
 		}

@@ -191,6 +191,8 @@ static const char *static_name(const char *path)
 	path++;
 	if (!*path || *path == '.')
 		return NULL;
+	if (strlen(path) > 3 && !strcmp(path + strlen(path) - 3, ".gz"))	/* the compressed copies are not files of their own */
+		return NULL;
 	for (const char *p = path; *p; p++)
 		if (!strchr("._-", *p) && !(*p >= '0' && *p <= '9') && !(*p >= 'a' && *p <= 'z') && !(*p >= 'A' && *p <= 'Z'))
 			return NULL;
@@ -208,29 +210,36 @@ static bool static_exists(const char *name)
 	"background:#cf222e;color:#fff;font:14px system-ui,sans-serif\">No password is set. " \
 	"Set one on the switch console with <b>passwd &lt;password&gt;</b>, then log in here.</div>"
 
-/* Answers with the file, or returns false if there is none. Files are served as they are on
- * disk: the 8051 compresses them to save flash and says so with Content-Encoding: gzip, which a
- * client decompresses to the same bytes, so none is sent here. login.html also carries a notice
- * while no password is set. */
+/* Answers with the file, or returns false if there is none. As on the 8051 (fileadder -z) a file is
+ * served compressed, with Content-Encoding: gzip, from <name>.gz next to it when that exists (the
+ * build writes them); the type is the plain name's. login.html is always served plain: it carries
+ * the notice while no password is set. */
 static bool send_static(struct conn *c, const char *name)
 {
-	static const char tail[] = "; charset=UTF-8\r\nCache-Control: max-age=60, must-revalidate\r\nConnection: close\r\n"
+	static const char tail[] = "Cache-Control: max-age=60, must-revalidate\r\nConnection: close\r\n"
 		"Access-Control-Allow-Origin: *\r\nContent-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; "
 		"style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; form-action 'self'\r\n\r\n";
 	bool notice = !strcmp(name, "login.html") && !auth_has_password();
-	char hdr[512];
+	char hdr[512], gz[300];
 	struct stat st;
 	size_t hl, got = 0;
 	uint8_t *buf = NULL;
-	int fd;
+	int fd = -1;
+	bool gzip = false;
 
-	if (www_fd < 0 || (fd = openat(www_fd, name, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)) < 0)
+	if (www_fd < 0)
+		return false;
+	if (strcmp(name, "login.html") && snprintf(gz, sizeof gz, "%s.gz", name) < (int)sizeof gz &&
+	    (fd = openat(www_fd, gz, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)) >= 0)
+		gzip = true;
+	if (fd < 0 && (fd = openat(www_fd, name, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)) < 0)
 		return false;
 	if (fstat(fd, &st) || !S_ISREG(st.st_mode) || st.st_size > FILE_MAX) {
 		close(fd);
 		return false;
 	}
-	hl = snprintf(hdr, sizeof hdr, "HTTP/1.1 200 OK\r\nContent-Type: %s%s", mime_of(name), tail);
+	hl = snprintf(hdr, sizeof hdr, "HTTP/1.1 200 OK\r\nContent-Type: %s; charset=UTF-8\r\n%s%s", mime_of(name),
+		      gzip ? "Content-Encoding: gzip\r\n" : "", tail);
 	buf = malloc(hl + st.st_size + sizeof NOTICE);
 	if (buf) {
 		memcpy(buf, hdr, hl);
@@ -361,7 +370,7 @@ static bool parse_request(struct conn *c, size_t hdr_end)
 			if (*b == '"')
 				b++;
 			n = strcspn(b, "\";");
-			if (n >= BOUNDARY_MAX)
+			if (!n || n >= BOUNDARY_MAX)	/* an empty boundary delimits nothing */
 				return false;
 			memcpy(r->boundary, "\r\n--", 4);
 			memcpy(r->boundary + 4, b, n);
@@ -416,10 +425,7 @@ static void run_cmd_body(struct conn *c, char *body)
 	bool trunc;
 	char *buf;
 
-	console_capture_begin();
-	execute_commands((uint8_t *)body);
-	auth_take_plain();
-	o = console_capture_end(&n, &trunc);
+	o = console_run((uint8_t *)body, &n, &trunc);
 	buf = malloc(hl + n + sizeof CMD_TRUNCATED + 3);
 	if (!buf)
 		return;
@@ -479,6 +485,7 @@ static void run_login_body(struct conn *c, const char *body)
 		ok = auth_check_password(pw);
 	}
 	memset(pw, 0, sizeof pw);
+	memset((char *)body, 0, strlen(body));	/* `pwd=<password>` */
 	if (ok && auth_login(id)) {
 		snprintf(resp, sizeof resp, "HTTP/1.1 302 Found\r\nConnection: close\r\nLocation: index.html\r\n"
 			 "Set-Cookie: session=%s; HttpOnly; SameSite=Strict\r\n\r\n", id);
@@ -769,6 +776,7 @@ int http_open(const char *spec, const char *www_dir)
 	struct addrinfo hints = { .ai_flags = AI_PASSIVE | AI_NUMERICHOST | AI_NUMERICSERV, .ai_socktype = SOCK_STREAM }, *ai;
 	size_t hl;
 	int one = 1, rc;
+	int zero = 0;
 
 	if (!colon) {
 		fprintf(stderr, "rtlplayground: --http wants <addr:port>, e.g. [::]:80 or 0.0.0.0:8080\n");
@@ -810,11 +818,13 @@ int http_open(const char *spec, const char *www_dir)
 		freeaddrinfo(ai);
 		return -1;
 	}
-	setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
-	if (ai->ai_family == AF_INET6) {
-		int zero = 0;
-
-		setsockopt(listen_fd, IPPROTO_IPV6, IPV6_V6ONLY, &zero, sizeof zero);
+	if (setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one) ||
+	    (ai->ai_family == AF_INET6 && setsockopt(listen_fd, IPPROTO_IPV6, IPV6_V6ONLY, &zero, sizeof zero))) {
+		fprintf(stderr, "rtlplayground: http socket option: %s\n", strerror(errno));
+		freeaddrinfo(ai);
+		close(listen_fd);
+		listen_fd = -1;
+		return -1;
 	}
 	if (bind(listen_fd, ai->ai_addr, ai->ai_addrlen) || listen(listen_fd, 16)) {
 		fprintf(stderr, "rtlplayground: http %s:%s: %s\n", host, port, strerror(errno));
@@ -868,15 +878,18 @@ void http_service(struct pollfd *fds, int64_t now)
 	}
 	if (fds[0].fd >= 0 && (fds[0].revents & POLLIN)) {
 		for (;;) {
-			int fd = accept4(listen_fd, NULL, NULL, SOCK_NONBLOCK | SOCK_CLOEXEC);
 			struct conn *c;
-			int i;
+			int i, fd;
 
-			if (fd < 0)
-				break;
+			/* no free slot: the rest waits in the kernel's backlog, not accepted-and-dropped */
 			for (i = 0; i < MAX_CONNS && conns[i]; i++)
 				;
-			if (i == MAX_CONNS || !(c = calloc(1, sizeof *c))) {
+			if (i == MAX_CONNS)
+				break;
+			fd = accept4(listen_fd, NULL, NULL, SOCK_NONBLOCK | SOCK_CLOEXEC);
+			if (fd < 0)
+				break;
+			if (!(c = calloc(1, sizeof *c))) {
 				close(fd);
 				break;
 			}

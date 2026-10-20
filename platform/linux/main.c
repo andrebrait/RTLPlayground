@@ -16,12 +16,11 @@
 #include "linux.h"
 
 extern __xdata char passwd[21];
+extern __xdata char save_cmd;
 
 #define TICK_MS 1000
 
-#ifndef DEFAULT_WWW
 #define DEFAULT_WWW "/usr/share/rtlplayground/www"
-#endif
 
 static volatile sig_atomic_t stop;
 
@@ -72,6 +71,10 @@ int main(int argc, char **argv)
 	if (http_open(http, www) || cli_open(cli))
 		return 1;
 	cmd_editor_init();
+	/* The shared parser records commands in the history once the startup configuration has been
+	 * run (execute_config); until the configuration store exists, record from the start. */
+	clear_command_history();
+	save_cmd = 1;
 	if (console) {
 		print_cmd_prompt();
 		console_flush();

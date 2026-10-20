@@ -18,7 +18,7 @@ check() { # <what> <expected> <got>
 # status in $rc.
 run() {
 	printf "$1" > "$TMP/in"
-	timeout -s KILL 5 "$BIN" --console --dump-state --http 127.0.0.1:0 --cli-socket "$TMP/cli.sock" < "$TMP/in" > "$TMP/raw"
+	timeout -s KILL 5 "$BIN" --console --dump-state --http 127.0.0.1:0 --www "$TMP" --cli-socket "$TMP/cli.sock" < "$TMP/in" > "$TMP/raw"
 	rc=$?
 	out=$(tr -d '\r' < "$TMP/raw")
 }

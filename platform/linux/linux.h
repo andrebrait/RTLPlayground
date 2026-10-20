@@ -15,12 +15,12 @@ extern const char *const board_ifnames[];
 void console_set_fd(int fd);
 void console_flush(void);
 
-/* Capture: from console_capture_begin() until console_capture_end(), everything the shared code
- * prints is collected (newline stays "\n") instead of going to the console. End returns the
- * collected bytes (valid until the next begin); truncated is set when CAPTURE_MAX was hit. */
+/* Runs NUL-terminated commands (one per line) for a web or CLI-socket client and returns what
+ * they printed (newline stays "\n"; never NULL, valid until the next call); truncated is set
+ * when CAPTURE_MAX was hit. The console user's half-typed line is kept, a `passwd <pw>` is hashed
+ * (auth_take_plain) and wiped from `cmds`. The result of the last command is in err_status. */
 #define CAPTURE_MAX 65536
-void console_capture_begin(void);
-const char *console_capture_end(size_t *len, bool *truncated);
+const char *console_run(uint8_t *cmds, size_t *len, bool *truncated);
 
 /* Console input: the bytes of a terminal or pipe, handed to the line editor the way the
  * serial ISR does on the 8051. Every complete line runs as a command. */
@@ -46,7 +46,7 @@ void cli_service(struct pollfd *fds, int64_t now);
 /* Web login (auth.c). The password exists only as a crypt(3) SHA-512 hash; the shared `passwd`
  * command leaves plaintext in passwd[], which auth_take_plain() hashes and clears: call it after
  * every run of the command parser. */
-void auth_take_plain(void);
+bool auth_take_plain(void);	/* true if there was a plaintext password to take */
 bool auth_has_password(void);
 bool auth_check_password(const char *pw);
 /* A new session replaces the old one (as on the 8051); id receives its 32 hex digits. */

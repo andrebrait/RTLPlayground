@@ -6,8 +6,9 @@
 #   make test                             the console test
 #
 # Builds output/rtlplayground (the daemon), output/swcli (its command-line client) and, through the
-# top-level html_min target, the minified web UI in $(ROOT)/output/html_min that the daemon serves
-# from --www (compiled in as the default).
+# top-level html_min target, the minified web UI in $(ROOT)/output/html_min with a gzip copy
+# (<name>.gz) of every file but login.html, as the 8051 image holds it. The daemon serves a
+# directory like that from --www (default /usr/share/rtlplayground/www); the bench passes this one.
 
 BOARD ?= BENCH6
 ROOT   = ../..
@@ -40,9 +41,7 @@ LOCAL  = main.c console.c state.c ports.c http.c auth.c cli_sock.c stubs_2a_pend
 OBJS = $(addprefix $(OUT)/,$(LOCAL:.c=.o)) \
        $(addprefix $(OUT)/shared/,$(SHARED:.c=.o))
 
-# The web UI the daemon serves unless told otherwise (--www).
-WWW = $(abspath $(ROOT)/output/html_min)
-CFLAGS += -DDEFAULT_WWW='"$(WWW)"'
+WWW = $(ROOT)/output/html_min
 
 all: $(OUT)/rtlplayground $(OUT)/swcli html_min
 
@@ -56,6 +55,9 @@ $(OUT)/swcli: swcli.c | $(OUT)
 # PLATFORM= keeps the top-level makefile from delegating straight back here.
 html_min:
 	$(MAKE) -C $(ROOT) PLATFORM= html_min
+	@for f in $(WWW)/*; do \
+		case $$f in *.gz|*/login.html) ;; *) gzip -9n -c $$f > $$f.gz || exit 1 ;; esac; \
+	done
 
 # boards/$(BOARD).c is the only file that names a board: an unknown BOARD stops here.
 boards/$(BOARD).c:
