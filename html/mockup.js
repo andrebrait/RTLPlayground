@@ -397,9 +397,25 @@ function jControls(p){
   J.rows[i]=r;
   return r;
 }
+// Every status badge in a column is as wide as the widest label that column can show in the current
+// language, so the ⓘ that follows lines up without right-aligning it
+function fitBadges(){
+  var sets={fitlink:LINKS.slice(1).concat([t("c_off"),t("c_down")]),fitfc:["TX","RX","TX/RX",t("c_off"),t("e_na")],fiteee:[t("e_active"),t("e_idle"),t("e_na")]};
+  var probe=h("div",{style:"position:absolute;visibility:hidden"});document.body.appendChild(probe);
+  var css="";
+  for(var k in sets){
+    probe.innerHTML=sets[k].map(function(s){return badge(s,"ok")}).join("");
+    var w=0;[].forEach.call(probe.children,function(b){b.style.display="inline-block";w=Math.max(w,b.offsetWidth)});
+    css+="."+k+" .badge{display:inline-block;box-sizing:border-box;text-align:center;min-width:"+Math.ceil(w)+"px}";
+  }
+  probe.remove();
+  var st=$("fitcss")||document.head.appendChild(h("style",{id:"fitcss"}));st.textContent=css;
+}
 function jFeat(ctl,st,info,p){
-  return h("span",{style:"white-space:nowrap;display:flex;gap:6px;align-items:center;width:100%"},
-    [ctl?ctl.parentNode:h("span",{html:badge(t("e_na"))}),h("span",{html:st}),h("span",{style:"flex:1"}),iBtn(function(){info(p)})]);
+  // the n/a badge takes the switch's place, so it gets the switch's width
+  return h("span",{style:"white-space:nowrap;display:inline-flex;gap:6px;align-items:center"},
+    [ctl?ctl.parentNode:h("span",{style:"width:34px;flex:none",html:badge(t("e_na"))}),
+     h("span",{class:info===fcInfo?"fitfc":"fiteee",html:st}),iBtn(function(){info(p)})]);
 }
 function jRead(i){var r=J.rows[i];return{en:r.en.checked,name:r.name.value.trim(),spd:r.spd.value,mtu:r.mtu.value,fc:r.fc&&r.fc.checked,eee:r.eee&&r.eee.checked}}
 function jSnapshot(){J.rows.forEach(function(_,i){J.orig[i]=jRead(i)})}
@@ -447,7 +463,7 @@ function jDemo(){
   jUpdate();
 }
 VARIANTS.J=function(){
-  J={orig:[],rows:[]};
+  J={orig:[],rows:[]};fitBadges();
   setHead([[t("c_port")],[t("c_enabled")],[t("c_name")],[t("c_link")],[t("pt_speed")],[t("pt_mtu")],[t("nav_fc")],[t("nav_eee")]]);
   var tb=$("ptable").tBodies[0];
   S.ports.forEach(function(p){
@@ -466,7 +482,7 @@ VARIANTS.J=function(){
 };
 // JM: phone cards with the same controls and the same page-wide Apply bar
 VARIANTS.JM=function(){
-  J={orig:[],rows:[]};
+  J={orig:[],rows:[]};fitBadges();
   var wrap=$("ptable").closest(".scrollx");wrap.style.display="none";
   var list=h("div",{class:"mockx",style:"display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px"});
   S.ports.forEach(function(p){
@@ -485,6 +501,8 @@ VARIANTS.JM=function(){
   list.after(jBar());
   loadMtu().then(function(){jSnapshot();jUpdate();if(JDEMO)setTimeout(jDemo,300)});
 };
+// JDDE: same as JD in German, to show the badge widths follow the language
+VARIANTS.JDDE=function(){rtlLang="de";LANG.de.nav_fc="Flusskontrolle";i18nApply();VARIANTS.JD()};
 var JDEMO=false;
 ["J","JM"].forEach(function(v){var f=VARIANTS[v];VARIANTS[v]=function(){LINKINFO=true;f()};VARIANTS[v+"D"]=function(){JDEMO=true;VARIANTS[v]()}});
 VARIANTS.JFC=function(){VARIANTS.J();fcInfo(S.ports[2])};
@@ -501,7 +519,7 @@ function mockStatus(){
   S.ports.forEach(function(p){
     var i=p.portNum-1,el=$("plink"+i),mc=$("pmac"+i);
     if(mc)mc.textContent=parseInt(p.macs,16)&0x1fff;
-    if(el){el.innerHTML=linkBadge(p);if(LINKINFO){var w=h("span",{style:"display:flex;align-items:center;width:100%"},[h("span",{html:el.innerHTML}),h("span",{style:"flex:1;min-width:8px"}),infoBtn(p)]);el.innerHTML="";el.appendChild(w)}}
+    if(el){el.innerHTML=linkBadge(p);if(LINKINFO){var w=h("span",{style:"display:inline-flex;align-items:center;white-space:nowrap"},[h("span",{class:"fitlink",html:el.innerHTML}),infoBtn(p)]);el.innerHTML="";el.appendChild(w)}}
   });
 }
 function mock(v){
