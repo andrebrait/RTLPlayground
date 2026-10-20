@@ -72,7 +72,7 @@ static bool starts_passwd(const char *e, size_t n, size_t *rest)
 
 static void history_rewrite(bool drop)
 {
-	static char lin[CMD_HISTORY_SIZE], out[CMD_HISTORY_SIZE + 16];
+	static char lin[CMD_HISTORY_SIZE], out[2 * CMD_HISTORY_SIZE];
 	size_t o = 0, skip;
 	unsigned i = 0;
 
@@ -103,17 +103,30 @@ static void history_rewrite(bool drop)
 		begins = (!prev || prev == '\n') && starts_passwd(lin + start, end - start, &rest);
 		if (begins && drop && end - start == sizeof HIST_MASKED - 1 && !memcmp(lin + start, HIST_MASKED, end - start))
 			continue;
+		/* Masking lengthens a short entry ("passwd a\n" 9 bytes -> 12), by a third at most, so out holds
+		 * twice the ring; every write is still bounded, and what would not fit is not written. */
 		if (begins && !drop) {
-			memcpy(out + o, HIST_MASKED, sizeof HIST_MASKED - 1);
-			o += sizeof HIST_MASKED - 1;
-			if (term)
-				out[o++] = '\n';
+			size_t n = sizeof HIST_MASKED - 1 + term;
+
+			if (o + n <= sizeof out) {
+				memcpy(out + o, HIST_MASKED, sizeof HIST_MASKED - 1);
+				if (term)
+					out[o + n - 1] = '\n';
+				o += n;
+			}
 			continue;
 		}
-		memcpy(out + o, lin + start, end - start + term);
-		o += end - start + term;
+		if (o + (end - start + term) <= sizeof out) {
+			memcpy(out + o, lin + start, end - start + term);
+			o += end - start + term;
+		}
 	}
-	skip = o > CMD_HISTORY_SIZE ? o - CMD_HISTORY_SIZE : 0;	/* the oldest bytes fall off the ring */
+	/* Keep two NUL bytes in front of the oldest entry: the readers start one byte past the write
+	 * position and skip to the first '\n' or NUL, so with fewer they would skip the oldest entry and print
+	 * its end as an empty line. What does not fit falls off the ring, whole entries only. */
+	skip = o > CMD_HISTORY_SIZE - 2 ? o - (CMD_HISTORY_SIZE - 2) : 0;
+	while (skip && skip < o && out[skip - 1] != '\n')
+		skip++;
 	for (unsigned k = 0; k < CMD_HISTORY_SIZE; k++)
 		cmd_history[k] = 0;
 	for (size_t k = skip; k < o; k++)

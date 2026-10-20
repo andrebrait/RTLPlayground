@@ -5,6 +5,13 @@
  * by POSTing the whole text; here the area is `view`, a RAM image with the same shape (text, then
  * zeros up to CONFIG_LEN) that config_read() serves to execute_config() and to GET /config.
  *
+ * The EFFECTIVE configuration (set_effective): when the file has no command but the password (it is
+ * missing, empty, or only holds the first password), `view` is the built-in default (every port in
+ * VLAN 1 with PVID 1, VLAN 1 the management VLAN, DHCP on) followed by the file's lines; any other
+ * file is `view` as it is. The default is thus ordinary text that runs at start and that GET /config
+ * returns, so the web UI's Save, which merges its changes into what it reads, writes the default's
+ * lines into the file together with the change, and the next start does not lose them.
+ *
  * Saving is atomic: write .new and fsync it, rename the old file to .bak, rename .new into
  * place, fsync the directory. A crash leaves either the old file or, between the two renames,
  * no startup-config with .bak (the complete old file) and .new (complete only if it was synced:
@@ -251,54 +258,68 @@ void config_open(const char *d)
 		auth_set_hash(hash);
 }
 
-/* Applies the factory state with the same commands a user would type, so the same code paths run:
- * every port an untagged member of VLAN 1 with PVID 1, VLAN 1 the management VLAN, DHCP on. */
-static void apply_default(void)
+/* The factory state as the commands a user would type, so the same code paths run: every port an
+ * untagged member of VLAN 1 with PVID 1, VLAN 1 the management VLAN, DHCP on. */
+static size_t default_text(char *buf, size_t cap)
 {
-	char cmds[256];
-	size_t n = snprintf(cmds, sizeof cmds, "vlan 1");
+	size_t n = snprintf(buf, cap, "vlan 1");
 
-	for (uint8_t i = machine.min_port; i <= machine.max_port; i++)
-		n += snprintf(cmds + n, sizeof cmds - n, " %d", machine.log_to_phys_port[i]);
-	n += snprintf(cmds + n, sizeof cmds - n, "\n");
-	for (uint8_t i = machine.min_port; i <= machine.max_port; i++)
-		n += snprintf(cmds + n, sizeof cmds - n, "pvid %d 1\n", machine.log_to_phys_port[i]);
-	snprintf(cmds + n, sizeof cmds - n, "vlan 1 mgmt\nip dhcp\n");
-	save_cmd = 0;
-	execute_commands((uint8_t *)cmds);
-	mgmt_apply();
-	clear_command_history();
-	save_cmd = 1;
+	for (uint8_t i = machine.min_port; i <= machine.max_port && n < cap; i++)
+		n += snprintf(buf + n, cap - n, " %d", machine.log_to_phys_port[i]);
+	if (n < cap)
+		n += snprintf(buf + n, cap - n, "\n");
+	for (uint8_t i = machine.min_port; i <= machine.max_port && n < cap; i++)
+		n += snprintf(buf + n, cap - n, "pvid %d 1\n", machine.log_to_phys_port[i]);
+	if (n < cap)
+		n += snprintf(buf + n, cap - n, "vlan 1 mgmt\nip dhcp\n");
+	return n < cap ? n : cap - 1;
 }
 
-/* True if the configuration in view says nothing but the password: the built-in default then runs
- * (the first password is stored on its own, before anything else is saved, config_persist_password). */
-static bool view_is_default(void)
+/* True if the text says nothing but the password (blank lines and passwdhash lines only). */
+static bool only_password(const char *text, size_t n)
 {
-	size_t n = strnlen(view, sizeof view), p = 0;
+	size_t p = 0;
 	struct line ln;
 
 	while (p < n) {
-		classify(view + p, n - p, &ln);
+		classify(text + p, n - p, &ln);
 		for (size_t i = 0; i < ln.len; i++)
-			if (view[p + i] != ' ' && view[p + i] != '\t' && ln.kind != HASH)
+			if (text[p + i] != ' ' && text[p + i] != '\t' && ln.kind != HASH)
 				return false;
 		p += ln.len + (p + ln.len < n);
 	}
 	return true;
 }
 
+/* Sets view to the EFFECTIVE startup configuration of the stored text: the built-in default
+ * followed by the text when the text has no command but the password (an empty or missing file
+ * included), the text alone otherwise. The effective text is what runs at start, what GET /config
+ * returns and therefore what the web UI's Save merges its changes into: a file saved after any
+ * change keeps the default's lines (DHCP, the VLAN 1 layout) instead of losing them. */
+static void set_effective(const char *text, size_t n)
+{
+	char buf[CONFIG_LEN];
+	size_t d = 0;
+
+	if (only_password(text, n))
+		d = default_text(buf, sizeof buf);
+	if (d + n > sizeof buf)	/* cannot happen with a password line only; never cut a file */
+		d = 0;
+	if (n > sizeof buf)
+		n = sizeof buf;
+	memcpy(buf + d, text, n);
+	set_view(buf, d + n);
+	explicit_bzero(buf, sizeof buf);
+}
+
 void config_startup(void)
 {
-	bool empty = view_is_default();	/* view has no NUL when the file filled it */
-
+	set_effective(view, strnlen(view, sizeof view));	/* view has no NUL when the file filled it */
 	execute_config();
 	mgmt_apply();	/* ip, netmask and gw of the file apply together, whatever their order */
 	/* execute_config seeds the 8051's default password "1234" before running the file; on Linux
 	 * that must not become a login. A password in the file arrived as a `passwdhash` line. */
 	memset(passwd, 0, sizeof passwd);
-	if (empty)
-		apply_default();
 }
 
 static bool write_new(const char *file, const char *data, size_t len)
@@ -376,7 +397,7 @@ bool config_persist_password(const char *hash)
 		return false;
 	}
 	n += snprintf(cur + n, sizeof cur - n, "passwdhash %s\n", hash);
-	/* nobody sent this text: what the web UI reads back is what is on the disk */
+	/* nobody sent this text: the web UI reads back what is on the disk, as the effective text */
 	return save_text((const uint8_t *)cur, n, true);
 }
 
@@ -423,7 +444,7 @@ static bool save_text(const uint8_t *text, size_t len, bool view_is_disk)
 		return false;
 	}
 	if (view_is_disk)
-		set_view(disk, dlen);
+		set_effective(disk, dlen);
 	else
 		set_view((const char *)text, len);
 	if (hash[0])

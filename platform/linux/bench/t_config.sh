@@ -62,7 +62,9 @@ assert_eq "the default ran after /reset: DHCP is on" 1 "$(udhcpc_up)"
 assert_eq "same process" "$pid" "$(cat "$RUN/pid")"
 assert_eq "/cmd_log is still empty" "" "$(swcurl -b "$jar" "$SW_URL/cmd_log")"
 assert_eq "the file is unchanged" 1 "$(wc -l < "$cfg")"
-assert_eq "GET /config is the passwdhash line" "$(cat "$cfg")" "$(get_cfg)"
+# the effective configuration: the built-in default, then the file's lines (here only the password)
+dflt=$'vlan 1 1 2 3 4 5 6\npvid 1 1\npvid 2 1\npvid 3 1\npvid 4 1\npvid 5 1\npvid 6 1\nvlan 1 mgmt\nip dhcp'
+assert_eq "GET /config is the default followed by the passwdhash line" "$dflt"$'\n'"$(cat "$cfg")" "$(get_cfg)"
 
 # ---- POST: plaintext password hashed, file 0600, the password-only file becomes the .bak ----
 printf 'hostname bench1\npasswd bench-pw\n' > "$RUN/a.txt"
@@ -254,6 +256,17 @@ assert_eq "wrapped history: every line is a hostname command or the masked passw
 assert_eq "wrapped history: the newest entry is the last password" "passwd ****" "$(tail -n 1 <<< "$log")"
 assert_eq "wrapped history: entries alternate" 0 "$(awk 'NR > 1 && (($0 ~ /^passwd/) == (prev ~ /^passwd/)) { bad++ } { prev = $0 } END { print bad + 0 }' <<< "$log")"
 assert_eq "wrapped history: the newest hostname is kept" "hostname h300" "$(tail -n 2 <<< "$log" | head -n 1)"
+# one POST /cmd of 12 short passwd lines into a full ring: the masked entries are longer than what was typed
+# (`passwd a` 9 bytes -> 12), the rewrite must stay inside its buffer (an overflow kills the daemon, ASan sees it)
+body=$(for i in $(seq 12); do echo "passwd a"; done)
+assert_eq "POST /cmd with 12 passwd lines" 200 "$(swcurl -b "$jar" --data-binary "$body" -o /dev/null -w '%{http_code}' "$SW_URL/cmd")"
+kill -0 "$(cat "$RUN/pid")" 2>/dev/null || { echo "the daemon died on a POST /cmd of 12 passwd lines into a full ring"; cat "$RUN/daemon.log"; exit 1; }
+login a || { echo "login with the password of the last passwd line failed"; exit 1; }
+log=$(swcurl -b "$jar" "$SW_URL/cmd_log")
+assert_eq "full ring + 12 passwd lines: no password text" 0 "$(grep -c 'passwd [^*]' <<< "$log")"
+assert_eq "full ring + 12 passwd lines: the newest entry is masked" "passwd ****" "$(tail -n 1 <<< "$log")"
+assert_eq "full ring + 12 passwd lines: the older entries are intact" 0 "$(grep -cvE '^(hostname h[0-9]+|passwd \*\*\*\*)$' <<< "$log")"
+assert_eq "full ring + 12 passwd lines: the 12 are there" 12 "$(tail -n 12 <<< "$log" | grep -cx 'passwd \*\*\*\*')"
 sw_cmd "passwd $oldpw" >/dev/null; curpw=$oldpw; newest	# the file still holds this one: runtime changes need a save to survive a restart
 
 # ---- failures leave the old file, no .new, the old read-back and the old password ----
@@ -307,3 +320,23 @@ sw_stop
 echo "hostname beyond" >> "$cfg"
 sw_start
 assert_eq "bytes past CONFIG_LEN are not part of the configuration" abcdefghijkl "$(sw_cmd hostname)"
+
+# ---- the default and the UI's Save: a Save of any other change keeps the default's lines ----
+# The UI's Save reads GET /config, merges the history on top (app.js mergeConf: the lines it read stay, a
+# `hostname` replaces a hostname line) and POSTs the result.
+sw_stop; rm -rf "$SW_CFG"; sw_start
+sw_cmd "passwd save-pw" >/dev/null; curpw=save-pw; newest
+assert_eq "fresh daemon: the effective configuration is the default and the hash" "$dflt"$'\n'"$(cat "$cfg")" "$(get_cfg)"
+sw_cmd "hostname bench2" >/dev/null
+assert_eq "the history holds the change only" "hostname bench2" "$(swcurl -b "$jar" "$SW_URL/cmd_log")"
+{ get_cfg; swcurl -b "$jar" "$SW_URL/cmd_log"; } > "$RUN/save.txt"
+assert_eq "UI-style Save" 200 "$(post_cfg "$RUN/save.txt")"
+assert_eq "the file has the default lines, the hash and the change" "$dflt"$'\n'"$(grep '^passwdhash ' "$cfg")"$'\nhostname bench2' "$(cat "$cfg")"
+assert_eq "read-back equals what was sent" "$(cat "$RUN/save.txt")" "$(get_cfg)"
+restart; newest
+assert_eq "after the restart: the saved file runs, DHCP is on" 1 "$(udhcpc_up)"
+assert_eq "hostname" bench2 "$(sw_cmd hostname)"
+assert_eq "management VLAN 1" '"mgmt":1' "$(sw_get vlanlist | grep -o '"mgmt":[0-9]*')"
+for n in 1 2 3 4 5 6; do
+	assert_eq "lan$n: only VLAN 1, as PVID, untagged" "lan$n 1 PVID Egress Untagged" "$(ip netns exec rtlp-sw bridge vlan show dev lan$n | tail -n +2 | tr -s ' ')"
+done

@@ -174,8 +174,13 @@ replayed line by line on every start, as in the flash of the 8051. It is at most
   `startup-config`. `GET /reset`, a restart of the daemon, and a reboot replay the file, so
   anything not saved is lost, as on the 8051. The exceptions are the kernel state the daemon does
   not own (see [VLANs](#vlans-and-the-bridge)).
-- With no file, an empty one, or one that holds nothing but the password line, the built-in default runs: every port an untagged member of VLAN
-  1 with PVID 1, VLAN 1 as management VLAN, and DHCP on.
+- **The built-in default and Save.** The effective startup configuration is the built-in default
+  (every port an untagged member of VLAN 1 with PVID 1, VLAN 1 as management VLAN, DHCP on)
+  followed by the file's lines when the file has no command but the password (it is missing,
+  empty, or only holds the first password); a file with any other command is used alone. `GET
+  /config` returns the effective text, so the web interface's *Save to flash* merges its changes into
+  the default lines and the saved file keeps them: the next start still has DHCP and VLAN 1. A file that
+  is uploaded or edited by hand with commands but without those lines gets no default.
 
 ## VLANs and the bridge
 

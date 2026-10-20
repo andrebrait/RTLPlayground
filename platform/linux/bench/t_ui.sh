@@ -40,9 +40,11 @@ used=$(grep -oE "[\"'\`]/[A-Za-z0-9_.-]+(\?[A-Za-z]+=)?" "$APP_JS" | tr -d "\"'\
 known=$(printf '%s\n' "$ROUTES" | cut -d'|' -f1 | sort -u)
 assert_eq "the routes app.js requests are the routes this test knows" "$known" "$used"
 # A route built at run time would not show above. The request wrappers (api, fetch, getJSON, getText)
-# take a literal path everywhere except in their own definitions: six calls, which are known.
-nonlit=$(grep -oE "\b(getJSON|getText|api|fetch)\([^\"'\`]" "$APP_JS" | wc -l)
-assert_eq "calls of the request functions with a path that is not a literal (only their definitions)" 6 "$nonlit"
+# take a literal path starting with "/" and a name everywhere except in their own definitions (six
+# calls, which are known): a relative path ("new.json"), a bare "/" glued to more text ("/"+n+".json")
+# or a variable all count.
+nonlit=$(grep -oE "\b(getJSON|getText|api|fetch)\(([^\"'\`]|[\"'\`]([^/]|/[^A-Za-z0-9_.-]))" "$APP_JS" | wc -l)
+assert_eq "calls of the request functions with a path that is not a literal route (only their definitions)" 6 "$nonlit"
 # STP is off (2b) and shows the defaults of a booting 8051 (rtl837x_stp.c stp_defaults)
 assert_eq "stp.json: off, with the 802.1D/w defaults" "0 1 8 2 20 15 6" "$(sw_get stp.json | python3 -c '
 import json, sys
