@@ -295,7 +295,7 @@ function linkTable(p){
   return d;
 }
 var _modal=modal;
-modal=function(a,b,c){$("modal").style.width="";_modal(a,b,c)};
+modal=function(a,b,c){$("modal").style.width="";$("modal").style.minWidth="";_modal(a,b,c)};
 function linkModal(p){modal(t("c_port")+" "+p.portNum+": "+t("c_link"),linkTable(p));$("modal").style.width="fit-content"}
 function infoBtn(p){
   return h("button",{title:"Link details",style:"background:none;border:0;padding:0 0 0 6px;cursor:pointer;color:var(--ac);font-size:15px;vertical-align:middle",text:"\u24d8",
@@ -365,23 +365,22 @@ VARIANTS.FL3=function(){VARIANTS.F();linkModal(S.ports[2])};
 
 // J: Enabled | Port | Name | Link (i) | Speed | MTU | Flow control (i) | EEE (i), one Apply for the whole page.
 // Every control is a draft; changed ports are highlighted and only they are sent on Apply.
-function infoModal(title,body){modal(title,body);$("modal").style.width="fit-content"}
+function infoModal(title,body){modal(title,body);$("modal").style.width="fit-content";$("modal").style.minWidth="260px"}
 function tick(on){return on?badge("\u2713","ok"):'<span class="mut">-</span>'}
-function capTable(rows){
-  var tb=h("table",{class:"t",style:"width:auto"}),r=tb.createTHead().insertRow();
-  ["",t("e_adv"),t("e_lp")].forEach(function(s){r.appendChild(h("th",{text:s}))});
-  var b=tb.createTBody();
-  rows.forEach(function(x){var tr=b.insertRow();tr.insertCell().textContent=x[0];tr.insertCell().innerHTML=tick(x[1]);tr.insertCell().innerHTML=tick(x[2])});
+// Two plain rows, label left: what this port advertises and what the link partner advertises
+function kvTable(rows){
+  var tb=h("table",{class:"t",style:"width:auto"}),b=tb.createTBody();
+  rows.forEach(function(x){var tr=b.insertRow(),c=tr.insertCell();c.className="mut";c.textContent=x[0];tr.insertCell().textContent=x[1]});
   return tb;
 }
 function sfpNote(){return h("p",{class:"small mut",style:"max-width:16em",text:"SFP ports do not advertise this."})}
 function fcInfo(p){
   var f=FC[p.portNum];
-  infoModal(t("c_port")+" "+p.portNum+": "+t("nav_fc"),p.isSFP?sfpNote():capTable([["Pause",f&1,f&4],["Asym",f&2,f&8]]));
+  infoModal(t("c_port")+" "+p.portNum+": "+t("nav_fc"),p.isSFP?sfpNote():kvTable([[t("e_adv"),fcFlags(f&3)],[t("e_lp"),fcFlags(f>>2&3)]]));
 }
 function eeeInfo(p){
-  var a=parseInt(EEE[p.portNum].adv,2),l=parseInt(EEE[p.portNum].lp,2);
-  infoModal(t("c_port")+" "+p.portNum+": "+t("nav_eee"),p.isSFP?sfpNote():capTable([["2.5G",a&1,l&1],["1G",a&2,l&2],["100M",a&4,l&4]]));
+  var e=EEE[p.portNum];
+  infoModal(t("c_port")+" "+p.portNum+": "+t("nav_eee"),p.isSFP?sfpNote():kvTable([[t("e_adv"),eeeFlags(e.adv)],[t("e_lp"),eeeFlags(e.lp)]]));
 }
 function iBtn(fn){return h("button",{title:"Details",style:"background:none;border:0;padding:0 0 0 4px;cursor:pointer;color:var(--ac);font-size:15px;vertical-align:middle",text:"\u24d8",onclick:fn})}
 var J={orig:[],rows:[]};
@@ -399,8 +398,8 @@ function jControls(p){
   return r;
 }
 function jFeat(ctl,st,info,p){
-  return h("span",{style:"white-space:nowrap;display:inline-flex;gap:6px;align-items:center"},
-    [ctl?ctl.parentNode:h("span",{html:badge(t("e_na"))}),h("span",{html:st}),iBtn(function(){info(p)})]);
+  return h("span",{style:"white-space:nowrap;display:flex;gap:6px;align-items:center;width:100%"},
+    [ctl?ctl.parentNode:h("span",{html:badge(t("e_na"))}),h("span",{html:st}),h("span",{style:"flex:1"}),iBtn(function(){info(p)})]);
 }
 function jRead(i){var r=J.rows[i];return{en:r.en.checked,name:r.name.value.trim(),spd:r.spd.value,mtu:r.mtu.value,fc:r.fc&&r.fc.checked,eee:r.eee&&r.eee.checked}}
 function jSnapshot(){J.rows.forEach(function(_,i){J.orig[i]=jRead(i)})}
@@ -449,12 +448,12 @@ function jDemo(){
 }
 VARIANTS.J=function(){
   J={orig:[],rows:[]};
-  setHead([[t("c_enabled")],[t("c_port")],[t("c_name")],[t("c_link")],[t("pt_speed")],[t("pt_mtu")],[t("nav_fc")],[t("nav_eee")]]);
+  setHead([[t("c_port")],[t("c_enabled")],[t("c_name")],[t("c_link")],[t("pt_speed")],[t("pt_mtu")],[t("nav_fc")],[t("nav_eee")]]);
   var tb=$("ptable").tBodies[0];
   S.ports.forEach(function(p){
     var i=p.portNum-1,r=jControls(p),tr=tb.insertRow();r.row=tr;
-    tr.insertCell().appendChild(r.en.parentNode);
     tr.insertCell().textContent=p.portNum+(p.isSFP?" (SFP)":"");
+    tr.insertCell().appendChild(r.en.parentNode);
     tr.insertCell().appendChild(r.name);
     var lk=tr.insertCell();lk.id="plink"+i;lk.style.whiteSpace="nowrap";
     tr.insertCell().appendChild(r.spd);
@@ -474,12 +473,12 @@ VARIANTS.JM=function(){
     var i=p.portNum-1,r=jControls(p);
     r.name.style.cssText="width:100%;box-sizing:border-box";r.spd.style.width="100%";
     var g=h("div",{style:"display:grid;grid-template-columns:7.5em 1fr;gap:6px 10px;align-items:center"});
-    [[t("c_name"),r.name],[t("c_link"),h("span",{id:"plink"+i})],[t("pt_speed"),r.spd],[t("pt_mtu"),r.mtu],
+    [[t("c_name"),r.name],[t("c_link"),h("div",{id:"plink"+i})],[t("pt_speed"),r.spd],[t("pt_mtu"),r.mtu],
      [t("nav_fc"),jFeat(r.fc,fcNeg(p),fcInfo,p)],[t("nav_eee"),jFeat(r.eee,eeeSt(p),eeeInfo,p)]].forEach(function(kv){
       g.appendChild(h("span",{class:"mut small",text:kv[0]}));g.appendChild(h("div",null,[kv[1]]));
     });
     r.row=h("div",{style:"border:1px solid var(--bd);border-radius:8px;padding:10px 12px"},[
-      h("div",{style:"display:flex;gap:10px;align-items:center;margin-bottom:8px"},[r.en.parentNode,h("b",{text:t("c_port")+" "+p.portNum+(p.isSFP?" (SFP)":"")})]),g]);
+      h("div",{style:"display:flex;gap:10px;align-items:center;margin-bottom:8px"},[h("b",{text:t("c_port")+" "+p.portNum+(p.isSFP?" (SFP)":"")}),r.en.parentNode]),g]);
     list.appendChild(r.row);
   });
   wrap.after(list);
@@ -502,7 +501,7 @@ function mockStatus(){
   S.ports.forEach(function(p){
     var i=p.portNum-1,el=$("plink"+i),mc=$("pmac"+i);
     if(mc)mc.textContent=parseInt(p.macs,16)&0x1fff;
-    if(el){el.innerHTML=linkBadge(p);if(LINKINFO)el.appendChild(infoBtn(p))}
+    if(el){el.innerHTML=linkBadge(p);if(LINKINFO){var w=h("span",{style:"display:flex;align-items:center;width:100%"},[h("span",{html:el.innerHTML}),h("span",{style:"flex:1;min-width:8px"}),infoBtn(p)]);el.innerHTML="";el.appendChild(w)}}
   });
 }
 function mock(v){
