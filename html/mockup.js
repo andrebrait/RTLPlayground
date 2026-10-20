@@ -3,7 +3,7 @@
 LANG.en.nav_fc="Flow control";LANG.en.fc_title="Flow control (802.3x pause)";LANG.en.fc_neg="Negotiated";
 var FC={}, EEE={};
 function fakeData(){
-  S.ports.forEach(function(p){if(p.link>0)p.link=p.isSFP?5:[6,6,3,2][p.portNum%4];if(!p.isSFP)p.adv=p.portNum===7?"011111":"111111"});
+  S.ports.forEach(function(p){if(p.link>0)p.link=p.isSFP?5:({1:6,3:2,5:3,7:2}[p.portNum]||6);if(!p.isSFP)p.adv=p.portNum===7?"011111":"111111"});
   // fc bits as in PR #652: 0 adv pause, 1 adv asym, 2-3 partner, 4 TX, 5 RX negotiated
   S.ports.forEach(function(p){
     var i=p.portNum, up=p.enabled&&p.link>0;
@@ -21,6 +21,8 @@ LANG.en.e_inactive="Inactive";LANG.de.e_inactive="Inaktiv";LANG.en.st_off="Off";
 // Off looks like a disabled port tile in the strip (faded, dashed); Inactive and Down like a port without link (solid outline)
 function dash(){return badge(t("st_off"),"st-off")}
 function inact(s){return badge(s,"st-in")}
+// Link badge in the colour of this port's tile in the strip (LINKC per speed), as the link pop-up already does
+function linkUp(p){var pc="var("+(LINKC[p.link]||"--s1000")+")";return'<span class="badge" style="color:'+pc+';background:color-mix(in srgb,'+pc+' 10%,var(--panel2))">'+esc(LINKS[p.link])+"</span>"}
 // flow control shows the negotiated direction or Inactive
 function fcNeg(p){var f=FC[p.portNum],n=f>>4&3;return!p.enabled||(!p.isSFP&&!(f&1))?dash():n?badge(["","TX","RX","TX/RX"][n],"ok"):inact(t("e_inactive"))}
 function eeeSt(p){var e=EEE[p.portNum];return p.isSFP?badge(t("e_na")):!p.enabled||!parseInt(e.adv,2)?dash():e.active?badge(t("e_active"),"ok"):inact(t("e_inactive"))}
@@ -548,7 +550,7 @@ function mockStatus(){
   S.ports.forEach(function(p){
     var i=p.portNum-1,el=$("plink"+i),mc=$("pmac"+i);
     if(mc)mc.textContent=parseInt(p.macs,16)&0x1fff;
-    if(el){el.innerHTML=!LINKINFO?linkBadge(p):!p.enabled?dash():p.link>0?linkBadge(p):inact(t("st_down"));if(LINKINFO){var w=h("span",{style:"display:inline-flex;align-items:center;white-space:nowrap"},[h("span",{class:"fitlink",html:el.innerHTML}),infoBtn(p)]);el.innerHTML="";el.appendChild(w)}}
+    if(el){el.innerHTML=!LINKINFO?linkBadge(p):!p.enabled?dash():p.link>0?linkUp(p):inact(t("st_down"));if(LINKINFO){var w=h("span",{style:"display:inline-flex;align-items:center;white-space:nowrap"},[h("span",{class:"fitlink",html:el.innerHTML}),infoBtn(p)]);el.innerHTML="";el.appendChild(w)}}
   });
 }
 function mock(v){
