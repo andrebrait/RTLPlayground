@@ -47,7 +47,7 @@ cat > "$RUN/flood.py" <<'PY'
 import socket, time
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
 while True:
-    s.sendto(b"x", ("192.0.2.255", 9)); time.sleep(0.001)
+    s.sendto(b"rtlp-bench-frame", ("192.0.2.255", 9)); time.sleep(0.001)
 PY
 mac1=$(in_host 1 cat /sys/class/net/h1/address); mac3=$(in_host 3 cat /sys/class/net/h3/address); mac4=$(in_host 4 cat /sys/class/net/h4/address)
 listen() { # <host> <source MAC> <out file> <ready file> [seconds]: starts a listener, its pid is $!

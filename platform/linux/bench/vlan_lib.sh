@@ -27,7 +27,7 @@ routes_of() { rtlp_sw ip -4 route show default | awk -v d="$1" '$4 == "dev" && $
 defroute() { routes_of swbr; }
 dummy_route() { routes_of dummy0; }
 
-# seen.py <ready file> <seconds> <source MAC> [dev]: counts the frames of that source MAC (payload "x")
+# seen.py <ready file> <seconds> <source MAC> [dev]: counts the frames of that source MAC that carry the bench marker
 # seen for that long, on dev (default: every device of the namespace); the ready file appears once the
 # socket is open, so nothing sent after that is missed; SIGTERM ends it early (it still prints)
 cat > "$RUN/seen.py" <<'PY'
@@ -43,7 +43,7 @@ try:
     while time.time() < end:
         try: f = s.recv(2048)
         except socket.timeout: continue
-        if f[6:12] == mac and f.endswith(b"x"): n += 1
+        if f[6:12] == mac and b"rtlp-bench-frame" in f: n += 1
 finally:
     print(n)
 PY
@@ -51,7 +51,7 @@ cat > "$RUN/send.py" <<'PY'
 import socket, sys
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
 if sys.argv[1]: s.setsockopt(socket.SOL_SOCKET, socket.SO_BINDTODEVICE, sys.argv[1].encode())
-for _ in range(5): s.sendto(b"x", (sys.argv[2] if len(sys.argv) > 2 else "192.0.2.255", 9))
+for _ in range(5): s.sendto(b"rtlp-bench-frame", (sys.argv[2] if len(sys.argv) > 2 else "192.0.2.255", 9))
 PY
 # wait_ready: until the listener just started has opened its socket (its ready file)
 wait_ready() { local i; for i in $(seq 100); do [[ -e $RUN/ready ]] && return 0; sleep 0.05; done; echo "listener not ready"; exit 1; }
