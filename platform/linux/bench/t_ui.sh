@@ -33,10 +33,29 @@ ROUTES='/status.json|json|
 /reset|skip|restarts the daemon; t_http.sh checks it
 /login.html|skip|a navigation target (fetched below)'
 
-used=$(grep -oE '"/[a-z0-9_.]+(\?[a-z]+=)?' "$APP_JS" | tr -d '"' | sort -u)
+# Every quote style, and the path may be glued to more text ("/vlan.json?vid="+id): the route is what
+# follows the quote up to the query's "=".
+used=$(grep -oE "[\"'\`]/[A-Za-z0-9_.-]+(\?[A-Za-z]+=)?" "$APP_JS" | tr -d "\"'\`" | sort -u)
 [[ -n $used ]] || { echo "no route found in $APP_JS"; exit 1; }
 known=$(printf '%s\n' "$ROUTES" | cut -d'|' -f1 | sort -u)
 assert_eq "the routes app.js requests are the routes this test knows" "$known" "$used"
+# A route built at run time would not show above. The request wrappers (api, fetch, getJSON, getText)
+# take a literal path everywhere except in their own definitions: six calls, which are known.
+nonlit=$(grep -oE "\b(getJSON|getText|api|fetch)\([^\"'\`]" "$APP_JS" | wc -l)
+assert_eq "calls of the request functions with a path that is not a literal (only their definitions)" 6 "$nonlit"
+# STP is off (2b) and shows the defaults of a booting 8051 (rtl837x_stp.c stp_defaults)
+assert_eq "stp.json: off, with the 802.1D/w defaults" "0 1 8 2 20 15 6" "$(sw_get stp.json | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+print(*[d[k] for k in ("on", "rstp", "prio", "hello", "maxage", "fwd", "txhold")])')"
+# the shape of the pages the UI builds its tables from
+assert_eq "status.json has one entry per port with link and macs" "6 6 6" "$(sw_get status.json | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+print(len(d), sum("link" in p for p in d), sum("macs" in p for p in d))')"
+assert_eq "stp.json lists every port" "1 2 3 4 5 6" "$(sw_get stp.json | python3 -c '
+import json, sys
+print(*[p["p"] for p in json.load(sys.stdin)["ports"]])')"
 
 while IFS='|' read -r route kind val; do
 	case $kind in

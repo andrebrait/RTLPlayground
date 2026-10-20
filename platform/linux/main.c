@@ -77,6 +77,7 @@ int main(int argc, char **argv)
 	ports_init();
 	bridge_init();
 	mgmt_init(dhcp_script);
+	stp_state_init();
 	/* Runs the startup configuration (or the default); the shared parser records commands in the
 	 * history only from here on. */
 	config_open(cfg);

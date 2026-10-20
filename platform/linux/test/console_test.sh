@@ -56,6 +56,11 @@ run 'passwd secret\n'
 check "passwd: daemon exits 0" 0 "$rc"
 check "passwd: hashed" 1 "$(countx 'has_password=1')"
 check "passwd: plaintext cleared" 1 "$(countx 'passwd_plain_left=0')"
+# the first password is stored at once: a daemon started on the same directory has it
+run 'foo\n'
+check "first password survives a restart" 1 "$(countx 'has_password=1')"
+check "first password: only a hash on disk" 0 "$(grep -c secret "$TMP/cfg/startup-config")"
+rm -rf "$TMP/cfg" && mkdir "$TMP/cfg" && echo 'hostname console-test' > "$TMP/cfg/startup-config" || exit 1
 run 'foo\n'
 check "no passwd: no password" 1 "$(countx 'has_password=0')"
 

@@ -83,10 +83,11 @@ rtlplayground [--console] [--http <addr:port>] [--cli-socket <path>] [--www <dir
 | Option | Default | Meaning |
 |---|---|---|
 | `--console` | off | Read commands from standard input and write the prompt and output to standard output, like the serial console of the 8051. Without it the daemon does not touch its standard streams. |
-| `--http <addr:port>` | `[::]:80` | Where the web interface listens. The address is numeric, IPv6 in brackets, e.g. `0.0.0.0:8080`. |
-| `--cli-socket <path>` | `/run/rtlplayground.sock` | The Unix socket `swcli` connects to (mode 0600). |
-| `--www <dir>` | `/usr/share/rtlplayground/www` | The directory of the web interface (`make` leaves it in `output/html_min`). |
-| `--cfg-dir <dir>` | `/cfg` | Where `startup-config` lives. It is created with mode 0700. |
+| `--dump-state` | off | A test aid: print a few `name=value` lines of internal state (`has_password`, `lldp_enabled`, ...) when the daemon exits. Used by the console test; not for production. |
+| `--http <addr:port>` | `[::]:80` | Where the web interface listens. The address is numeric, IPv6 in brackets, e.g. `0.0.0.0:8080`. On a kernel without IPv6 the default falls back to `0.0.0.0:80`. |
+| `--cli-socket <path>` | `/run/rtlplayground.sock` | The Unix socket `swcli` connects to (mode 0600). `swcli` looks for the same path unless it is given `-s`. |
+| `--www <dir>` | `/usr/share/rtlplayground/www` | The directory of the web interface (`make` leaves it in `output/html_min` of the repository root, not under `platform/linux`). |
+| `--cfg-dir <dir>` | `/cfg` | Where `startup-config` lives. The directory itself is created if it is missing, but not its parents. Mode 0700 is enforced only when the directory belongs to the user the daemon runs as; otherwise the daemon logs a warning and leaves the mode alone. |
 | `--dhcp-script <script>` | `/usr/share/rtlplayground/udhcpc.script` | The BusyBox `udhcpc` event script. |
 
 The daemon is meant to run as root: it configures network interfaces, binds port 80 and starts
@@ -109,7 +110,7 @@ swcli [-s <socket>] <command words...>     # one command
 swcli [-s <socket>]                        # commands from standard input, one per line
 ```
 
-The output is exactly what the console would print. The exit status is 0 when the daemon was
+Without `-s` the socket is `/run/rtlplayground.sock`, the daemon's default. The output is exactly what the console would print. The exit status is 0 when the daemon was
 reached (also for a command that printed an error) and 1 when it was not. Use the standard-input
 form for `passwd`, because the password would otherwise be visible in the process list and in
 the shell history:
@@ -129,16 +130,26 @@ The same commands are available on the web interface (*System*, *Console*) and a
 - **Only hashes are stored.** The shared `passwd <password>` command writes the plaintext
   into a global as on the 8051; the platform hashes it (`crypt(3)`, SHA-512, random salt) right
   after the command ran and wipes the plaintext. Nothing but the `$6$...` hash is kept in memory
-  or on disk.
+  or on disk. A password is at most 20 characters (what the shared command keeps); longer input is
+  cut at 20.
+- **The first password is stored at once.** Setting the first password (when none exists) is what
+  makes the switch reachable, so the daemon writes it to `startup-config` itself, as a
+  `passwdhash` line added to the file as it is (the built-in default still runs while the file
+  holds nothing else), and removes the command from the history, so *Save to flash* has nothing
+  new to offer and the web interface shows no unsaved changes. If it cannot be written, the password
+  is set anyway, the console prints why and that it will be lost at the next restart, and the command
+  stays in the history as `passwd ****`. **Every later password change follows the 8051 model**: it
+  takes effect at once and is kept only by *Save to flash*.
 - **The startup configuration holds `passwdhash <hash>`**, not `passwd`. `passwdhash` is a command
   the platform adds; it sets the hash and prints nothing, and it refuses anything that is not
   a well-formed `$6$` hash. A saved configuration that contains a plaintext `passwd` line is rewritten into
   a `passwdhash` line before it reaches the disk, and only the last password line of a file is
   kept.
 - **The command history is scrubbed.** The shared parser records every command, including
-  `passwd <password>`. The platform overwrites the argument with asterisks as soon as the command
-  has run, so neither the console history, `GET /cmd_log` nor the merge of the history into the
-  startup configuration by *Save to flash* contains the password. When *Save* merges a line
+  `passwd <password>`. As soon as the command has run, the platform rewrites that history entry to
+  exactly `passwd ****`, whatever the password was: neither its characters nor its length remain. So
+  neither the console history, `GET /cmd_log` nor the merge of the history into the startup
+  configuration by *Save to flash* contains the password. When *Save* merges a line
   `passwd ****` back, the platform keeps the current hash instead of hashing the asterisks. A password
   that consists only of asterisks therefore cannot be set through an upload; set it on the console.
 - One session is valid at a time, as on the 8051: a new login ends the previous session, and so
@@ -163,7 +174,7 @@ replayed line by line on every start, as in the flash of the 8051. It is at most
   `startup-config`. `GET /reset`, a restart of the daemon, and a reboot replay the file, so
   anything not saved is lost, as on the 8051. The exceptions are the kernel state the daemon does
   not own (see [VLANs](#vlans-and-the-bridge)).
-- With no file, or an empty one, the built-in default runs: every port an untagged member of VLAN
+- With no file, an empty one, or one that holds nothing but the password line, the built-in default runs: every port an untagged member of VLAN
   1 with PVID 1, VLAN 1 as management VLAN, and DHCP on.
 
 ## VLANs and the bridge
@@ -288,7 +299,8 @@ docker run --rm --privileged -v "$PWD":/w -w /w rtlplayground-dev platform/linux
 `run.sh` runs every `t_*.sh` on a fresh bench and prints `ok <name>` or `FAIL <name>`; the exit
 status is 1 if any failed. The tests are `t_smoke`, `t_cli`, `t_http`, `t_http_hostile`, `t_config`,
 `t_ports`, `t_vlan`, `t_restart`, `t_l2` and `t_ui`, which fetches every route that `html/app.js`
-requests and fails when the script gains a route the test does not know. See
+requests (except `/upload` and `/reset`, which `t_http` covers) and fails when `app.js` gains a route the
+test does not know. See
 `platform/linux/bench/README.md` for the helpers. To look at the web interface of a bench by hand,
 run the daemon in `rtlp-sw` and forward a port into the namespace, for example with `socat`
 and `ip netns exec rtlp-sw`, inside a privileged container with its port published.

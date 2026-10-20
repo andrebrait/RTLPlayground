@@ -14,6 +14,7 @@
 #include "linux.h"
 
 extern __xdata uint8_t cmd_history[CMD_HISTORY_SIZE];
+extern __xdata uint16_t cmd_history_ptr;
 
 #define SESSION_ID_LEN 32
 #define SESSION_TIMEOUT_DEFAULT 200	/* seconds, as httpd.c */
@@ -47,32 +48,78 @@ static bool same(const char *a, const char *b)
 	return !diff;
 }
 
-/* Overwrites every `passwd <pw>` entry of the shared command history (the parser records each
- * command, passwords included) with `passwd ****`. An entry starts after a '\n' or NUL. */
-static void scrub_history(void)
-{
-	for (unsigned q = 0; q < CMD_HISTORY_SIZE; q++) {
-		unsigned p = q, prev = (q - 1) & CMD_HISTORY_MASK;
-		static const char word[] = "passwd";
+/* The shared parser records every command in the ring cmd_history (entries end with '\n', the
+ * unwritten rest is NUL, cmd_history_ptr is the next write position). A command line that starts a
+ * `passwd` entry is rewritten as exactly "passwd ****", whatever the password was: neither its
+ * characters nor its length stay in the history, and the web UI's Save merges the line back as a
+ * password line that keeps the current hash (config.c). drop removes the "passwd ****" entries
+ * instead. The entries are compacted towards the newest one; the ring pointer does not move. */
+#define HIST_MASKED "passwd ****"
 
-		if (cmd_history[prev] != 0 && cmd_history[prev] != '\n')
-			continue;
-		while (cmd_history[p] == ' ')
-			p = (p + 1) & CMD_HISTORY_MASK;
-		for (size_t i = 0; i < sizeof word - 1; i++)
-			if (cmd_history[(p + i) & CMD_HISTORY_MASK] != word[i])
-				goto next;
-		p = (p + sizeof word - 1) & CMD_HISTORY_MASK;
-		if (cmd_history[p] != ' ')
-			continue;
-		while (cmd_history[p] == ' ')
-			p = (p + 1) & CMD_HISTORY_MASK;
-		for (unsigned n = 0; n < CMD_HISTORY_SIZE && cmd_history[p] != 0 && cmd_history[p] != '\n'; n++) {
-			cmd_history[p] = '*';
-			p = (p + 1) & CMD_HISTORY_MASK;
-		}
-next:		;
+static bool starts_passwd(const char *e, size_t n, size_t *rest)
+{
+	size_t i = 0;
+
+	while (i < n && e[i] == ' ')
+		i++;
+	if (n - i < 7 || memcmp(e + i, "passwd ", 7))
+		return false;
+	for (i += 7; i < n && e[i] == ' '; i++)
+		;
+	*rest = i;
+	return i < n;
+}
+
+static void history_rewrite(bool drop)
+{
+	static char lin[CMD_HISTORY_SIZE], out[CMD_HISTORY_SIZE + 16];
+	size_t o = 0, skip;
+	unsigned i = 0;
+
+	for (unsigned k = 0; k < CMD_HISTORY_SIZE; k++)
+		lin[k] = cmd_history[(cmd_history_ptr + k) & CMD_HISTORY_MASK];
+	/* A ring that has wrapped starts inside an entry the parser overwrote the head of: the readers
+	 * (page_impl.c send_cmd_log, `history`) skip to the first '\n', so does this. Without it the
+	 * compaction below would put a NUL in front of that remnant and make it look like a whole entry. */
+	if (!memchr(lin, 0, sizeof lin)) {
+		while (i < CMD_HISTORY_SIZE && lin[i] != '\n')
+			i++;
+		i += i < CMD_HISTORY_SIZE;
 	}
+	while (i < CMD_HISTORY_SIZE) {
+		unsigned start = i, end;
+		char prev = i ? lin[i - 1] : lin[CMD_HISTORY_SIZE - 1];	/* the oldest byte follows the newest */
+		bool term, begins;
+		size_t rest;
+
+		if (!lin[i]) {
+			i++;
+			continue;
+		}
+		for (end = i; end < CMD_HISTORY_SIZE && lin[end] && lin[end] != '\n'; end++)
+			;
+		term = end < CMD_HISTORY_SIZE;	/* a '\n' or NUL follows */
+		i = end + term;
+		begins = (!prev || prev == '\n') && starts_passwd(lin + start, end - start, &rest);
+		if (begins && drop && end - start == sizeof HIST_MASKED - 1 && !memcmp(lin + start, HIST_MASKED, end - start))
+			continue;
+		if (begins && !drop) {
+			memcpy(out + o, HIST_MASKED, sizeof HIST_MASKED - 1);
+			o += sizeof HIST_MASKED - 1;
+			if (term)
+				out[o++] = '\n';
+			continue;
+		}
+		memcpy(out + o, lin + start, end - start + term);
+		o += end - start + term;
+	}
+	skip = o > CMD_HISTORY_SIZE ? o - CMD_HISTORY_SIZE : 0;	/* the oldest bytes fall off the ring */
+	for (unsigned k = 0; k < CMD_HISTORY_SIZE; k++)
+		cmd_history[k] = 0;
+	for (size_t k = skip; k < o; k++)
+		cmd_history[(cmd_history_ptr - (o - skip) + (k - skip)) & CMD_HISTORY_MASK] = out[k];
+	explicit_bzero(lin, sizeof lin);
+	explicit_bzero(out, sizeof out);
 }
 
 bool auth_hash_password(const char *pw, char out[AUTH_HASH_MAX])
@@ -101,12 +148,24 @@ bool auth_hash_password(const char *pw, char out[AUTH_HASH_MAX])
  * `passwdhash` (safer than keeping a session that was granted for the old password). */
 bool auth_take_plain(void)
 {
+	bool first = !hash[0];
+
 	if (!passwd[0])
 		return false;
-	scrub_history();
+	history_rewrite(false);
 	memset(cmd_buffer, 0, CMD_BUF_SIZE);
-	if (auth_hash_password(passwd, hash))
+	if (auth_hash_password(passwd, hash)) {
 		session_id[0] = 0;	/* whoever was logged in with the old password is out */
+		/* The first password is what makes the switch reachable at all: it is stored at once, so a
+		 * restart before anyone saves cannot leave a switch with no login. Later changes follow the
+		 * 8051 model (they are saved with the rest of the configuration). */
+		if (first) {
+			if (config_persist_password(hash))
+				history_rewrite(true);	/* nothing unsaved is left in the history */
+			else
+				cmd_error("The password is set, but it could not be saved: it is lost at the next restart\n");
+		}
+	}
 	memset(passwd, 0, sizeof passwd);
 	return true;
 }

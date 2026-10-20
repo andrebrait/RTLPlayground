@@ -23,6 +23,17 @@ post_cfg() { swcurl -b "$jar" -F "configuration=@$1;filename=config.txt;type=app
 get_cfg() { swcurl -b "$jar" "$SW_URL/config"; }
 restart() { sw_stop; sw_start; }
 
+# ---- the first password cannot be stored: it is set, the reason is printed, the history keeps it ----
+RTLP_TEST_FAIL_INSTALL=1 sw_start
+assert_eq "no file yet" "" "$(ls "$SW_CFG")"
+out=$(sw_cmd "passwd failpw")
+assert_contains "a password that could not be stored says so" "could not be saved" "$out"
+assert_eq "nothing was stored" "" "$(ls "$SW_CFG")"
+login failpw || { echo "the unsaved password is not a login"; exit 1; }
+assert_eq "the history keeps the masked command" "passwd ****" "$(swcurl -b "$jar" "$SW_URL/cmd_log")"
+sw_stop
+rm -rf "$SW_CFG"
+
 # ---- first start: no file; the default applies; the 8051's "1234" is not a login ----
 sw_start
 assert_eq "cfg dir mode" 700 "$(stat -c %a "$SW_CFG")"
@@ -31,15 +42,33 @@ assert_eq "startup commands are not in the history" "" "$(sw_cmd history)"
 sw_cmd version >/dev/null	# a command is what makes the daemon hash a plaintext password left over
 login 1234 && { echo "the compiled-in default password 1234 is a login"; exit 1; }
 assert_eq "no password in the file: no password set" 401 "$(swcurl -o /dev/null -w '%{http_code}' "$SW_URL/information.json")"
+udhcpc_up() { local p n=0; for p in /proc/[0-9]*; do [[ $(tr '\0' ' ' < "$p/cmdline" 2>/dev/null) == *"udhcpc -i swbr"* ]] && n=$((n + 1)); done; echo $n; }
+assert_eq "the default started DHCP" 1 "$(udhcpc_up)"
 sw_cmd "passwd bench-pw" >/dev/null
+# the first password is stored at once, on its own line, and leaves nothing unsaved behind
+assert_eq "the first password is on disk" 1 "$(grep -c '^passwdhash \$6\$' "$cfg")"
+assert_eq "and it is the only line" 1 "$(wc -l < "$cfg")"
+assert_eq "file mode" 600 "$(stat -c %a "$cfg")"
+grep -q bench-pw "$cfg" && { echo "plaintext password on disk"; exit 1; }
+assert_eq "the console history holds no password command" 0 "$(sw_cmd history | grep -c passwd)"
 login bench-pw || { echo "login with the console password failed"; exit 1; }
-assert_eq "no stored config yet" "" "$(get_cfg)"
+assert_eq "/cmd_log holds none: nothing is unsaved" 0 "$(swcurl -b "$jar" "$SW_URL/cmd_log" | grep -c passwd)"
+# a /reset keeps the login and, as the configuration only holds the password, runs the default again
+pid=$(cat "$RUN/pid")
+assert_contains "/reset answers" "Restarting" "$(swcurl -b "$jar" "$SW_URL/reset")"
+for _ in $(seq 100); do login bench-pw && [[ $(udhcpc_up) == 1 ]] && break; sleep 0.1; done
+login bench-pw || { echo "the first password is no login after /reset"; exit 1; }
+assert_eq "the default ran after /reset: DHCP is on" 1 "$(udhcpc_up)"
+assert_eq "same process" "$pid" "$(cat "$RUN/pid")"
+assert_eq "/cmd_log is still empty" "" "$(swcurl -b "$jar" "$SW_URL/cmd_log")"
+assert_eq "the file is unchanged" 1 "$(wc -l < "$cfg")"
+assert_eq "GET /config is the passwdhash line" "$(cat "$cfg")" "$(get_cfg)"
 
-# ---- POST: plaintext password hashed, file 0600, no .bak for a first save ----
+# ---- POST: plaintext password hashed, file 0600, the password-only file becomes the .bak ----
 printf 'hostname bench1\npasswd bench-pw\n' > "$RUN/a.txt"
 assert_eq "POST /config" 200 "$(post_cfg "$RUN/a.txt")"
 assert_eq "file mode" 600 "$(stat -c %a "$cfg")"
-assert_eq "no .bak for a first save" "" "$(ls "$SW_CFG" | grep -v '^startup-config$')"
+assert_eq "the first password's file is now the .bak" "startup-config.bak" "$(ls "$SW_CFG" | grep -v '^startup-config$')"
 assert_contains "hostname stored" $'hostname bench1\n' "$(cat "$cfg")"
 [[ $(sed -n 2p "$cfg") =~ ^passwdhash\ \$6\$[^\ ]+$ ]] || { echo "line 2 is not a passwdhash line: $(cat "$cfg")"; exit 1; }
 grep -q bench-pw "$cfg" && { echo "plaintext password on disk"; exit 1; }
@@ -136,7 +165,8 @@ sw_start
 assert_eq "asterisks with no hash: no password" 1 "$(login '******'; echo $?)"
 sw_cmd "passwd x" >/dev/null
 login x || { echo "login with the console password failed"; exit 1; }
-assert_eq "asterisks with no hash: the line is dropped" "hostname hand" "$(get_cfg)"
+assert_eq "asterisks with no hash: the line is dropped, the first password is stored" "hostname hand
+passwdhash" "$(get_cfg | sed 's/^\(passwdhash\) .*/\1/')"
 
 # ---- CRLF line ends (an editor on Windows): the password line is still found and its ending kept ----
 printf 'hostname crlf\r\npasswd crlf-pw\r\n' > "$RUN/crlf.txt"
@@ -204,6 +234,27 @@ login abcdefghijklmnopqrstuvwxy && { echo "the full 25 characters log in: not cu
 login abcdefghijklmnopqrst || { echo "the first 20 characters do not log in"; exit 1; }
 curpw=abcdefghijklmnopqrst; restart
 login abcdefghijklmnopqrst || { echo "the first 20 characters do not log in after a restart"; exit 1; }
+
+# ---- the history shows `passwd ****` whatever the password was: no characters, no length ----
+newest; oldpw=$curpw
+cp "$cfg" "$RUN/pw.disk"
+for pw in a abcdefghijklmnopqrst; do sw_cmd "passwd $pw" >/dev/null; curpw=$pw; done
+cmp -s "$cfg" "$RUN/pw.disk" || { echo "a later password change was written to the file: it keeps the 8051 model (save to keep)"; exit 1; }
+login "$curpw" || { echo "login after the password changes failed"; exit 1; }
+log=$(swcurl -b "$jar" "$SW_URL/cmd_log")
+assert_eq "web history: two changed passwords of different length, the same masked line" $'passwd ****\npasswd ****' "$(grep passwd <<< "$log")"
+assert_eq "console history: the same" $'passwd ****\npasswd ****' "$(sw_cmd history | grep passwd)"
+# the ring (2048 bytes) wraps: 300 pairs of a command and a password of changing length; every password
+# line of what is left is the masked one, the other lines are intact, and the entries still alternate
+{ for i in $(seq 300); do echo "hostname h$i"; echo "passwd pw$(printf '%*s' $((i % 17)) '' | tr ' ' x)$i"; done; } | "$SWCLI" -s "$RUN/cli.sock" >/dev/null
+login "pw$(printf '%*s' $((300 % 17)) '' | tr ' ' x)300" || { echo "login with the last password of the loop failed"; exit 1; }
+log=$(swcurl -b "$jar" "$SW_URL/cmd_log")
+assert_eq "wrapped history: no password text left" 0 "$(grep -c 'pw[x0-9]' <<< "$log")"
+assert_eq "wrapped history: every line is a hostname command or the masked passwd" 0 "$(grep -cvE '^(hostname h[0-9]+|passwd \*\*\*\*)$' <<< "$log")"
+assert_eq "wrapped history: the newest entry is the last password" "passwd ****" "$(tail -n 1 <<< "$log")"
+assert_eq "wrapped history: entries alternate" 0 "$(awk 'NR > 1 && (($0 ~ /^passwd/) == (prev ~ /^passwd/)) { bad++ } { prev = $0 } END { print bad + 0 }' <<< "$log")"
+assert_eq "wrapped history: the newest hostname is kept" "hostname h300" "$(tail -n 2 <<< "$log" | head -n 1)"
+sw_cmd "passwd $oldpw" >/dev/null; curpw=$oldpw; newest	# the file still holds this one: runtime changes need a save to survive a restart
 
 # ---- failures leave the old file, no .new, the old read-back and the old password ----
 nofail() { # <what>: nothing changed since $RUN/before.disk / $beforeget

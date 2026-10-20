@@ -174,8 +174,8 @@ hist=$(sw_cmd history)
 for pw in newpw other-pw bench-pw; do
 	[[ $log$hist != *"$pw"* ]] || { echo "password $pw is in the command history: $log $hist"; exit 1; }
 done
-assert_contains "web history shows what was hidden" "passwd *****" "$log"
-assert_contains "console history shows what was hidden" "passwd ********" "$hist"
+assert_contains "web history shows what was hidden" "passwd ****" "$log"
+assert_contains "console history shows what was hidden" "passwd ****" "$hist"
 
 # ---- /reset: the daemon starts over (same process); the password was never saved, so it is gone ----
 pid=$(cat "$RUN/pid")

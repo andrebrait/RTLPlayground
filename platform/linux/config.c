@@ -271,13 +271,27 @@ static void apply_default(void)
 	save_cmd = 1;
 }
 
+/* True if the configuration in view says nothing but the password: the built-in default then runs
+ * (the first password is stored on its own, before anything else is saved, config_persist_password). */
+static bool view_is_default(void)
+{
+	size_t n = strnlen(view, sizeof view), p = 0;
+	struct line ln;
+
+	while (p < n) {
+		classify(view + p, n - p, &ln);
+		for (size_t i = 0; i < ln.len; i++)
+			if (view[p + i] != ' ' && view[p + i] != '\t' && ln.kind != HASH)
+				return false;
+		p += ln.len + (p + ln.len < n);
+	}
+	return true;
+}
+
 void config_startup(void)
 {
-	bool empty = true;
+	bool empty = view_is_default();	/* view has no NUL when the file filled it */
 
-	for (size_t i = 0; i < sizeof view && view[i]; i++)	/* view has no NUL when the file filled it */
-		if (view[i] != ' ' && view[i] != '\t' && view[i] != '\r' && view[i] != '\n')
-			empty = false;
 	execute_config();
 	mgmt_apply();	/* ip, netmask and gw of the file apply together, whatever their order */
 	/* execute_config seeds the 8051's default password "1234" before running the file; on Linux
@@ -325,7 +339,53 @@ static bool sync_dir(void)
 	return ok;
 }
 
+static bool save_text(const uint8_t *text, size_t len, bool view_is_disk);
+
+bool config_persist_password(const char *hash)
+{
+	static char cur[CONFIG_LEN];
+	char main_[FILE_MAX];
+	size_t n = 0;
+	ssize_t r = 1;
+	int fd;
+
+	if (!dir[0]) {
+		fprintf(stderr, "rtlplayground: the password is not stored: no configuration store\n");
+		return false;
+	}
+	path(main_, "");
+	fd = open(main_, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+	if (fd < 0 && errno != ENOENT) {
+		fprintf(stderr, "rtlplayground: cannot read %s: %s\n", main_, strerror(errno));
+		return false;
+	}
+	if (fd >= 0) {
+		while (n < sizeof cur && (r = read(fd, cur + n, sizeof cur - n)) > 0)
+			n += r;
+		close(fd);
+		if (r < 0) {
+			fprintf(stderr, "rtlplayground: cannot read %s: %s\n", main_, strerror(errno));
+			return false;
+		}
+	}
+	n = strnlen(cur, n);
+	if (n && cur[n - 1] != '\n' && cur[n - 1] != '\r')
+		cur[n++] = '\n';
+	if (n + strlen("passwdhash ") + strlen(hash) + 1 >= sizeof cur) {
+		fprintf(stderr, "rtlplayground: the password is not stored: the startup configuration is full\n");
+		return false;
+	}
+	n += snprintf(cur + n, sizeof cur - n, "passwdhash %s\n", hash);
+	/* nobody sent this text: what the web UI reads back is what is on the disk */
+	return save_text((const uint8_t *)cur, n, true);
+}
+
 bool config_save(const uint8_t *text, size_t len)
+{
+	return save_text(text, len, false);
+}
+
+static bool save_text(const uint8_t *text, size_t len, bool view_is_disk)
 {
 	char main_[FILE_MAX], bak[FILE_MAX], new_[FILE_MAX], hash[AUTH_HASH_MAX];
 	static char disk[CONFIG_LEN];
@@ -362,7 +422,10 @@ bool config_save(const uint8_t *text, size_t len)
 		unlink(new_);
 		return false;
 	}
-	set_view((const char *)text, len);
+	if (view_is_disk)
+		set_view(disk, dlen);
+	else
+		set_view((const char *)text, len);
 	if (hash[0])
 		auth_set_hash(hash);
 	explicit_bzero(disk, sizeof disk);

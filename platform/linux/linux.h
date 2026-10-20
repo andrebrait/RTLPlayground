@@ -72,6 +72,13 @@ void config_startup(void);
  * line is turned into a `passwdhash` line before anything reaches the disk; false = it could not
  * be stored (nothing changed). */
 bool config_save(const uint8_t *text, size_t len);
+/* The first password of a switch: appends `passwdhash <hash>` to the stored configuration (the file
+ * as it is now, or an empty one) and saves it the way config_save does. false = not stored; the
+ * reason went to stderr. */
+bool config_persist_password(const char *hash);
+
+/* The default STP configuration and port map of a booting 8051 (state.c); call after mgmt_init. */
+void stp_state_init(void);
 
 /* Ports (ports.c): takes the power-on chip temperature. Call once, before the startup
  * configuration runs. */
