@@ -509,6 +509,10 @@ var JDEMO=false;
 ["J","JM"].forEach(function(v){var f=VARIANTS[v];VARIANTS[v]=function(){LINKINFO=true;f()};VARIANTS[v+"D"]=function(){JDEMO=true;VARIANTS[v]()}});
 VARIANTS.JFC=function(){VARIANTS.J();fcInfo(S.ports[2])};
 VARIANTS.JEEE=function(){VARIANTS.J();eeeInfo(S.ports[0])};
+VARIANTS.JL=function(){VARIANTS.J();linkModal(S.ports[2])};
+VARIANTS.JML=function(){VARIANTS.JM();linkModal(S.ports[2])};
+VARIANTS.JMFC=function(){VARIANTS.JM();fcInfo(S.ports[2])};
+VARIANTS.JMEEE=function(){VARIANTS.JM();eeeInfo(S.ports[0])};
 // ST: Devices learned moves to the Statistics page (appended after RX bad, since statsStatus fills cells 0-6)
 VARIANTS.ST=function(){
   showTab("stats");statsStatus();
