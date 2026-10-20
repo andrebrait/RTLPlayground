@@ -12,19 +12,6 @@
 
 #define UNSUPPORTED() cmd_error("Not supported on this platform yet\n")
 
-/* Ports: every port reads as down and disabled, with nothing advertised or counted. */
-uint8_t port_link_get(uint8_t port) __banked { return 0; }
-bool port_phy_enabled(uint8_t port) __banked { return false; }
-uint8_t port_phy_adv_get(uint8_t port) __banked { return 0; }
-void port_counter_get(uint8_t port, __xdata uint8_t counter) __banked { memset(port_buf, 0, 8); }
-void port_macs_learned_get(uint8_t port) __banked { memset(port_buf, 0, 4); }
-void port_mtu_set(uint8_t port, __xdata uint16_t mtu) __banked { UNSUPPORTED(); }
-void port_stats_print(void) __banked { UNSUPPORTED(); }
-void port_media_show(uint8_t port) __banked { UNSUPPORTED(); }
-void phy_set_speed(void) __banked { UNSUPPORTED(); }
-void phy_set_duplex(void) __banked { UNSUPPORTED(); }
-void phy_show(uint8_t port) __banked { UNSUPPORTED(); }
-
 /* VLANs: none beyond the default, no names, PVID 1. */
 void vlan_create(void) __banked { UNSUPPORTED(); }
 void vlan_delete(uint16_t vlan) __banked { UNSUPPORTED(); }

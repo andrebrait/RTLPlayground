@@ -46,7 +46,7 @@ WWW = $(ROOT)/output/html_min
 all: $(OUT)/rtlplayground $(OUT)/swcli html_min
 
 $(OUT)/rtlplayground: $(OBJS)
-	$(CC) $^ -o $@ -lcrypt
+	$(CC) $^ -o $@ -lcrypt -lmnl
 
 # swcli talks to the socket and nothing else: no shared code, no board.
 $(OUT)/swcli: swcli.c | $(OUT)
@@ -94,7 +94,12 @@ $(OUT)/version.h: FORCE | $(OUT)
 		"#endif" > $@.tmp
 	@cmp -s $@.tmp $@ && rm -f $@.tmp || mv $@.tmp $@
 
-test: all
+# test_linkcode includes only linkcode.h: no board, no shared code.
+$(OUT)/test_linkcode: test/test_linkcode.c linkcode.h | $(OUT)
+	$(CC) -std=gnu11 -O1 -Wall -Wextra -Werror -D_GNU_SOURCE -I. $< -o $@
+
+test: all $(OUT)/test_linkcode
+	$(OUT)/test_linkcode
 	sh test/console_test.sh
 
 clean:

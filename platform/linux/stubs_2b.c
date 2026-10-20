@@ -1,7 +1,7 @@
 /*
  * What the shared code links against that this platform does not do yet: the features of
- * milestone 2b, and the hardware with no counterpart on the bench board (SFP cages, the chip
- * temperature, the flash size). A command says "not supported", a getter returns the off
+ * milestone 2b, and the hardware with no counterpart on the bench board (SFP cages, the flash
+ * size). A command says "not supported", a getter returns the off
  * state. The change that implements an entry deletes it from here.
  */
 #include <string.h>
@@ -11,14 +11,13 @@
 
 #define UNSUPPORTED() cmd_error("Not supported on this platform yet\n")
 
-/* Hardware without a counterpart: no cages, no sensor, no flash chip. */
+/* Hardware without a counterpart: no cages, no flash chip. */
 bool sfp_read_block(uint8_t slot, uint8_t reg, uint8_t len) __banked { return false; }
 bool sfp_print_info(uint8_t sfp) __banked { return false; }
 void handle_sfp(void) __banked { }
 bool sfp_present(uint8_t slot) __banked { return false; }
 bool sfp_los(uint8_t slot) __banked { return false; }
 bool sfp_present_live(uint8_t slot) { return false; }
-int16_t chip_temp_get(uint8_t sensor) __banked { return 0; }
 const char *get_flash_size_str(void) { return ""; }
 
 /* EEE */

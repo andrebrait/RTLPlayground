@@ -72,6 +72,7 @@ int main(int argc, char **argv)
 	if (http_open(http, www) || cli_open(cli))
 		return 1;
 	cmd_editor_init();
+	ports_init();
 	/* Runs the startup configuration (or the default); the shared parser records commands in the
 	 * history only from here on. */
 	config_open(cfg);
