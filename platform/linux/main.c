@@ -44,7 +44,7 @@ static void tick(void)
 int main(int argc, char **argv)
 {
 	int console = 0, dump_state = 0;
-	const char *http = "[::]:80", *cli = "/run/rtlplayground.sock", *www = DEFAULT_WWW, *cfg = "/cfg";
+	const char *http = "[::]:80", *cli = "/run/rtlplayground.sock", *www = DEFAULT_WWW, *cfg = "/cfg", *dhcp_script = NULL;
 
 	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "--console")) {
@@ -59,8 +59,10 @@ int main(int argc, char **argv)
 			www = argv[++i];
 		} else if (i + 1 < argc && !strcmp(argv[i], "--cfg-dir")) {
 			cfg = argv[++i];
+		} else if (i + 1 < argc && !strcmp(argv[i], "--dhcp-script")) {
+			dhcp_script = argv[++i];
 		} else {
-			fprintf(stderr, "usage: %s [--console] [--http <addr:port>] [--cli-socket <path>] [--www <dir>] [--cfg-dir <dir>]\n", argv[0]);
+			fprintf(stderr, "usage: %s [--console] [--http <addr:port>] [--cli-socket <path>] [--www <dir>] [--cfg-dir <dir>] [--dhcp-script <udhcpc script>]\n", argv[0]);
 			return 2;
 		}
 	}
@@ -73,6 +75,8 @@ int main(int argc, char **argv)
 		return 1;
 	cmd_editor_init();
 	ports_init();
+	bridge_init();
+	mgmt_init(dhcp_script);
 	/* Runs the startup configuration (or the default); the shared parser records commands in the
 	 * history only from here on. */
 	config_open(cfg);
@@ -100,11 +104,13 @@ int main(int argc, char **argv)
 		now = now_ms();
 		http_service(fds + 1, now);
 		cli_service(fds + 1 + HTTP_SLOTS, now);
+		mgmt_service(now);
 		if (http_restart_requested()) {
 			/* GET /reset: the answer is out; start over with the same arguments. The sockets are
 			 * close-on-exec, so the new process binds them afresh. */
 			console_flush();
 			cli_close();
+			mgmt_exit();
 			execv("/proc/self/exe", argv);
 			perror("execv /proc/self/exe");
 			return 1;
@@ -130,6 +136,7 @@ int main(int argc, char **argv)
 	}
 	console_flush();
 	cli_close();
+	mgmt_exit();
 	if (dump_state) {
 		/* One `name=value` line per piece of state a test needs to see; add to it as tests need. */
 		printf("\nlldp_enabled=%d\n", lldp_enabled);

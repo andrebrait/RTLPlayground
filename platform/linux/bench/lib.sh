@@ -8,6 +8,7 @@ BENCH_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 BIN=${RTLP_BIN:-$BENCH_DIR/../output/rtlplayground}
 SWCLI=${RTLP_SWCLI:-$(dirname "$BIN")/swcli}
 WWW=${RTLP_WWW:-$BENCH_DIR/../../../output/html_min}	# the web UI the daemon serves (--www)
+DHCP_SCRIPT=${RTLP_DHCP_SCRIPT:-$BENCH_DIR/../udhcpc.script}	# the udhcpc script (--dhcp-script)
 RUN=${RTLP_BENCH_RUN:-/run/rtlp-bench}
 SW_CFG=${SW_CFG:-$RUN/cfg}	# the daemon's --cfg-dir (inside $RUN, so teardown removes it)
 SW_URL=${SW_URL:-http://127.0.0.1}	# the web UI inside `rtlp-sw`
@@ -23,7 +24,7 @@ sw_start() {
 	mkdir -p "$RUN" && mkfifo "$RUN/in" "$RUN/out" || die "cannot create $RUN fifos"
 	exec 3<>"$RUN/in" 4<>"$RUN/out"	# held read-write so neither end blocks or sees EOF
 	# fds 3/4 are closed in the daemon: it must not be a writer of its own input.
-	ip netns exec rtlp-sw "$BIN" --console --cli-socket "$RUN/cli.sock" --www "$WWW" --cfg-dir "$SW_CFG" <&3 >&4 2>>"$RUN/daemon.log" 3>&- 4>&- &
+	ip netns exec rtlp-sw "$BIN" --console --cli-socket "$RUN/cli.sock" --www "$WWW" --cfg-dir "$SW_CFG" --dhcp-script "$DHCP_SCRIPT" <&3 >&4 2>>"$RUN/daemon.log" 3>&- 4>&- &
 	echo $! > "$RUN/pid"
 	_sw_read_prompt >/dev/null || die "daemon gave no prompt"
 }

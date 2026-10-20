@@ -75,4 +75,23 @@ bool config_save(const uint8_t *text, size_t len);
  * configuration runs. */
 void ports_init(void);
 
+/* Bridge (bridge.c): swbr holds every board port; its VLAN entries are the switch's VLAN table.
+ * bridge_init creates or adopts swbr, puts the board ports in it and sets the VLAN state of a
+ * booting 8051; call it before the startup configuration runs. bridge_mgmt_vlan makes the
+ * bridge's own entry for VLAN vid (if that VLAN exists) the management one (active) or an
+ * ordinary tagged one: 0 or -errno. */
+void bridge_init(void);
+int bridge_mgmt_vlan(uint16_t vid, bool active);
+int bridge_mac_get(uint8_t mac[6]);
+int bridge_mac_set(const uint8_t mac[6]);
+
+/* Management IP and DHCP (mgmt.c). mgmt_init: after bridge_init; dhcp_script is the udhcpc script
+ * (NULL: the built-in path). mgmt_apply: call after every run of commands, it applies a changed
+ * ip/netmask/gw to swbr and reports a failure like a command would. mgmt_service: every poll-loop
+ * wake-up. mgmt_exit: before the daemon exits or re-executes (stops the DHCP client). */
+void mgmt_init(const char *dhcp_script);
+void mgmt_apply(void);
+void mgmt_service(int64_t now);
+void mgmt_exit(void);
+
 #endif

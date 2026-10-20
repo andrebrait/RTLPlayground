@@ -251,10 +251,8 @@ void config_open(const char *d)
 		auth_set_hash(hash);
 }
 
-/* Applies the factory state with the same commands a user would type, so the same code paths run.
- * Still pending stubs (they say "Not supported on this platform yet": nine lines at every boot
- * without a configuration): `vlan 1 ...` (vlan_create, 1), one `pvid` per port (port_pvid_set, 6),
- * `vlan 1 mgmt` (port_l2_static_mgmt, 1), `ip dhcp` (dhcp_start, 1). */
+/* Applies the factory state with the same commands a user would type, so the same code paths run:
+ * every port an untagged member of VLAN 1 with PVID 1, VLAN 1 the management VLAN, DHCP on. */
 static void apply_default(void)
 {
 	char cmds[256];
@@ -268,6 +266,7 @@ static void apply_default(void)
 	snprintf(cmds + n, sizeof cmds - n, "vlan 1 mgmt\nip dhcp\n");
 	save_cmd = 0;
 	execute_commands((uint8_t *)cmds);
+	mgmt_apply();
 	clear_command_history();
 	save_cmd = 1;
 }
@@ -280,6 +279,7 @@ void config_startup(void)
 		if (view[i] != ' ' && view[i] != '\t' && view[i] != '\r' && view[i] != '\n')
 			empty = false;
 	execute_config();
+	mgmt_apply();	/* ip, netmask and gw of the file apply together, whatever their order */
 	/* execute_config seeds the 8051's default password "1234" before running the file; on Linux
 	 * that must not become a login. A password in the file arrived as a `passwdhash` line. */
 	memset(passwd, 0, sizeof passwd);

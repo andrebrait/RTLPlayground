@@ -114,13 +114,11 @@ ip -n rtlp-sw link set lan5 mtu 65535 || exit 1
 assert_contains "mtu show clamps 65535 + 26" "Port 5 0x3fff" "$(sw_cmd 'mtu show')"
 assert_contains "mtu.json clamps" '"portNum":5,"mtu":"0x3fff"' "$(sw_get mtu.json)"
 sw_cmd "mtu 5 1526" >/dev/null
-# a bridge over the ports follows the smallest port MTU: the kernel does it, nobody sets the bridge's
-rtlp_sw ip link add brt type bridge || exit 1
-for n in 1 2 3 4 5 6; do rtlp_sw ip link set lan$n master brt || exit 1; done
+# swbr, the bridge the daemon made over the ports, follows the smallest port MTU: the kernel does it, nobody sets the bridge's
 for n in 1 2 3 4 5 6; do sw_cmd "mtu $n 9000" >/dev/null; done
-assert_eq "bridge follows the ports to 8974" 8974 "$(mtu_of brt)"
+assert_eq "bridge follows the ports to 8974" 8974 "$(mtu_of swbr)"
 sw_cmd "mtu 3 1526" >/dev/null
-assert_eq "one port back to 1526 pulls the bridge down" 1500 "$(mtu_of brt)"
+assert_eq "one port back to 1526 pulls the bridge down" 1500 "$(mtu_of swbr)"
 assert_eq "...and leaves the other ports" 8974 "$(mtu_of lan4)"
 assert_contains "mtu show of port 3" "Port 3 0x05f6" "$(sw_cmd 'mtu show')"
 

@@ -1,0 +1,22 @@
+#!/bin/sh
+# BusyBox udhcpc event script of the daemon (mgmt.c runs `busybox udhcpc -i swbr -f -S -s <this>`).
+# It puts the lease on the interface, nothing else: the daemon reads the address, mask and
+# gateway back from the kernel. The lease is valid for its time and "preferred" for half of it,
+# which is what `ip` prints as the renewal time. Needs `ip` (iproute2, or an `ip` that takes
+# valid_lft: without it the address is set with no lifetime).
+case "$1" in
+deconfig)
+	ip -4 addr flush dev "$interface"
+	;;
+bound|renew)
+	[ "$1" = bound ] && ip -4 addr flush dev "$interface"
+	set -- "$ip/${mask:-24}" ${broadcast:+broadcast "$broadcast"} dev "$interface"
+	if [ -n "$lease" ]; then
+		ip -4 addr replace "$@" valid_lft "$lease" preferred_lft "$((lease / 2))" || ip -4 addr replace "$@" || exit 1
+	else
+		ip -4 addr replace "$@" || exit 1
+	fi
+	[ -n "$router" ] && ip -4 route replace default via "${router%% *}" dev "$interface"
+	;;
+esac
+exit 0

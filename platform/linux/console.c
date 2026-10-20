@@ -83,6 +83,7 @@ const char *console_run(uint8_t *cmds, size_t *len, bool *truncated)
 	memcpy(saved, cmd_buffer, sizeof saved);
 	console_capture_begin();
 	execute_commands(cmds);
+	mgmt_apply();
 	took = auth_take_plain();
 	if (took)
 		memset(cmds, 0, strlen((char *)cmds));	/* the caller's copy of `passwd <pw>` */
@@ -190,6 +191,7 @@ static void run_command(void)
 	cmd_tokenize();
 	if (err_status == ERR_OK)
 		cmd_parser();
+	mgmt_apply();
 	auth_take_plain();
 	print_cmd_prompt();
 }

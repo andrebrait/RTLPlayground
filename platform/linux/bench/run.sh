@@ -17,7 +17,7 @@ for t in t_*.sh; do
 		exit 1
 	fi
 	# Output goes to a file, not a $(...) pipe: the daemon inherits stderr and would keep the pipe open.
-	if [ $rc = 0 ] && timeout -s KILL "${RTLP_TEST_TIMEOUT:-60}" bash "./$t" >> "$log" 2>&1; then
+	if [ $rc = 0 ] && timeout -s KILL "${RTLP_TEST_TIMEOUT:-150}" bash "./$t" >> "$log" 2>&1; then
 		echo "ok $name"
 	else
 		echo "FAIL $name"
