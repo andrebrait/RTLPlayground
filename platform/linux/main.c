@@ -12,6 +12,7 @@
 
 #include "cmd_editor.h"
 #include "cmd_parser.h"
+#include "platform.h"
 #include "linux.h"
 
 #define TICK_MS 1000
@@ -38,11 +39,13 @@ static void tick(void)
 
 int main(int argc, char **argv)
 {
-	int console = 0;
+	int console = 0, dump_state = 0;
 
 	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "--console")) {
 			console = 1;
+		} else if (!strcmp(argv[i], "--dump-state")) {
+			dump_state = 1;	/* test aid: print platform state on exit, see below */
 		} else {
 			fprintf(stderr, "usage: %s [--console]\n", argv[0]);
 			return 2;
@@ -92,5 +95,10 @@ int main(int argc, char **argv)
 		console_flush();
 	}
 	console_flush();
+	if (dump_state) {
+		/* One `name=value` line per piece of state a test needs to see; add to it as tests need. */
+		printf("\nlldp_enabled=%d\n", lldp_enabled);
+		fflush(stdout);
+	}
 	return 0;
 }

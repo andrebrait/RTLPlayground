@@ -149,7 +149,7 @@ static void push(const uint8_t *p, size_t n)
 /* cmd_edit() waits for the rest of an escape sequence by returning without consuming it, and
  * spins forever on one it does not know. So the editor only ever sees whole sequences it
  * handles (ESC [ A/B/C/D, ESC [ 3 ~); every other escape sequence is swallowed here:
- *   ESC [ <parameter/intermediate bytes 0x20-0x3f> <final byte 0x40-0x7e>   (CSI, at most CSI_MAX bytes)
+ *   ESC [ <parameter/intermediate bytes 0x20-0x3f> <final byte 0x40-0x7e>   (CSI; only the first CSI_MAX bytes are kept)
  *   ESC O <one byte>                                                         (SS3, e.g. F1..F4)
  *   ESC <printable>                                                          (Alt-key)
  * A control byte (CR, LF, ...) inside or right after an escape ends it and is then handled as
@@ -189,17 +189,19 @@ void console_feed(const uint8_t *buf, size_t len)
 			state = ESC_NONE;
 			break;
 		case ESC_CSI:
+			/* seq_n keeps counting past CSI_MAX without storing: a sequence that long is
+			 * never one the editor knows, but it still ends only at its final byte. */
 			if (c >= 0x20 && c <= 0x3f) {
-				if (seq_n < CSI_MAX) {
-					seq[seq_n++] = c;
-					continue;
-				}
-				state = ESC_NONE;	/* longer than any sequence the editor knows */
+				if (seq_n < CSI_MAX)
+					seq[seq_n] = c;
+				seq_n++;
 				continue;
 			}
 			state = ESC_NONE;
 			if (c >= 0x40 && c <= 0x7e) {
-				seq[seq_n++] = c;
+				if (seq_n < CSI_MAX)
+					seq[seq_n] = c;
+				seq_n++;
 				if ((seq_n == 3 && c >= 'A' && c <= 'D') || (seq_n == 4 && seq[2] == '3' && c == '~'))
 					push(seq, seq_n);
 				continue;
