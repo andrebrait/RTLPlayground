@@ -8,7 +8,7 @@ sw_start
 sw_cmd "passwd $SW_PASS" >/dev/null
 
 cat > "$RUN/l2tool.py" <<'PY'
-import json, sys, urllib.request
+import json, subprocess, sys, urllib.request
 
 def opener():
     # the session of sw_get (a login replaces the one before it): its cookie is in the jar curl wrote
@@ -38,6 +38,33 @@ def walk(op):
         idx = int(s[-1]["idx"], 16) + 1
     return rows, guard
 
+def page(op, idx):
+    return json.load(op.open("http://127.0.0.1/l2.json?idx=%d" % idx, timeout=5))
+
+def midwalk(between):
+    """l2Load() with `between()` run after its first page; returns the rows of the walk, a key twice raises"""
+    op, seen, rows, idx = opener(), {}, [], 0
+    for n in range(140):
+        s = page(op, idx)
+        if not s:
+            break
+        wrapped = False
+        for e in s:
+            i = int(e["idx"], 16)
+            if i in seen:
+                wrapped = True
+                continue
+            seen[i] = 1
+            rows.append((e["mac"], int(e["vlan"], 16), e["type"], e["port"], i))
+        if n == 0:
+            between(op, s)
+        if wrapped:
+            break
+        idx = int(s[-1]["idx"], 16) + 1
+    keys = [r[:2] for r in rows]
+    assert len(keys) == len(set(keys)), "an entry is listed twice in one walk: %s" % sorted(k for k in keys if keys.count(k) > 1)
+    return rows
+
 cmd = sys.argv[2]
 if cmd == "rows":      # one line per entry: mac vlan type port
     print("\n".join(sorted("%s %d %s %d" % r[:4] for r in walk(opener())[0])))
@@ -57,6 +84,20 @@ elif cmd == "kernel":  # the same lines from `bridge -j fdb show` on stdin, argv
         elif e["ifname"].startswith("lan"):
             out.append("%s %d %s %d" % (e["mac"], e["vlan"], "s" if e["state"] == "static" else "l", int(e["ifname"][3:]) - 1))
     print("\n".join(sorted(out)))
+elif cmd == "colwalk":  # argv[3] = the MACs to add meanwhile (file, one per line)
+    def between(op, first):
+        # the 10 colliding entries the first page listed leave, 10 others join, the 10 come back
+        victims = [e["mac"] for e in first if e["mac"].startswith("00:00:00:")][:10]
+        assert len(victims) == 10, "the first page lists %d colliding entries" % len(victims)
+        def batch(verb, macs, tail):
+            subprocess.run(["bridge", "-force", "-batch", "-"], check=True, input="".join("fdb %s %s dev lan3 %s vlan 1\n" % (verb, m, tail) for m in macs).encode())
+        batch("del", victims, "master")
+        page(op, 4000)     # a dump that sees them gone
+        batch("replace", open(sys.argv[3]).read().split(), "master static")
+        page(op, 4000)
+        batch("replace", victims, "master static")
+    rows = midwalk(between)
+    print("\n".join(sorted("%s %d" % r[:2] for r in rows if r[0].startswith("00:00:00:"))))
 elif cmd == "churn":   # N walks while entries come and go: argv[3] = N, argv[4] = file of MACs that stay
     op, stay = opener(), set(open(sys.argv[4]).read().split())
     most = churned = 0
@@ -173,6 +214,45 @@ assert_contains "...the management VLAN is still 20" '{"mgmt":20,' "$(sw_get vla
 assert_contains "...and so is the own entry" "00:11:22:33:44:55 20 s 9" "$(l2 rows)"
 sw_cmd "vlan 1 mgmt" >/dev/null
 own=00:11:22:33:44:55	# `mac` refuses the locally administered default the bridge had, so it stays
+
+# ---- the key is (MAC, VLAN); a station that moves keeps its row and gets the new port ----
+assert_eq "vlan 20 has port 6" "" "$(bv | grep '^lan6 ' | grep -v ' 20:U')"
+rtlp_sw bridge fdb add 02:00:00:00:00:b1 dev lan6 master static vlan 1 || exit 1
+rtlp_sw bridge fdb add 02:00:00:00:00:b1 dev lan6 master static vlan 20 || exit 1
+rows=$(l2 rows | grep 02:00:00:00:00:b1)
+assert_eq "the same MAC in two VLANs: two rows" $'02:00:00:00:00:b1 1 s 5\n02:00:00:00:00:b1 20 s 5' "$rows"
+assert_eq "...in two slots" 2 "$(sw_get l2.json | grep -o '"mac":"02:00:00:00:00:b1"[^}]*"idx":"[0-9a-f]*"' | sed 's/.*"idx"//' | sort -u | wc -l)"
+rtlp_sw bridge fdb del 02:00:00:00:00:b1 dev lan6 master vlan 1 || exit 1
+rtlp_sw bridge fdb del 02:00:00:00:00:b1 dev lan6 master vlan 20 || exit 1
+rtlp_sw bridge fdb add 02:00:00:00:00:b2 dev lan1 master dynamic vlan 1 || exit 1
+i1=$(l2 idx 02:00:00:00:00:b2 1)
+rtlp_sw bridge fdb replace 02:00:00:00:00:b2 dev lan4 master dynamic vlan 1 || exit 1
+assert_contains "a station moves to port 4 (logical 3)" "02:00:00:00:00:b2 1 l 3" "$(l2 rows)"
+assert_eq "...keeping its index" "$i1" "$(l2 idx 02:00:00:00:00:b2 1)"
+rtlp_sw bridge fdb del 02:00:00:00:00:b2 dev lan4 master vlan 1 || exit 1
+
+# ---- entries that share a slot chain: freed slots keep their key (a walk never lists an entry twice) ----
+python3 - "$RUN" <<'PY'
+import sys
+run = sys.argv[1]
+def mac(v):      # the groups c and d of the daemon's hash are equal, so every one of these MACs has the same home
+    return "00:00:00:%02x:%x%x:%02x" % (v >> 4, v & 15, v >> 8, v & 255)
+def w(name, verb, vs, tail):
+    open("%s/%s" % (run, name), "w").write("".join("fdb %s %s dev lan3 %s vlan 1\n" % (verb, mac(v), tail) for v in vs))
+w("col.add", "replace", range(1, 101), "master static")
+open(run + "/col.new", "w").write("".join(mac(v) + "\n" for v in range(101, 111)))
+PY
+rtlp_sw bridge -batch "$RUN/col.add" || exit 1
+assert_eq "100 colliding entries are listed" 100 "$(l2 rows | grep -c '^00:00:00:')"
+want=$( { python3 -c '
+def mac(v): return "00:00:00:%02x:%x%x:%02x" % (v >> 4, v & 15, v >> 8, v & 255)
+for v in range(1, 111): print(mac(v), 1)' ; } | sort)
+got=$(l2 colwalk "$RUN/col.new" 2>&1) || { echo "colliding walk: $got"; exit 1; }
+assert_eq "a walk during which 10 entries leave, 10 others join and the 10 come back: each once, none lost" "$want" "$got"
+sed 's/^fdb replace/fdb del/; s/ master static/ master/' "$RUN/col.add" > "$RUN/col.del"
+rtlp_sw bridge -force -batch "$RUN/col.del" 2>/dev/null
+for m in $(cat "$RUN/col.new"); do rtlp_sw bridge fdb del "$m" dev lan3 master vlan 1 || exit 1; done
+assert_eq "the colliding entries are gone again" 0 "$(l2 rows | grep -c '^00:00:00:')"
 
 # ---- paging while entries come and go (app.js mirror; Review Focus 5) ----
 for i in $(seq 1 100); do printf '02:00:00:00:%02x:%02x\n' $((i % 7)) "$i"; done > "$RUN/stay"

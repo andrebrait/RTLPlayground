@@ -97,13 +97,16 @@ $(OUT)/version.h: FORCE | $(OUT)
 
 # The unit tests include only the pure headers (linkcode.h, mibmap.h, portlogic.h): no board, no
 # shared code, no NIC. test_linkcode is plain C; the others need platform.h and the shim.
-UNIT = test_linkcode test_mibmap test_portlogic
+UNIT = test_linkcode test_mibmap test_portlogic test_fdb
 $(OUT)/test_linkcode: test/test_linkcode.c linkcode.h | $(OUT)
 	$(CC) -std=gnu11 -O1 -Wall -Wextra -Werror -D_GNU_SOURCE -I. $< -o $@
 $(OUT)/test_mibmap: test/test_mibmap.c mibmap.h | $(OUT) $(OUT)/version.h
 	$(CC) $(CFLAGS) $< -o $@
 $(OUT)/test_portlogic: test/test_portlogic.c portlogic.h | $(OUT) $(OUT)/version.h
 	$(CC) $(CFLAGS) $< -o $@
+# fdb.c itself on a canned bridge (the netlink dump is a mock)
+$(OUT)/test_fdb: test/test_fdb.c fdb.c | $(OUT) $(OUT)/version.h
+	$(CC) $(CFLAGS) $< -o $@ -lmnl
 
 test: all $(addprefix $(OUT)/,$(UNIT))
 	@for t in $(UNIT); do $(OUT)/$$t || exit 1; done

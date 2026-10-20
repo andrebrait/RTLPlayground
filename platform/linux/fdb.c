@@ -6,12 +6,17 @@
  * its slot for as long as it exists, the page walks the slots upwards with `idx=` the last slot + 1,
  * and the walk ends when the client sees a slot twice. A position in a sorted dump would shift under
  * a page that is being walked (an entry added before the cursor shows up a second time at the next
- * position), so the daemon keeps the slots too: an entry gets the free slot nearest to its hash
- * (home()) the first time a dump shows it, keeps it while later dumps show it, and gives it up
- * with the first dump that does not. The table holds what the hardware holds, 4096 entries: of
- * a bridge with more, the entries that found no free slot are not listed (said once on stderr).
- * shortcut: an entry that vanishes and returns within one walk of the page may come back in another
- * slot (its home taken meanwhile) and show twice; the page then shows a row twice, nothing else.
+ * position), so the daemon keeps the slots too: an entry gets the slot nearest to its hash (home())
+ * that has never held an entry, the first time a dump shows it, and keeps it while later dumps show it.
+ * A slot whose entry is gone is not listed but keeps the key: the same entry coming back (a station
+ * that is aged out and learned again during one walk of the page) gets its old slot, so it is never
+ * listed twice by one walk. Only when no never-used slot is left a new entry takes such a freed slot
+ * (the first one from its home). The table holds what the hardware holds, 4096 entries: of a bridge
+ * with more live entries, the ones that found no slot are not listed (said once on stderr).
+ * Slots are not kept across a daemon restart: entries that collide may get other slots then, so a
+ * page being walked while the daemon restarts may list such an entry twice or miss it.
+ * shortcut: an entry whose old slot was taken over (no never-used slot was left, so the table was
+ * full of keys) and that returns within one walk may show twice; the page then shows a row twice.
  *
  * Listed: the entries on a board port (learned = dynamic, static = `bridge fdb ... static`) and the
  * entry of the switch's own MAC in the management VLAN (static, port CPU), as the 8051 shows it
@@ -32,7 +37,8 @@
 #include "uip/uip.h"
 
 #define SLOTS 4096		/* the slots of the 8051 table; l2_buf.idx is 12 bits */
-#define TAB (2 * SLOTS)		/* lookup table over the slots, at most half full */
+#define TAB_BITS 13
+#define TAB (1 << TAB_BITS)	/* lookup table over the slots: at most half full, 3/4 before it is rebuilt */
 
 extern __xdata uint16_t management_vlan;
 extern __xdata struct uip_eth_addr uip_ethaddr;
@@ -42,12 +48,16 @@ struct slot {
 	uint8_t mac[6];
 	uint8_t port;		/* logical port, CPU_PORT for the bridge */
 	bool is_static;
-	bool used;
+	bool keyed;		/* vid and mac are an entry's: it is listed now (used) or was and may return */
+	bool used;		/* the last dump showed it */
 	uint32_t seen;		/* the dump that last showed it */
 };
 
 static struct slot slot[SLOTS];
-static uint16_t tab[TAB];	/* slot + 1 by key, 0 = empty; rebuilt by every dump */
+/* slot + 1 by key, 0 = empty. A cell stays when its slot is given another key (the lookup compares the
+ * slot's key, so it only costs a probe); every dump rebuilds the table, and so does tab_put() at 3/4. */
+static uint16_t tab[TAB];
+static unsigned tab_n;
 static uint32_t dump_no;
 static unsigned learned[CPU_PORT + 1];	/* the learned entries per port in the last dump */
 static bool warned_full;
@@ -63,6 +73,18 @@ static unsigned home(const uint8_t *mac, uint16_t vid)
 	return (a ^ b ^ c ^ d ^ vid) & (SLOTS - 1);
 }
 
+/* Where the lookup table starts to probe: a different, multiplicative hash over the whole key, so
+ * addresses that share a home (which a host on the segment can arrange) do not share a probe chain,
+ * and the whole table is used. */
+static unsigned thash(const uint8_t *mac, uint16_t vid)
+{
+	uint64_t k = 0;
+
+	for (int i = 0; i < 6; i++)
+		k = k << 8 | mac[i];
+	return ((k << 12 | vid) * 0x9E3779B97F4A7C15ull) >> (64 - TAB_BITS);
+}
+
 struct dump {
 	int br;
 	int port_if[CPU_PORT];
@@ -70,22 +92,50 @@ struct dump {
 
 static void tab_put(unsigned s)
 {
-	unsigned h = home(slot[s].mac, slot[s].vid);
+	unsigned h = thash(slot[s].mac, slot[s].vid);
 
 	while (tab[h])
 		h = (h + 1) & (TAB - 1);
 	tab[h] = s + 1;
+	tab_n++;
+}
+
+static void tab_build(void)
+{
+	memset(tab, 0, sizeof tab);
+	tab_n = 0;
+	for (unsigned s = 0; s < SLOTS; s++)
+		if (slot[s].keyed)
+			tab_put(s);
 }
 
 static int tab_find(const uint8_t *mac, uint16_t vid)
 {
-	for (unsigned h = home(mac, vid); tab[h]; h = (h + 1) & (TAB - 1)) {
+	for (unsigned h = thash(mac, vid); tab[h]; h = (h + 1) & (TAB - 1)) {
 		const struct slot *s = &slot[tab[h] - 1];
 
-		if (s->vid == vid && !memcmp(s->mac, mac, 6))
+		if (s->keyed && s->vid == vid && !memcmp(s->mac, mac, 6))
 			return tab[h] - 1;
 	}
 	return -1;
+}
+
+/* The slot for a key the table does not know: the first one from its home that never held an entry,
+ * else the first freed one; -1 when every slot is listed. */
+static int slot_new(const uint8_t *mac, uint16_t vid)
+{
+	unsigned h = home(mac, vid);
+	int freed = -1;
+
+	for (unsigned i = 0; i < SLOTS; i++) {
+		unsigned c = (h + i) & (SLOTS - 1);
+
+		if (!slot[c].keyed)
+			return c;
+		if (!slot[c].used && freed < 0)
+			freed = c;
+	}
+	return freed;
 }
 
 static int fdb_cb(const struct nlmsghdr *nlh, void *data)
@@ -139,9 +189,7 @@ static int fdb_cb(const struct nlmsghdr *nlh, void *data)
 	}
 	s = tab_find(mac, vid);
 	if (s < 0) {
-		for (unsigned i = 0; i < SLOTS && s < 0; i++)
-			if (!slot[(home(mac, vid) + i) & (SLOTS - 1)].used)
-				s = (home(mac, vid) + i) & (SLOTS - 1);
+		s = slot_new(mac, vid);
 		if (s < 0) {
 			if (!warned_full) {
 				warned_full = true;
@@ -149,11 +197,14 @@ static int fdb_cb(const struct nlmsghdr *nlh, void *data)
 			}
 			return MNL_CB_OK;
 		}
-		slot[s].used = true;
+		slot[s].keyed = true;
 		slot[s].vid = vid;
 		memcpy(slot[s].mac, mac, 6);
 		tab_put(s);
+		if (tab_n > TAB / 4 * 3)
+			tab_build();
 	}
+	slot[s].used = true;
 	slot[s].port = port;
 	slot[s].is_static = is_static;
 	slot[s].seen = dump_no;
@@ -162,7 +213,7 @@ static int fdb_cb(const struct nlmsghdr *nlh, void *data)
 	return MNL_CB_OK;
 }
 
-/* Reads the FDB into the slots: every slot holds an entry the kernel shows now, or is free. */
+/* Reads the FDB into the slots: a used slot holds an entry the kernel shows now. */
 static int fdb_dump(void)
 {
 	char buf[NL_MSG_MAX];
@@ -176,12 +227,9 @@ static int fdb_dump(void)
 		return -ENODEV;
 	for (uint8_t p = 0; p < CPU_PORT; p++)
 		d.port_if[p] = board_ifnames[p] ? if_nametoindex(board_ifnames[p]) : 0;
-	memset(tab, 0, sizeof tab);
 	memset(learned, 0, sizeof learned);
 	dump_no++;
-	for (unsigned s = 0; s < SLOTS; s++)
-		if (slot[s].used)
-			tab_put(s);
+	tab_build();
 	rc = nl_dump(nlh, fdb_cb, &d);
 	for (unsigned s = 0; !rc && s < SLOTS; s++)
 		if (slot[s].used && slot[s].seen != dump_no)
@@ -213,8 +261,12 @@ bool l2_entry_next(void) __banked
 {
 	int s = dump_ok() ? slot_from(l2_buf.idx & (SLOTS - 1)) : -1;
 
-	if (s < 0)
+	if (s < 0) {
+		/* send_l2 adds 1 and ends its walk when that is the first index it got: with this, an empty
+		 * table or a failed dump costs it two calls, not L2_MAX_TRANSFER of them */
+		l2_buf.idx--;
 		return false;
+	}
 	l2_buf.idx = s;
 	l2_buf.vid = slot[s].vid;
 	memcpy(l2_buf.mac, slot[s].mac, 6);
@@ -246,7 +298,7 @@ uint8_t l2_entry_delete(uint16_t idx) __banked
 
 	if (idx >= SLOTS || !dump_ok() || !slot[idx].used)
 		return 0;
-	if (slot[idx].port == CPU_PORT || !memcmp(slot[idx].mac, uip_ethaddr.addr, 6))
+	if (slot[idx].port == CPU_PORT)
 		return 0;	/* the switch's own entry keeps management reachable */
 	rc = fdb_del(&slot[idx]);
 	if (rc && rc != -ENOENT)
@@ -304,11 +356,25 @@ void port_l2_learned(void) __banked
 	}
 }
 
-/* The learned entries of a port: the hardware counter of the learning limit counts what the port learned, not what was configured. */
+/* The learned entries of a port. A page asks for the ports in ascending order; the counts of one such
+ * run come from one dump (a lower or equal port starts a new run, and so does 250 ms). The hardware
+ * counter of the learning limit counts what the port learned, not what was configured. */
 void port_macs_learned_get(uint8_t port) __banked
 {
-	unsigned n = port <= CPU_PORT && dump_ok() ? learned[port] : 0;
+	static unsigned count[CPU_PORT + 1];
+	static int last = -1;
+	static int64_t at;
+	unsigned n = 0;
 
+	if (port <= last || now_ms() - at > 250) {
+		bool ok = dump_ok();
+
+		memcpy(count, ok ? learned : (unsigned[CPU_PORT + 1]){ 0 }, sizeof count);
+		at = now_ms();
+	}
+	last = port;
+	if (port <= CPU_PORT)
+		n = count[port];
 	port_buf[0] = port_buf[1] = 0;
 	port_buf[2] = n >> 8;
 	port_buf[3] = n;
