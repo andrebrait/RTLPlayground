@@ -131,11 +131,8 @@ static void run_command(void)
 	print_cmd_prompt();
 }
 
-/* Pushes bytes into the editor's ring and lets it consume them. cmd_edit() waits for the
- * rest of an escape sequence by returning without consuming it, and spins forever on one it
- * does not know, so only whole sequences the editor handles (cursor keys, Delete) are
- * pushed, together; any other escape sequence is dropped here. A command runs before the next
- * byte is pushed: the editor would otherwise type into cmd_buffer while it is being parsed. */
+/* Pushes bytes into the editor's ring and lets it consume them. A command runs before the
+ * next byte is pushed: the editor would otherwise type into cmd_buffer while it is parsed. */
 static void push(const uint8_t *p, size_t n)
 {
 	for (size_t i = 0; i < n; i++) {
@@ -149,28 +146,69 @@ static void push(const uint8_t *p, size_t n)
 	}
 }
 
+/* cmd_edit() waits for the rest of an escape sequence by returning without consuming it, and
+ * spins forever on one it does not know. So the editor only ever sees whole sequences it
+ * handles (ESC [ A/B/C/D, ESC [ 3 ~); every other escape sequence is swallowed here:
+ *   ESC [ <parameter/intermediate bytes 0x20-0x3f> <final byte 0x40-0x7e>   (CSI, at most CSI_MAX bytes)
+ *   ESC O <one byte>                                                         (SS3, e.g. F1..F4)
+ *   ESC <printable>                                                          (Alt-key)
+ * A control byte (CR, LF, ...) inside or right after an escape ends it and is then handled as
+ * typed, so ESC followed by Enter still runs the line. */
+#define CSI_MAX 16
+
+enum esc_state { ESC_NONE, ESC_START, ESC_CSI, ESC_SS3 };
+
 void console_feed(const uint8_t *buf, size_t len)
 {
-	static uint8_t esc[4];
-	static uint8_t esc_n;
+	static uint8_t seq[CSI_MAX];
+	static size_t seq_n;
+	static enum esc_state state;
 
 	for (; len; buf++, len--) {
 		uint8_t c = *buf;
 
-		if (esc_n == 0 && c != '\033') {
-			push(&c, 1);
+		if (c == '\033') {	/* starts a sequence, whatever was pending is dead */
+			seq[0] = c;
+			seq_n = 1;
+			state = ESC_START;
 			continue;
 		}
-		if (c == '\033')
-			esc_n = 0;	/* a new sequence starts, whatever was pending is dead */
-		esc[esc_n++] = c;
-		if (esc_n == 2 && c != '[')
-			esc_n = 0;	/* ESC and a key: not a CSI sequence, drop it */
-		else if (esc_n >= 3 && c >= 0x40 && c <= 0x7e) {	/* the final byte of the CSI */
-			if ((esc_n == 3 && c >= 'A' && c <= 'D') || (esc_n == 4 && esc[2] == '3' && c == '~'))
-				push(esc, esc_n);
-			esc_n = 0;
-		} else if (esc_n == 4)
-			esc_n = 0;	/* longer than any sequence the editor knows */
+		switch (state) {
+		case ESC_NONE:
+			push(&c, 1);
+			continue;
+		case ESC_START:
+			if (c == '[') {
+				seq[seq_n++] = c;
+				state = ESC_CSI;
+				continue;
+			}
+			state = c == 'O' ? ESC_SS3 : ESC_NONE;
+			break;
+		case ESC_SS3:
+			state = ESC_NONE;
+			break;
+		case ESC_CSI:
+			if (c >= 0x20 && c <= 0x3f) {
+				if (seq_n < CSI_MAX) {
+					seq[seq_n++] = c;
+					continue;
+				}
+				state = ESC_NONE;	/* longer than any sequence the editor knows */
+				continue;
+			}
+			state = ESC_NONE;
+			if (c >= 0x40 && c <= 0x7e) {
+				seq[seq_n++] = c;
+				if ((seq_n == 3 && c >= 'A' && c <= 'D') || (seq_n == 4 && seq[2] == '3' && c == '~'))
+					push(seq, seq_n);
+				continue;
+			}
+			break;
+		}
+		/* Here the byte ended the escape without belonging to it: a printable one is part of
+		 * a sequence we drop (ESC O x, ESC x), a control byte is typed input. */
+		if (c < 0x20 || c == 0x7f)
+			push(&c, 1);
 	}
 }

@@ -20,7 +20,6 @@ bool sfp_los(uint8_t slot) __banked { return false; }
 bool sfp_present_live(uint8_t slot) { return false; }
 int16_t chip_temp_get(uint8_t sensor) __banked { return 0; }
 const char *get_flash_size_str(void) { return ""; }
-void trap_rma_set(uint16_t rma, uint8_t act) __banked { }
 
 /* EEE */
 uint8_t port_eee_adv_get(uint8_t port) __banked { return 0; }
@@ -33,12 +32,32 @@ void port_eee_enable(__xdata uint8_t port, __xdata uint8_t speed) __banked { UNS
 void port_eee_disable(uint8_t port) __banked { UNSUPPORTED(); }
 void port_eee_status(uint8_t port) __banked { UNSUPPORTED(); }
 
+/* LLDP: `lldp on` asks for LLDP frames to be trapped to the CPU, which this platform cannot
+ * do yet, so the state stays off. `lldp off` (RMA_ACT_FORWARD) has nothing to undo. */
+void trap_rma_set(uint16_t rma, uint8_t act) __banked
+{
+	lldp_enabled = 0;
+	if (act == RMA_ACT_TRAP)
+		UNSUPPORTED();
+}
+
 /* Mirroring, isolation, link aggregation */
 void port_mirror_set(uint8_t port, __xdata uint16_t rx_pmask, __xdata uint16_t tx_pmask) __banked { UNSUPPORTED(); }
 void port_mirror_del(void) __banked { UNSUPPORTED(); }
 void port_mirror_get(void) __banked { memset(port_buf, 0, 6); }
 void port_isolate(uint8_t port, __xdata uint16_t pmask) __banked { UNSUPPORTED(); }
-uint16_t port_isolation_get(uint8_t port) __banked { return 0; }
+/* Isolation is off: every port reaches every port and the CPU, as the 8051 sets it up
+ * (rtl837x_port.c port_l2_setup) and as `isolate <port> off` writes it. */
+uint16_t port_isolation_get(uint8_t port) __banked
+{
+	uint16_t members = PMASK_CPU;
+
+	if (port > machine.max_port)
+		return 0;
+	for (uint8_t i = machine.min_port; i <= machine.max_port; i++)
+		members |= (uint16_t)1 << i;
+	return members;
+}
 uint16_t port_lag_members_get(uint8_t lag) __banked { return 0; }
 uint8_t port_lag_of(uint8_t port) __banked { return PORT_LAG_NONE; }
 void port_lag_members_set(__xdata uint8_t lag, __xdata uint16_t members) __banked { UNSUPPORTED(); }

@@ -9,7 +9,9 @@ BOARD ?= BENCH6
 ROOT   = ../..
 OUT    = output
 
-CC ?= gcc
+ifeq ($(origin CC),default)
+CC = gcc
+endif
 # The warning policy of test/Makefile. -DRTLP_HOST_TEST keeps platform.h from declaring the
 # 8051 memcpy/strlen/... that clash with libc. The shim goes in first so __xdata and friends
 # vanish before any firmware header. -I. precedes the repository root: it holds the stand-ins

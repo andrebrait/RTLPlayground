@@ -3,8 +3,6 @@ ifeq ($(PLATFORM),linux)
 .PHONY: all test clean
 all test clean:
 	$(MAKE) -C platform/linux $@
-else ifneq ($(PLATFORM),)
-$(error PLATFORM=$(PLATFORM) is not supported; use PLATFORM=linux or leave it unset for the 8051 firmware)
 else
 
 VERSION=0.1.0

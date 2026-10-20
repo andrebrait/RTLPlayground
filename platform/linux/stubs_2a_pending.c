@@ -47,9 +47,14 @@ void print_port_ingress_filter_mode(vlan_ingress_mode_t mode) __banked { }
 /* L2 table: empty. */
 bool l2_entry_next(void) __banked { return false; }
 uint8_t l2_entry_delete(uint16_t idx) __banked { return 0; }
-uint8_t port_l2_forget(void) __banked { return 0; }
+uint8_t port_l2_forget(void) __banked { UNSUPPORTED(); return 0; }
 void port_l2_learned(void) __banked { UNSUPPORTED(); }
-void port_l2_static_mgmt(__xdata uint8_t *mac, __xdata uint16_t vlan, __xdata bool remove_entry) __banked { }
+/* The shared code removes the old entry, then adds the new one: say so once, on the add. */
+void port_l2_static_mgmt(__xdata uint8_t *mac, __xdata uint16_t vlan, __xdata bool remove_entry) __banked
+{
+	if (!remove_entry)
+		UNSUPPORTED();
+}
 
 /* Management IP: no DHCP client. */
 void dhcp_start(void) __banked { UNSUPPORTED(); }
