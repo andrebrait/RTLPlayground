@@ -16,8 +16,10 @@ function sw(on,dis){
   l.firstChild.checked=!!on;if(dis)l.firstChild.disabled=true;
   return l;
 }
-function fcNeg(p){var n=FC[p.portNum]>>4&3;return n?badge(["","TX","RX","TX/RX"][n],"ok"):badge(t("c_off"))}
-function eeeSt(p){var e=EEE[p.portNum];return p.isSFP?badge(t("e_na")):e.active?badge(t("e_active"),"ok"):badge(t("e_idle"))}
+// "-" = port or feature switched off; "off"/"idle" = switched on but not in use on this link
+function dash(){return'<span class="badge" style="background:none">-</span>'}
+function fcNeg(p){var f=FC[p.portNum],n=f>>4&3;return!p.enabled||(!p.isSFP&&!(f&1))?dash():n?badge(["","TX","RX","TX/RX"][n],"ok"):badge(t("c_off"))}
+function eeeSt(p){var e=EEE[p.portNum];return p.isSFP?badge(t("e_na")):!p.enabled||!parseInt(e.adv,2)?dash():e.active?badge(t("e_active"),"ok"):badge(t("e_idle"))}
 function cellWith(tr,kids){var c=tr.insertCell();c.style.whiteSpace="nowrap";kids.forEach(function(k){typeof k==="string"?c.insertAdjacentHTML("beforeend",k):c.appendChild(k)});return c}
 
 function baseRow(tb,p,opt){
@@ -519,7 +521,7 @@ function mockStatus(){
   S.ports.forEach(function(p){
     var i=p.portNum-1,el=$("plink"+i),mc=$("pmac"+i);
     if(mc)mc.textContent=parseInt(p.macs,16)&0x1fff;
-    if(el){el.innerHTML=linkBadge(p);if(LINKINFO){var w=h("span",{style:"display:inline-flex;align-items:center;white-space:nowrap"},[h("span",{class:"fitlink",html:el.innerHTML}),infoBtn(p)]);el.innerHTML="";el.appendChild(w)}}
+    if(el){el.innerHTML=LINKINFO&&!p.enabled?dash():linkBadge(p);if(LINKINFO){var w=h("span",{style:"display:inline-flex;align-items:center;white-space:nowrap"},[h("span",{class:"fitlink",html:el.innerHTML}),infoBtn(p)]);el.innerHTML="";el.appendChild(w)}}
   });
 }
 function mock(v){
