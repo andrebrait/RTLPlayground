@@ -54,6 +54,11 @@ devices by looking at the image using e.g. Ghidra. If you want to contribute to 
 design of the web-interface or get a feeling for the interface first, a standalone
 device simulator is provided, which runs entirely under Linux as a local webserver.
 
+The command line and the web interface can also be built as a Linux daemon (`make PLATFORM=linux`) that
+configures the ports, VLANs and management address of a switch running Linux through the kernel instead of the
+switch registers. It shares `cmd_parser.c`, `cmd_editor.c`, `httpd/page_impl.c` and `html/` with the firmware
+unchanged; see [RTLPlayground on Linux](doc/linux.md).
+
 ## (0) Compiling Requirements
 
 Install the following particular build requisites (Debian 12/13), note that Ubuntu 24.04

@@ -15,6 +15,14 @@
     target selects single-IO flash reads (`flash_sio`). New machine target
     `MACHINE_2G5F4_10G2_V1_01`, see `doc/devices/2G5F4_10G2_V1.01.md`.
 
+- Linux
+  - Build the command line and web interface as a Linux daemon with `make PLATFORM=linux`, which
+    drives a switch running Linux through rtnetlink and ethtool: console, CLI socket (`swcli`),
+    web interface with login (no default password, only a SHA-512 hash is stored), atomic startup
+    configuration, ports and counters, VLANs on a bridge, management IP and DHCP, and the L2
+    table. The 8051 images are unchanged. Link aggregation, STP, IGMP, LLDP, mirroring, isolation,
+    rate limits, EEE, DNS, NTP and syslog are not supported yet. See `doc/linux.md`.
+
 - Web UI
   - Compress the embedded assets (minify + gzip) and switch to a single-page layout. #315
   - Replace the multi-page UI with a themed single-page app: light, dark and Selenized themes following the browser by default,
