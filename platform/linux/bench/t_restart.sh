@@ -5,6 +5,9 @@
 # host 1 floods VLAN 10 (untagged, PVID 10) through 20 restarts and 5 /reset and not one frame reaches host 3
 # (VLAN 1); neither do the frames of the two parked ports (host 3: `pvid 3 99`, host 4: `ingress 4t`) reach
 # host 5 (VLAN 1). (3) Descriptors: /reset does not leak any, and the DHCP client has no descriptor of the daemon.
+# (5) A restart is a boot: what was not saved (VLANs, PVIDs, MTU, a port taken down) is gone, a cold start brings
+# every port up. (6) A second daemon on the same configuration directory or CLI socket is refused; a dead one's
+# socket is taken over.
 . "$(dirname "$0")/lib.sh"
 . "$(dirname "$0")/vlan_lib.sh"
 SW_PASS=benchpass
@@ -38,7 +41,7 @@ printf 'passwdhash %s\nvlan 1 1 2 3 4 5 6\nvlan 10 lab 1 2t\npvid 1 10\npvid 3 9
 in_host 2 ip link add link h2 name h2.10 type vlan id 10 && in_host 2 ip link set h2.10 up || exit 1
 rtlp_sw ip link del swbr || exit 1	# a new bridge for this configuration
 sw_start
-want=$(table "lan1 1:U 10:P:U" "lan2 1:P:U 10" "lan3 1:U $(pk 3):P:U" "lan4 1:U $(pk 4):P:U" "$(ports 5 6 1:P:U)" "swbr 1:P:U 10")
+want=$(table "lan1 1:U 10:P:U" "lan2 1:P:U 10" "lan3 1:U $(pk 3):P:U" "lan4 1:U $(pk 4):P:U" "$(ports 5 6 1:P:U)" "swbr 1:P:U")
 assert_eq "the configuration is applied (ports 3 and 4 parked)" "$want" "$(bv)"
 cat > "$RUN/flood.py" <<'PY'
 import socket, time
@@ -111,6 +114,7 @@ n0=$(nfds)
 for i in 1 2 3; do
 	reset_daemon
 	assert_eq "same process after /reset $i" "$pid" "$(cat "$RUN/pid")"
+	assert_eq "the process is still named rtlplayground after /reset $i (not exe)" rtlplayground "$(cat "/proc/$pid/comm")"
 	warm
 	assert_eq "descriptors of the daemon after /reset $i" "$n0" "$(nfds)"
 done
@@ -154,3 +158,74 @@ assert_eq "...nor host 2" 0 "$(frames_seen 5 2)"
 assert_eq "...nor the bridge" 0 "$(frames_seen 5 sw)"
 assert_eq "frames tagged 4090 from host 1 do not reach parked host 5" 0 "$(frames_seen 1 5 h1.4090 198.51.100.255)"
 assert_eq "control: host 1 reaches host 6" 5 "$(frames_seen 1 6)"
+
+# ---- (5) a restart is a boot: what was not saved is lost ----
+mtu_of() { ip -n rtlp-sw -o link show "$1" | sed -n 's/.* mtu \([0-9]*\) .*/\1/p'; }
+up_of() { ip -n rtlp-sw -br link show "$1" | awk '{print $2}'; }	# UP, DOWN
+boot=$(table "$(ports 1 6 1:P:U)" "swbr 1:P:U")
+unsaved() { # change things the way a user does and does not save
+	sw_cmd "vlan 10 lab 1 2t" >/dev/null; sw_cmd "pvid 1 10" >/dev/null; sw_cmd "pvid 4 99" >/dev/null
+	sw_cmd "mtu 2 9000" >/dev/null; sw_cmd "port 3 off" >/dev/null
+	assert_eq "unsaved changes are in force: PVID of port 1 on VLAN 10, port 4 parked" "lan1 1:U 10:P:U" "$(bv | grep '^lan1 ')"
+	assert_eq "...MTU of lan2" 8974 "$(mtu_of lan2)"
+	assert_eq "...lan3 is down" DOWN "$(up_of lan3)"
+}
+booted() { # <what>
+	assert_eq "$1: the bridge is in its boot state (VLAN 1, PVID 1 everywhere, no VLAN 10)" "$boot" "$(bv)"
+	assert_eq "$1: vlan show: PVID 1 on every port" 6 "$(sw_cmd 'vlan show' | grep -c $'^[1-6]\t0x0001\tAny')"
+	assert_eq "$1: the MTU is the default again" 1500 "$(mtu_of lan2)"
+	assert_eq "$1: mtu show says the same (1500 + 26)" 6 "$(sw_cmd 'mtu show' | grep -c '0x05f6')"
+	assert_eq "$1: lan3 is up again" UP "$(up_of lan3)"
+}
+sw_stop
+printf 'passwdhash %s\nhostname rs\n' "$hash" > "$SW_CFG/startup-config"
+# a cold start with every port down: they come up, and the switch switches
+rtlp_sw ip link del swbr || exit 1
+for n in 1 2 3 4 5 6; do rtlp_sw ip link set "lan$n" down || exit 1; done
+sw_start
+for n in 1 2 3 4 5 6; do assert_eq "cold start: lan$n is up" UP "$(up_of lan$n)"; done
+assert_eq "cold start: the boot state" "$boot" "$(bv)"
+ping_ok 1 192.0.2.12 || { echo "cold start: host 1 does not reach host 2"; exit 1; }
+# the same on a bridge that is there with its ports down (a daemon that died, then the ports were taken down)
+sw_stop
+for n in 1 2 3 4 5 6; do rtlp_sw ip link set "lan$n" down || exit 1; done
+sw_start
+for n in 1 2 3 4 5 6; do assert_eq "adopted bridge, ports down: lan$n is up" UP "$(up_of lan$n)"; done
+ping_ok 1 192.0.2.12 || { echo "adopted bridge, ports down: host 1 does not reach host 2"; exit 1; }
+unsaved
+sw_stop; sw_start
+booted "restart"
+unsaved
+reset_daemon
+booted "/reset"
+# VLAN 1 deleted and not saved: a configuration that never mentions it gets it back, on every port, untagged
+sw_cmd "vlan 1 d" >/dev/null
+assert_eq "vlan 1 d: no VLAN at all" "$(for n in 1 2 3 4 5 6; do echo "lan$n $(pk $n):P:U"; done)" "$(bv)"
+sw_stop; sw_start
+booted "restart after vlan 1 d"
+unsaved
+sw_cmd "vlan 1 d" >/dev/null
+reset_daemon
+booted "/reset after vlan 1 d"
+
+# ---- (6) one daemon per configuration directory and CLI socket ----
+other() { # <extra args...>: a second daemon, no console; its exit status, then its message
+	ip netns exec rtlp-sw timeout -s KILL 5 "$BIN" --cli-socket "$RUN/cli2.sock" --www "$WWW" --http 127.0.0.1:8090 --dhcp-script "$DHCP_SCRIPT" "$@" 2>&1 </dev/null
+	echo "rc=$?"
+}
+out=$(other --cfg-dir "$SW_CFG")
+assert_contains "a second daemon on the same configuration directory refuses" "another daemon is running" "$out"
+assert_contains "...with a status other than 0" "rc=1" "$out"
+assert_eq "...it made no socket" 0 "$(ls "$RUN/cli2.sock" 2>/dev/null | wc -l)"
+assert_contains "the first daemon still answers" "Unknown command" "$(sw_cmd foo)"
+mkdir "$RUN/cfg2"
+out=$(ip netns exec rtlp-sw timeout -s KILL 5 "$BIN" --cli-socket "$RUN/cli.sock" --www "$WWW" --cfg-dir "$RUN/cfg2" --dhcp-script "$DHCP_SCRIPT" 2>&1 </dev/null; echo "rc=$?")
+assert_contains "a second daemon on the live CLI socket refuses" "another daemon is listening" "$out"
+assert_contains "...with a status other than 0" "rc=1" "$out"
+assert_contains "the first daemon still owns the socket" "Unknown command" "$(sw_cmd foo)"
+# a socket that nobody listens on is taken over: the daemon was killed, its socket stayed
+pid=$(cat "$RUN/pid"); kill -KILL "$pid"; wait "$pid" 2>/dev/null
+exec 3>&- 4>&-; rm -f "$RUN/in" "$RUN/out" "$RUN/pid"
+[[ -S $RUN/cli.sock ]] || { echo "the killed daemon left no socket to take over"; exit 1; }
+sw_start
+assert_contains "a dead daemon's socket is taken over" "Unknown command" "$(sw_cmd foo)"

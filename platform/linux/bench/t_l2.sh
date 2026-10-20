@@ -8,7 +8,11 @@ sw_start
 sw_cmd "passwd $SW_PASS" >/dev/null
 
 cat > "$RUN/l2tool.py" <<'PY'
-import json, subprocess, sys, urllib.request
+import json, subprocess, sys, time, urllib.request
+
+# The daemon reuses one dump of the kernel's table for 250 ms (fdb.c): a walk that must see what changed
+# before it starts the first page 0.3 s after the change.
+STALE = 0.3
 
 def opener():
     # the session of sw_get (a login replaces the one before it): its cookie is in the jar curl wrote
@@ -20,6 +24,7 @@ def opener():
 def walk(op):
     """l2Load() of html/app.js: [(mac, vlan, type, port, idx)], pages fetched"""
     seen, rows, idx, guard = {}, [], 0, 0
+    time.sleep(STALE)
     while True:
         s = json.load(op.open("http://127.0.0.1/l2.json?idx=%d" % idx, timeout=5))
         if not s:
@@ -44,6 +49,7 @@ def page(op, idx):
 def midwalk(between):
     """l2Load() with `between()` run after its first page; returns the rows of the walk, a key twice raises"""
     op, seen, rows, idx = opener(), {}, [], 0
+    time.sleep(STALE)
     for n in range(140):
         s = page(op, idx)
         if not s:
@@ -92,8 +98,10 @@ elif cmd == "colwalk":  # argv[3] = the MACs to add meanwhile (file, one per lin
         def batch(verb, macs, tail):
             subprocess.run(["bridge", "-force", "-batch", "-"], check=True, input="".join("fdb %s %s dev lan3 %s vlan 1\n" % (verb, m, tail) for m in macs).encode())
         batch("del", victims, "master")
+        time.sleep(STALE)
         page(op, 4000)     # a dump that sees them gone
         batch("replace", open(sys.argv[3]).read().split(), "master static")
+        time.sleep(STALE)
         page(op, 4000)
         batch("replace", victims, "master static")
     rows = midwalk(between)
@@ -208,7 +216,7 @@ assert_eq "vlan 20 mgmt" "Management VLAN set to 0x0014" "$(sw_cmd 'vlan 20 mgmt
 assert_contains "the own entry is in VLAN 20 now" "00:11:22:33:44:55 20 s 9" "$(l2 rows)"
 out=$(sw_cmd "vlan 4090 mgmt")
 assert_contains "a parking VLAN cannot manage the switch" "Error: VLAN 4090 is reserved for a parked port" "$out"
-assert_eq "...the bridge keeps its untagged entry of VLAN 20" "swbr 1 20:P:U" "$(bv | grep '^swbr ')"
+assert_eq "...the bridge keeps its untagged entry of VLAN 20" "swbr 20:P:U" "$(bv | grep '^swbr ')"
 assert_contains "...the shared command reports the VLAN it is left with" "Management VLAN set to 0x0014" "$out"
 assert_contains "...the management VLAN is still 20" '{"mgmt":20,' "$(sw_get vlanlist)"
 assert_contains "...and so is the own entry" "00:11:22:33:44:55 20 s 9" "$(l2 rows)"

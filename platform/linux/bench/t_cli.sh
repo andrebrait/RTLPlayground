@@ -5,6 +5,7 @@
 SW_PASS=hunter2
 sw_start
 swcurl() { ip netns exec rtlp-sw curl -s -m "$SW_TIMEOUT" --max-redirs 0 "$@"; }
+assert_eq "the CLI socket is private to its owner (mode 600)" 600 "$(stat -c %a "$RUN/cli.sock")"
 alive() { kill -0 "$(cat "$RUN/pid")" 2>/dev/null && [[ $(sw_cmd foo) == *"Unknown command"* ]] && [[ $(sw_console foo) == *"Unknown command"* ]]; }
 
 # ---- a console line half typed; a command through the socket; the line is finished ----

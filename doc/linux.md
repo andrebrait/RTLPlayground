@@ -15,8 +15,9 @@ L2 table. Everything else is listed in [What is supported](#what-is-supported).
 ## Build
 
 Dependencies: `make`, `gcc`, `python3`, `gzip`, `libmnl-dev`, and a C library with `crypt(3)`
-(`libcrypt`). The 8051 toolchain is not needed. Runtime dependencies are libc, libmnl and, for
-DHCP only, BusyBox with the `udhcpc` applet and an `ip` command (iproute2 or BusyBox).
+(`libcrypt`). The 8051 toolchain is not needed. Runtime dependencies are libc, **libcrypt
+(libxcrypt, for `crypt(3)`; the daemon links it)**, libmnl and, for DHCP only, BusyBox with the
+`udhcpc` applet and an `ip` command (iproute2 or BusyBox).
 
 ```
 make PLATFORM=linux [BOARD=BENCH6]
@@ -32,8 +33,13 @@ and, in `output/html_min/`, the minified web interface together with a gzip copy
 of every file except `login.html`. The daemon serves the compressed copy with
 `Content-Encoding: gzip`, as the 8051 does.
 
-`make PLATFORM=linux test` runs the unit tests, a console test against the daemon and a test of
-the install target. The namespace bench (see [Bench](#bench)) needs root and is run separately.
+The default build (and `install`) is the production build: no `-Werror`, and none of the test
+hooks (a failing `rename`, a crash in the middle of a save, an injected netlink failure, `--dump-state`
+are compiled only into the **test build**). `make PLATFORM=linux test` builds the test build too
+(`output/test/`, `-DRTLP_TEST_HOOKS -Werror`), runs the unit tests, a console test against it
+(in a network namespace of its own when run as root), a test of the install target and a test of the
+bench scripts. The namespace bench (see [Bench](#bench)) runs the test build, needs root and is run
+separately; `make -C platform/linux testbin` builds just that.
 
 The Docker image of the repository (`docker build -t rtlplayground-dev .`) contains every
 dependency, including those of the bench.
@@ -76,25 +82,32 @@ and `VM2E1000` (two e1000e NICs of a test virtual machine).
 ## Running
 
 ```
-rtlplayground [--console] [--http <addr:port>] [--cli-socket <path>] [--www <dir>]
+rtlplayground [--console] [--http <addr:port> [--http-any]] [--cli-socket <path>] [--www <dir>]
               [--cfg-dir <dir>] [--dhcp-script <script>]
 ```
 
 | Option | Default | Meaning |
 |---|---|---|
 | `--console` | off | Read commands from standard input and write the prompt and output to standard output, like the serial console of the 8051. Without it the daemon does not touch its standard streams. |
-| `--dump-state` | off | A test aid: print a few `name=value` lines of internal state (`has_password`, `lldp_enabled`, ...) when the daemon exits. Used by the console test; not for production. |
-| `--http <addr:port>` | `[::]:80` | Where the web interface listens. The address is numeric, IPv6 in brackets, e.g. `0.0.0.0:8080`. On a kernel without IPv6 the default falls back to `0.0.0.0:80`. |
-| `--cli-socket <path>` | `/run/rtlplayground.sock` | The Unix socket `swcli` connects to (mode 0600). `swcli` looks for the same path unless it is given `-s`. |
+| `--http <addr:port>` | `[::]:80` | Where the web interface listens. The address is numeric, IPv6 in brackets, e.g. `0.0.0.0:8080`. On a kernel without IPv6 the default falls back to `0.0.0.0:80`. **The listener is bound to `swbr`** (`SO_BINDTODEVICE`), so the web interface answers on the management VLAN only, not on any other interface that has an address; a loopback listener (`127.0.0.1` and `::1`, same port) serves local tools. The default `[::]:80` therefore serves IPv4 and IPv6 on `swbr` and loopback; an explicit address keeps that address and port and is bound to `swbr` all the same. If `swbr` or the address does not exist, the daemon says so and runs without the web interface (console and CLI socket work). |
+| `--http-any` | off | With `--http`: do not bind to `swbr`; listen on exactly that address on every interface that has it (and no extra loopback listener). For setups where the management interface is not `swbr`. |
+| `--cli-socket <path>` | `/run/rtlplayground.sock` | The Unix socket `swcli` connects to (mode 0600). `swcli` looks for the same path unless it is given `-s`. A socket nobody listens on (a killed daemon's) is replaced; a live one is not: the daemon refuses to start. |
 | `--www <dir>` | `/usr/share/rtlplayground/www` | The directory of the web interface (`make` leaves it in `output/html_min` of the repository root, not under `platform/linux`). |
-| `--cfg-dir <dir>` | `/cfg` | Where `startup-config` lives. The directory itself is created if it is missing, but not its parents. Mode 0700 is enforced only when the directory belongs to the user the daemon runs as; otherwise the daemon logs a warning and leaves the mode alone. |
+| `--cfg-dir <dir>` | `/cfg` | Where `startup-config` lives. The directory itself is created if it is missing, but not its parents, and is locked (`flock`) for the life of the process: **a second daemon on the same directory refuses to start.** **Trust:** the daemon runs as root and runs what the file says, so it reads the directory and the file only if they belong to the user the daemon runs as and are not writable by group or others (a directory of ours with other modes is tightened to 0700); otherwise it logs why, runs the built-in default, sets no password and stores nothing. |
 | `--dhcp-script <script>` | `/usr/share/rtlplayground/udhcpc.script` | The BusyBox `udhcpc` event script. |
 
 The daemon is meant to run as root: it configures network interfaces, binds port 80 and starts
-the DHCP client. It runs one `poll()` loop and never blocks. On `SIGTERM` or
-`SIGINT` it stops; `GET /reset` (the *Reboot switch* button) makes it execute itself again with
+the DHCP client. It runs one `poll()` loop, which waits only in `poll()` (at most a second at a time).
+The exceptions are named: every netlink request is synchronous (the kernel answers at once), starting
+the DHCP client waits for it to exec BusyBox for at most 200 ms, and a daemon that exits or restarts
+waits (at most about a second) for the DHCP client to end. Stopping the client for `ip <address>` or
+`ip dhcp` does not wait: it gets `SIGTERM` at once and is reaped, and killed if it must be, by the loop;
+the address that `ip <address>` sets then reaches the kernel as soon as the client has exited (milliseconds, a
+second at most), not before, because a client that already has its lease would still run the lease script
+that flushes it.
+On `SIGTERM` or `SIGINT` it stops; `GET /reset` (the *Reboot switch* button) makes it execute itself again with
 the same arguments, so the configuration is read anew. The daemon does not fork or write a PID file;
-let the init system supervise it.
+let the init system supervise it. The process is named `rtlplayground` also after `/reset`.
 
 The daemon creates or adopts the bridge `swbr` (see [VLANs](#vlans-and-the-bridge)) and starts
 BusyBox `udhcpc` as a child when DHCP is on. Standard error carries diagnostics.
@@ -129,8 +142,13 @@ The same commands are available on the web interface (*System*, *Console*) and a
   login fails, and `POST /cmd` answers 401.
 - **Only hashes are stored.** The shared `passwd <password>` command writes the plaintext
   into a global as on the 8051; the platform hashes it (`crypt(3)`, SHA-512, random salt) right
-  after the command ran and wipes the plaintext. Nothing but the `$6$...` hash is kept in memory
-  or on disk. A password is at most 20 characters (what the shared command keeps); longer input is
+  after the command ran and wipes the plaintext. Nothing but the `$6$...` hash reaches the disk. One
+  copy of plaintext stays in RAM: the **last uploaded configuration text** (with a `passwd <password>`
+  line, if the upload had one) is held and served by `GET /config` until the next upload or restart,
+  because the web interface's *Save* reads the configuration back and insists that it is byte for byte
+  what it sent (see [Configuration](#configuration)). A `passwdhash` line is accepted only in the form
+  the daemon writes: `$6$<salt>$<86 characters>`; a `rounds=` field is refused, since a large one
+  would keep `crypt` busy in the poll loop for minutes. A password is at most 20 characters (what the shared command keeps); longer input is
   cut at 20.
 - **The first password is stored at once.** Setting the first password (when none exists) is what
   makes the switch reachable, so the daemon writes it to `startup-config` itself, as a
@@ -159,7 +177,10 @@ The same commands are available on the web interface (*System*, *Console*) and a
 ## Configuration
 
 The startup configuration is the file `<cfg-dir>/startup-config`, a list of CLI commands that is
-replayed line by line on every start, as in the flash of the 8051. It is at most 2048 bytes.
+replayed line by line on every start, as in the flash of the 8051. It is at most **4095 bytes**
+(`CONFIG_LEN` is 4096, the area the 8051 keeps it in, and the text needs a terminating NUL). The 2048
+bytes that the 8051's web editor allows are the limit of that editor only; the daemon takes
+what the web interface uploads up to 4095.
 
 - **Saving is atomic.** The new text is written to `startup-config.new` and synced, the old file
   is renamed to `startup-config.bak`, the new one is renamed into place and the directory is synced.
@@ -172,8 +193,13 @@ replayed line by line on every start, as in the flash of the 8051. It is at most
 - **Runtime changes need a save to survive.** Commands change the running system at once (the
   kernel state) and are recorded in the command history; only *Save to flash* writes them to
   `startup-config`. `GET /reset`, a restart of the daemon, and a reboot replay the file, so
-  anything not saved is lost, as on the 8051. The exceptions are the kernel state the daemon does
-  not own (see [VLANs](#vlans-and-the-bridge)).
+  anything not saved is lost, as on the 8051. At every start the daemon puts the system in the state
+  of a booting 8051 **before** it replays the file: every board port administratively up (also after
+  `port <n> off` and on a cold start with the ports down), the default MTU (1500, `mtu show` 1526), every
+  mode the port supports advertised; ports the file gives no `pvid` get PVID register 1; VLAN 1 is back
+  on every port, untagged, unless the file creates or deletes it; VLANs the file does not create are
+  removed (see [VLANs](#vlans-and-the-bridge) for how an existing bridge is adopted without a gap in
+  switching). The exception is the kernel state the daemon does not own.
 - **The built-in default and Save.** The effective startup configuration is the built-in default
   (every port an untagged member of VLAN 1 with PVID 1, VLAN 1 as management VLAN, DHCP on)
   followed by the file's lines when the file has no command but the password (it is missing,
@@ -184,11 +210,19 @@ replayed line by line on every start, as in the flash of the 8051. It is at most
 
 ## VLANs and the bridge
 
-The switch fabric is the Linux bridge `swbr` with `vlan_filtering 1`, STP off and
-`vlan_default_pvid 0`; every board port is a member. The VLAN table of the console and the web
+The switch fabric is the Linux bridge `swbr` with `vlan_filtering 1`, STP off, multicast snooping off (IGMP
+is 2b) and `vlan_default_pvid 0`; every board port is a member. The VLAN table of the console and the web
 interface is the VLAN table of the bridge: a VLAN is a set of bridge VLAN entries, the CPU port
 (port 9 of the 8051) is the bridge itself, and a port's PVID is the PVID flag of its entry. The
 management VLAN is untagged on the bridge, so the management IP address lives on `swbr`.
+**The bridge itself is a member of the management VLAN only.** On a DSA switch the bridge's own VLAN
+entry is the CPU port's membership in hardware: in every VLAN it would let the floods of every
+VLAN reach the switch's CPU. `vlan.json`, `vlan show`'s CPU bit and the VLAN list still show the CPU
+in every VLAN, as the 8051 pages expect. The management address is reachable from the management VLAN only.
+A VLAN with no board port that is not the management VLAN has no bridge entry and does not exist (the
+8051 can hold one with only the CPU). Deleting the management VLAN prints a warning: management
+is then possible only through the console and the CLI socket. A VLAN change that fails on some
+port is undone (members, tagging, PVIDs and name are as before; if even that fails it says so).
 
 The kernel is the single source of truth: reads are netlink dumps, not copies. If the bridge
 already exists at start (daemon restart or `/reset`) it is adopted without interrupting traffic and the
@@ -218,7 +252,9 @@ so `ip` and `information.json` report what is configured. A netmask of `0.0.0.0`
 a gateway that is not reachable from the address is refused, or kept without a route (with a
 warning) when it became unreachable because the address changed in the same command run.
 
-`ip dhcp` starts `busybox udhcpc -i swbr -f -S -s <script>` as a child of the daemon. The script
+`ip dhcp` starts `busybox udhcpc -i swbr -f -S -s <script>` as a child of the daemon, and only when it
+runs takes a static address away; if it cannot be started (no BusyBox) the address, the routes and `ip`
+stay as they were and the error is printed. The script
 `udhcpc.script` puts address and default route on `swbr` with the lease as lifetime, and the
 daemon reads them back once a second. If the client exits it is started again after five seconds; if
 it cannot be started DHCP is switched off and the reason logged. When the daemon exits the child is
@@ -260,7 +296,10 @@ platform never sets the MTU of `swbr`; the kernel follows the smallest port MTU 
 
 Link state and speed come from sysfs and ethtool and map to the link codes of the web interface
 (10M, 100M, 1000M, 2.5G, 5G, 10G; 10G for veth). Speed, duplex and enable/disable are
-changed through ethtool; a device that refuses the setting prints an error and keeps its state.
+changed through ethtool; a device that refuses the setting prints an error and keeps its state. The
+modes are selected by speed on copper (`1000baseT`, `2500baseT`, ...) and on SFP+, optical and
+backplane ports alike (`1000baseX`, `2500baseX`, `10000baseSR/LR/LRM/ER/CR/KR/KX4`): `port <n> 10g`
+advertises the 10G modes the port supports and clears the others, `1g` only the 1000 ones.
 Every kernel call is checked: a failed change is never reported as applied.
 
 ## L2 table
@@ -270,7 +309,9 @@ listed with VLAN and port, together with the switch's own address (port `CPU`, i
 VLAN, as on the 8051). The kernel's other local entries, entries in parking VLANs and entries
 of other interfaces are not listed. The web interface addresses an entry by a 12-bit slot
 number; the platform keeps a stable slot per entry, so a page that is being walked sees no
-entry twice while entries come and go. The `l2` command prints the table, `l2 forget` removes the learned entries, the
+entry twice while entries come and go. One page of `/l2.json` (up to 30 entries) reads the kernel's
+table once: the dump is reused for 250 ms, so the page may be up to 250 ms behind the kernel
+(a delete or `l2 forget` drops it). The `l2` command prints the table, `l2 forget` removes the learned entries, the
 delete button of the web interface removes one entry, and `mac <address>` sets the switch's own
 address. The learned-addresses column of the port page counts the learned entries of the port.
 
@@ -296,13 +337,15 @@ It needs root, `iproute2`, BusyBox (with `udhcpc`, `udhcpd` and `ping`), `ethtoo
 `python3` and `openssl`.
 
 ```
-make PLATFORM=linux
+make -C platform/linux testbin
 sudo platform/linux/bench/run.sh
 docker run --rm --privileged -v "$PWD":/w -w /w rtlplayground-dev platform/linux/bench/run.sh
 ```
 
 `run.sh` runs every `t_*.sh` on a fresh bench and prints `ok <name>` or `FAIL <name>`; the exit
-status is 1 if any failed. The tests are `t_smoke`, `t_cli`, `t_http`, `t_http_hostile`, `t_config`,
+status is 1 if any failed. It runs the test build (`make -C platform/linux testbin`), not the production
+binary. `setup.sh` refuses a run directory that is not a bench's (no owner marker), and `teardown.sh` deletes
+a directory only if it holds the marker and lies under `/run/rtlp-bench*` or `/tmp/rtlp-bench*`. The tests are `t_smoke`, `t_cli`, `t_http`, `t_http_hostile`, `t_config`,
 `t_ports`, `t_vlan`, `t_restart`, `t_l2` and `t_ui`, which fetches every route that `html/app.js`
 requests (except `/upload` and `/reset`, which `t_http` covers) and fails when `app.js` gains a route the
 test does not know. See

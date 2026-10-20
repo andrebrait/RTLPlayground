@@ -242,11 +242,12 @@ bool auth_session_valid(const char *id)
 bool auth_hash_valid(const char *arg)
 {
 	size_t n = strlen(arg);
-	/* $6$[rounds=N$]salt$ followed by the 86 characters of the digest */
+	/* $6$salt$ followed by the 86 characters of the digest. No `rounds=N$`: the daemon never writes one,
+	 * and an N of millions would keep crypt() busy in the poll loop for minutes (there is no '=' in the set below). */
 	const char *last = strrchr(arg, '$');
 
 	return !strncmp(arg, "$6$", 3) && n < AUTH_HASH_MAX && last != arg + 2 && n - (last + 1 - arg) == 86 &&
-	       strspn(arg + 3, "$./=0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz") == n - 3;
+	       strspn(arg + 3, "$./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz") == n - 3;
 }
 
 /* passwdhash <$6$...>: sets the hash directly, how a saved configuration restores the password

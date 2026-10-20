@@ -1,13 +1,13 @@
 # Namespace bench
 
-Runs the Linux daemon (`make PLATFORM=linux`) in network namespace `rtlp-sw` with six veth ports
+Runs the Linux daemon (the test build) in network namespace `rtlp-sw` with six veth ports
 `lan1`..`lan6`. Each peer `h<N>` lives in namespace `rtlp-h<N>` with `192.0.2.1<N>/24`
-(TEST-NET-1). Needs root, and `iproute2 busybox ethtool curl python3 openssl` besides the build dependencies (BusyBox with the `udhcpc`, `udhcpd` and `ping` applets, a kernel with `dummy`; `t_vlan.sh` runs a DHCP server in host 1 and takes about 55 s, so `run.sh` gives a test 150 s, `RTLP_TEST_TIMEOUT` overrides).
+(TEST-NET-1). Runs the test build (`make -C platform/linux testbin`: the hooks the tests use). Needs root, and `iproute2 busybox ethtool curl python3 openssl` besides the build dependencies (BusyBox with the `udhcpc`, `udhcpd` and `ping` applets, a kernel with `dummy`; `t_vlan.sh` runs a DHCP server in host 1 and takes about 55 s, so `run.sh` gives a test 150 s, `RTLP_TEST_TIMEOUT` overrides).
 
     sudo platform/linux/bench/run.sh      # every t_*.sh on a fresh bench: `ok <name>` / `FAIL <name>`, exit 1 on any failure
     docker run --rm --privileged -v "$PWD":/w -w /w rtlplayground-dev platform/linux/bench/run.sh
 
-- `setup.sh` / `teardown.sh`: create / remove the namespaces (teardown also stops the daemon; idempotent; deletes only the namespaces `setup.sh` recorded in `$RUN/owner`, and `--force` also the `rtlp-*` names of a stale bench; other namespaces are never touched).
+- `setup.sh` / `teardown.sh`: create / remove the namespaces (teardown also stops the daemon; idempotent; deletes only the namespaces `setup.sh` recorded in `$RUN/owner`, and `--force` also the `rtlp-*` names of a stale bench; other namespaces are never touched; `$RUN` is removed only if it holds that marker and lies under `/run/rtlp-bench*` or `/tmp/rtlp-bench*`, and `setup.sh` refuses an existing `$RUN` it did not make).
 - `lib.sh`: helpers for tests (`sw_start`, `sw_stop`, `sw_cmd`, `sw_console`, `sw_get`, `in_host`, `assert_eq`, `assert_contains`).
   `sw_cmd` runs a command through the CLI socket with `swcli`; `sw_console` types it into the daemon's `--console` over a FIFO pair and reads up to the next prompt. `sw_get <path>` fetches a page from the web UI inside `rtlp-sw` (127.0.0.1:80), logging in with `$SW_PASS` first. `sw_stop` kills the daemon so `sw_start` can start it again on the same configuration (`VAR=x sw_start` hands `VAR` to the daemon). The daemon runs with `--cfg-dir $SW_CFG` (default `$RUN/cfg`, removed by teardown). The daemon's stderr is `$RUN/daemon.log`. The daemon gets `--www $WWW` (default: the built `output/html_min`, `RTLP_WWW` overrides); the build leaves a `.gz` of every file but `login.html` next to the files, which the daemon serves with `Content-Encoding: gzip`. The DHCP client script is `--dhcp-script $DHCP_SCRIPT` (default `../udhcpc.script`, `RTLP_DHCP_SCRIPT` overrides). The daemon makes the bridge `swbr` over `lan1`..`lan6` itself; it stays in `rtlp-sw` when the daemon is killed.
 - A test is a `t_*.sh` that sources `lib.sh`, calls `sw_start`, and exits non-zero on failure. `RTLP_BIN` overrides the daemon path.

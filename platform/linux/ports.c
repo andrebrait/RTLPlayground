@@ -553,3 +553,40 @@ void ports_init(void)
 {
 	temp_at_start = chip_temp_get(0);
 }
+
+/* ---------------------------------------------------------------- boot state */
+
+#define MTU_DEFAULT 1500	/* the MTU of a netdev that nobody changed */
+
+/* Startup state of every board port (a daemon restart is a boot: what was set and not saved is lost,
+ * as on the 8051): administratively up, the default MTU, every supported mode advertised with
+ * autonegotiation on where the port has it. Only what differs is written, so a port that is already
+ * so does not renegotiate its link. A failure is logged and the next port goes on. */
+void ports_reset(void)
+{
+	for (uint8_t port = 0; port < BOARD_PORTS; port++) {
+		struct ifreq ifr = ifr_for(port);
+		struct elink e, before;
+		bool any;
+
+		if (!ifname_of(port))
+			continue;
+		if (ioctl(ctl_fd(), SIOCGIFFLAGS, &ifr) < 0 ||
+		    (!(ifr.ifr_flags & IFF_UP) && (ifr.ifr_flags |= IFF_UP, ioctl(ctl_fd(), SIOCSIFFLAGS, &ifr) < 0)))
+			fprintf(stderr, "rtlplayground: cannot bring %s up: %s\n", ifname_of(port), strerror(errno));
+		if (ioctl(ctl_fd(), SIOCGIFMTU, &ifr) == 0 && ifr.ifr_mtu != MTU_DEFAULT) {
+			ifr.ifr_mtu = MTU_DEFAULT;
+			if (ioctl(ctl_fd(), SIOCSIFMTU, &ifr) < 0)
+				fprintf(stderr, "rtlplayground: cannot set the MTU of %s to %d: %s\n", ifname_of(port), MTU_DEFAULT, strerror(errno));
+		}
+		if (elink_get(port, &e) < 0)
+			continue;
+		before = e;
+		if (!speed_masks(&e, PHY_SPEED_AUTO, PHY_DUPLEX_BOTH, &any) || !any)
+			continue;
+		if (mode_in(&e, MASK_SUPPORTED, ETHTOOL_LINK_MODE_Autoneg_BIT))
+			e.base.autoneg = AUTONEG_ENABLE;
+		if (memcmp(&e, &before, sizeof e) && elink_set(port, &e) < 0)
+			fprintf(stderr, "rtlplayground: cannot restore the link modes of %s: %s\n", ifname_of(port), strerror(errno));
+	}
+}

@@ -185,6 +185,7 @@ static void reset(void)
 	kn = dumps = dump_rc = deleted = 0;
 	dump_no = 0;
 	warned_full = dump_failed = false;
+	dump_at = 0;
 	clock_ms += 10000;
 }
 
@@ -323,18 +324,20 @@ int main(void)
 	nseen = 0;
 	check("an empty table: the page makes 2 calls", 2, page(0, seen, &nseen));
 	check("...it lists nothing", 0, nseen);
-	check("...and dumped twice", 2, dumps);
+	check("...from one dump", 1, dumps);
 	dumps = 0;
 	check("from another index", 2, page(0x7ff, seen, &nseen));
 	dumps = 0;
 	kadd_v(1, 1, 1, 0);
 	dump_rc = -EIO;
+	clock_ms += 300;	/* the empty table's dump is old */
 	nseen = 0;
 	check("a failed dump: 2 calls", 2, page(0, seen, &nseen));
 	check("...and 2 dumps", 2, dumps);
 	dump_rc = 0;
 	for (unsigned v = 2; v <= 100; v++)
 		kadd_v(v, 1, 1, 0);
+	clock_ms += 300;
 	nseen = 0;
 	int calls = page(0, seen, &nseen);
 	check("a table with 100 entries: a page lists 29 or more", 1, nseen >= 29 && nseen <= 30);
@@ -352,6 +355,28 @@ int main(void)
 			break;
 	}
 	check("the walk by pages reaches all 100 entries (the last page wraps)", 1, total >= 100);
+
+	/* ---- a page of 30 entries reads the kernel's table once, not once per entry ---- */
+	reset();
+	for (unsigned v = 1; v <= 100; v++)
+		kadd_v(v, 1, 1, 0);
+	dumps = 0;
+	nseen = 0;
+	page(0, seen, &nseen);
+	check("a page of 30 entries: 30 listed", 30, nseen);
+	check("...from one dump", 1, dumps);
+	nseen = 0;
+	page(seen[29] + 1, seen, &nseen);
+	check("the next page, right after: the same dump, the same slots", 1, dumps);
+	clock_ms += 300;
+	nseen = 0;
+	page(0, seen, &nseen);
+	check("a page 300 ms later reads the table again", 2, dumps);
+	l2_entry_delete(slot_of_v(5));
+	check("a delete dumps (it needs the slot as it is)", 3, dumps);
+	nseen = 0;
+	page(0, seen, &nseen);
+	check("...and the page after it too", 4, dumps);
 
 	printf(fails ? "%d FAILED\n" : "all ok\n", fails);
 	return fails != 0;

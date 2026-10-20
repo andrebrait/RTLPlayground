@@ -18,6 +18,12 @@
  * shortcut: an entry whose old slot was taken over (no never-used slot was left, so the table was
  * full of keys) and that returns within one walk may show twice; the page then shows a row twice.
  *
+ * One page of /l2.json asks for up to 30 entries in a row (l2_entry_next): they are read from ONE dump
+ * of the kernel's table, reused for DUMP_REUSE_MS (the slots stay as that dump left them, which a
+ * walk needs anyway); a dump of a table of 4000 entries costs about 50 ms on a fast ARM, so a dump per
+ * entry made a walk of the table take seconds. Every other reader (delete, forget, `l2` show, the
+ * MACs column) dumps afresh, and a delete or forget drops the reused dump.
+ *
  * Listed: the entries on a board port (learned = dynamic, static = `bridge fdb ... static`) and the
  * entry of the switch's own MAC in the management VLAN (static, port CPU), as the 8051 shows it
  * (page_impl.c l2_delete refuses it). Not listed: the local entries of the ports
@@ -39,6 +45,7 @@
 #define SLOTS 4096		/* the slots of the 8051 table; l2_buf.idx is 12 bits */
 #define TAB_BITS 13
 #define TAB (1 << TAB_BITS)	/* lookup table over the slots: at most half full, 3/4 before it is rebuilt */
+#define DUMP_REUSE_MS 250
 
 extern __xdata uint16_t management_vlan;
 extern __xdata struct uip_eth_addr uip_ethaddr;
@@ -62,6 +69,7 @@ static uint32_t dump_no;
 static unsigned learned[CPU_PORT + 1];	/* the learned entries per port in the last dump */
 static bool warned_full;
 static bool dump_failed;
+static int64_t dump_at;		/* when the slots were last read in full; 0: they may not be used as they are */
 
 /* The slot nearest to home: the three 12-bit groups of the address folded together and the VLAN, so
  * addresses that differ only in their low bits (the ones of one NIC vendor's run) never collide. */
@@ -234,6 +242,7 @@ static int fdb_dump(void)
 	for (unsigned s = 0; !rc && s < SLOTS; s++)
 		if (slot[s].used && slot[s].seen != dump_no)
 			slot[s].used = false;
+	dump_at = rc ? 0 : now_ms();
 	return rc;
 }
 
@@ -259,7 +268,8 @@ static int slot_from(unsigned from)
 
 bool l2_entry_next(void) __banked
 {
-	int s = dump_ok() ? slot_from(l2_buf.idx & (SLOTS - 1)) : -1;
+	bool fresh = dump_at && now_ms() - dump_at < DUMP_REUSE_MS;
+	int s = fresh || dump_ok() ? slot_from(l2_buf.idx & (SLOTS - 1)) : -1;
 
 	if (s < 0) {
 		/* send_l2 adds 1 and ends its walk when that is the first index it got: with this, an empty
@@ -301,6 +311,7 @@ uint8_t l2_entry_delete(uint16_t idx) __banked
 	if (slot[idx].port == CPU_PORT)
 		return 0;	/* the switch's own entry keeps management reachable */
 	rc = fdb_del(&slot[idx]);
+	dump_at = 0;
 	if (rc && rc != -ENOENT)
 		fprintf(stderr, "rtlplayground: cannot delete an L2 entry: %s\n", strerror(-rc));
 	return !rc;
@@ -324,6 +335,7 @@ uint8_t port_l2_forget(void) __banked
 		if (rc && rc != -ENOENT && !first)
 			first = rc;
 	}
+	dump_at = 0;
 	if (first)
 		nl_error("cannot forget every learned L2 entry", first);
 	return !first;

@@ -43,7 +43,13 @@ assert_eq "the routes app.js requests are the routes this test knows" "$known" "
 # take a literal path starting with "/" and a name everywhere except in their own definitions (six
 # calls, which are known): a relative path ("new.json"), a bare "/" glued to more text ("/"+n+".json")
 # or a variable all count.
-nonlit=$(grep -oE "\b(getJSON|getText|api|fetch)\(([^\"'\`]|[\"'\`]([^/]|/[^A-Za-z0-9_.-]))" "$APP_JS" | wc -l)
+# (whitespace is allowed before the parenthesis: `getJSON ("x")`)
+nonlit_calls() { grep -oE "\b(getJSON|getText|api|fetch)[[:space:]]*\(([^\"'\`]|[\"'\`]([^/]|/[^A-Za-z0-9_.-]))"; }
+assert_eq "the check counts a relative path after a space" 1 "$(printf 'x = getJSON ("new.json");' | nonlit_calls | wc -l)"
+assert_eq "...and one without" 1 "$(printf 'x = getText("new.json");' | nonlit_calls | wc -l)"
+assert_eq "...and a variable after a space" 1 "$(printf 'fetch (url)' | nonlit_calls | wc -l)"
+assert_eq "...but not a literal route" 0 "$(printf 'getJSON ("/mtu.json"); api("/cmd")' | nonlit_calls | wc -l)"
+nonlit=$(nonlit_calls < "$APP_JS" | wc -l)
 assert_eq "calls of the request functions with a path that is not a literal route (only their definitions)" 6 "$nonlit"
 # STP is off (2b) and shows the defaults of a booting 8051 (rtl837x_stp.c stp_defaults)
 assert_eq "stp.json: off, with the 802.1D/w defaults" "0 1 8 2 20 15 6" "$(sw_get stp.json | python3 -c '

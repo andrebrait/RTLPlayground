@@ -2,7 +2,7 @@
 # Runs every t_*.sh on a fresh bench (setup before, teardown after, even on failure). A stale
 # bench from an earlier run makes setup refuse (status 3): the run then stops without touching it;
 # clean it with teardown.sh --force.
-# Needs root, a built daemon (make PLATFORM=linux) and the packages in README.md.
+# Needs root, the test build of the daemon (make -C platform/linux testbin) and the packages in README.md.
 cd "$(dirname "$0")" || exit 1
 log=$(mktemp) || exit 1
 fail=0

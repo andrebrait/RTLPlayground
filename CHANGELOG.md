@@ -18,9 +18,10 @@
 - Linux
   - Build the command line and web interface as a Linux daemon with `make PLATFORM=linux`, which
     drives a switch running Linux through rtnetlink and ethtool: console, CLI socket (`swcli`),
-    web interface with login (no default password, only a SHA-512 hash is stored), atomic startup
-    configuration, ports and counters, VLANs on a bridge, management IP and DHCP, and the L2
-    table. The 8051 images are unchanged. Link aggregation, STP, IGMP, LLDP, mirroring, isolation,
+    web interface with login (no default password, only a SHA-512 hash is stored; answers on the
+    management VLAN and loopback only), atomic startup configuration (read only from a directory
+    and file the daemon's user owns), ports and counters, VLANs on a bridge, management IP and
+    DHCP, and the L2 table. A restart is a boot: what was not saved is gone. The 8051 images are unchanged. Link aggregation, STP, IGMP, LLDP, mirroring, isolation,
     rate limits, EEE, DNS, NTP and syslog are not supported yet. See `doc/linux.md`.
 
 - Web UI

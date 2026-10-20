@@ -14,8 +14,8 @@ mkdir -p "$RUN" && cp "$BENCH_DIR/../udhcpc.script" "$DHCP_SCRIPT" && chmod +x "
 sw_start
 sw_cmd "passwd $SW_PASS" >/dev/null
 # ---- the default configuration: VLAN 1, every port an untagged member with PVID 1, the bridge too ----
-assert_eq "swbr: vlan_filtering, default pvid, STP state" "1 0 0" \
-	"$(rtlp_sw cat /sys/class/net/swbr/bridge/vlan_filtering /sys/class/net/swbr/bridge/default_pvid /sys/class/net/swbr/bridge/stp_state | tr '\n' ' ' | sed 's/ $//')"
+assert_eq "swbr: vlan_filtering, default pvid, STP state, multicast snooping (IGMP is off until 2b)" "1 0 0 0" \
+	"$(rtlp_sw cat /sys/class/net/swbr/bridge/vlan_filtering /sys/class/net/swbr/bridge/default_pvid /sys/class/net/swbr/bridge/stp_state /sys/class/net/swbr/bridge/multicast_snooping | tr '\n' ' ' | sed 's/ $//')"
 for n in 1 2 3 4 5 6; do
 	assert_eq "lan$n is a port of swbr" ../swbr "$(rtlp_sw readlink /sys/class/net/lan$n/master)"
 done
@@ -41,9 +41,9 @@ out=$(sw_cmd "vlan 1 2 3 4 5 6")
 assert_contains "vlan 1 without port 1" "vlan: 0x0001, members: 0x023e, tagged: 0x0200" "$out"
 out=$(sw_cmd "vlan 10 lab 1 2t")
 assert_contains "vlan 10 prints as the 8051 does" "vlan: 0x000a, members: 0x0203, tagged: 0x0202" "$out"
-assert_eq "port 1 left VLAN 1 and joined VLAN 10, its PVID register still says 1: it is parked" "$(table "lan1 10:U $(pk 1):P:U" "lan2 1:P:U 10" "$(ports 3 6 1:P:U)" "swbr 1:P:U 10")" "$(bv)"
+assert_eq "port 1 left VLAN 1 and joined VLAN 10, its PVID register still says 1: it is parked" "$(table "lan1 10:U $(pk 1):P:U" "lan2 1:P:U 10" "$(ports 3 6 1:P:U)" "swbr 1:P:U")" "$(bv)"
 sw_cmd "pvid 1 10" >/dev/null
-assert_eq "bridge vlan show" "$(table "lan1 10:P:U" "lan2 1:P:U 10" "$(ports 3 6 1:P:U)" "swbr 1:P:U 10")" "$(bv)"
+assert_eq "bridge vlan show" "$(table "lan1 10:P:U" "lan2 1:P:U 10" "$(ports 3 6 1:P:U)" "swbr 1:P:U")" "$(bv)"
 assert_eq "vlan 10: ports 1 and 2 and the CPU, only port 1 untagged, PVID of port 1" '{"members":"0x2000603","name":"lab","pvid":"0x0001"}' "$(vlan_json 10)"
 assert_eq "vlan 1 without port 1" '{"members":"0x208fa3e","name":"","pvid":"0x003e"}' "$(vlan_json 1)"
 assert_eq "/vlanlist" '{"mgmt":1,"vlan":[{"id":1,"name":""},{"id":10,"name":"lab"}]}' "$(sw_get vlanlist)"
@@ -111,30 +111,30 @@ assert_contains "...and the shared command says so" "Error: cannot set the ingre
 assert_contains "...the mode did not change" $'5\t0x0001\tAny\tEnabled' "$(sw_cmd 'vlan show')"
 assert_eq "...nor the bridge" "lan5 1:P:U" "$(bv | grep '^lan5 ')"
 assert_contains "ingress t: all ports" "All ports ingress filter set to: Tagged" "$(sw_cmd 'ingress t')"
-assert_eq "all ports tagged only: every port is parked in its own VLAN" "$(table "lan1 10:U $(pk 1):P:U" "lan2 1:U 10 $(pk 2):P:U" "lan3 1:U 10:U $(pk 3):P:U" "lan4 1:U $(pk 4):P:U" "lan5 1:U $(pk 5):P:U" "lan6 1:U $(pk 6):P:U" "swbr 1:P:U 10")" "$(bv)"
+assert_eq "all ports tagged only: every port is parked in its own VLAN" "$(table "lan1 10:U $(pk 1):P:U" "lan2 1:U 10 $(pk 2):P:U" "lan3 1:U 10:U $(pk 3):P:U" "lan4 1:U $(pk 4):P:U" "lan5 1:U $(pk 5):P:U" "lan6 1:U $(pk 6):P:U" "swbr 1:P:U")" "$(bv)"
 assert_eq "...untagged frames of host 4 reach neither parked host 5 nor parked host 6" "0 0" "$(frames_seen 4 5) $(frames_seen 4 6)"
 assert_eq "...nor the bridge" 0 "$(frames_seen 4 sw)"
 ping_ok 5 192.0.2.16 && { echo "two parked ports reach each other"; exit 1; }
 sw_cmd "ingress a" >/dev/null
-assert_eq "ingress a: back" "$(table "lan1 10:P:U" "lan2 1:P:U 10" "lan3 1:P:U 10:U" "$(ports 4 6 1:P:U)" "swbr 1:P:U 10")" "$(bv)"
+assert_eq "ingress a: back" "$(table "lan1 10:P:U" "lan2 1:P:U 10" "lan3 1:P:U 10:U" "$(ports 4 6 1:P:U)" "swbr 1:P:U")" "$(bv)"
 
 # ---- the management VLAN: the bridge's own entry, untagged with PVID ----
 assert_eq "vlan 20 mgmt before VLAN 20 exists" "Management VLAN set to 0x0014" "$(sw_cmd 'vlan 20 mgmt')"
-assert_eq "...VLAN 1 on swbr is an ordinary tagged entry now" "swbr 1 10" "$(bv | grep '^swbr ')"
+assert_eq "...the bridge itself is in no VLAN now: it is a member of the management VLAN only, and that does not exist yet" "" "$(bv | grep '^swbr ')"
 assert_eq "...and VLAN 20 does not exist" '{"members":"0x0","name":"","pvid":"0x0000"}' "$(vlan_json 20)"
 assert_contains "/vlanlist mgmt" '{"mgmt":20,' "$(sw_get vlanlist)"
 sw_cmd "vlan 20 6" >/dev/null
-assert_eq "creating VLAN 20 makes it the untagged PVID entry of swbr" "swbr 1 10 20:P:U" "$(bv | grep '^swbr ')"
+assert_eq "creating VLAN 20 makes it the untagged PVID entry of swbr, the only one" "swbr 20:P:U" "$(bv | grep '^swbr ')"
 assert_eq "...with port 6 a member" "lan6 1:P:U 20:U" "$(bv | grep '^lan6 ')"
 assert_eq "/vlan.json for VLAN 20: port 6 and the CPU, both untagged" '{"members":"0x2088220","name":"","pvid":"0x0000"}' "$(vlan_json 20)"
 assert_eq "vlan 1 mgmt moves it back" "Management VLAN set to 0x0001" "$(sw_cmd 'vlan 1 mgmt')"
-assert_eq "...VLAN 1 untagged PVID again, 20 tagged" "swbr 1:P:U 10 20" "$(bv | grep '^swbr ')"
+assert_eq "...VLAN 1 untagged PVID again, and the bridge is out of VLAN 20" "swbr 1:P:U" "$(bv | grep '^swbr ')"
 assert_contains "vlan 0 mgmt" "Management VLAN disabled" "$(sw_cmd "vlan 0 mgmt")"
-assert_eq "...untagged management resolves in VLAN 1, as on the 8051" "swbr 1:P:U 10 20" "$(bv | grep '^swbr ')"
+assert_eq "...untagged management resolves in VLAN 1, as on the 8051" "swbr 1:P:U" "$(bv | grep '^swbr ')"
 assert_contains "/vlanlist mgmt 0" '{"mgmt":0,' "$(sw_get vlanlist)"
 sw_cmd "vlan 1 mgmt" >/dev/null
 assert_eq "vlan 20 d" "" "$(sw_cmd 'vlan 20 d')"
-assert_eq "...VLAN 20 is gone from every port and the bridge" "$(table "lan1 10:P:U" "lan2 1:P:U 10" "lan3 1:P:U 10:U" "$(ports 4 6 1:P:U)" "swbr 1:P:U 10")" "$(bv)"
+assert_eq "...VLAN 20 is gone from every port and the bridge" "$(table "lan1 10:P:U" "lan2 1:P:U 10" "lan3 1:P:U 10:U" "$(ports 4 6 1:P:U)" "swbr 1:P:U")" "$(bv)"
 assert_eq "vlan 10 d" "" "$(sw_cmd 'vlan 10 d')"
 assert_eq "/vlanlist after it: the name is gone too" '{"mgmt":1,"vlan":[{"id":1,"name":""}]}' "$(sw_get vlanlist)"
 
@@ -149,7 +149,8 @@ for _ in $(seq 100); do
 	sleep 0.05
 done
 grep -q '^\[VLAN\]lan6 *99' "$RUN/mon.log" || { echo "the bridge monitor does not report"; exit 1; }
-assert_eq "vlan 1 d" "" "$(sw_cmd 'vlan 1 d')"
+assert_eq "vlan 1 d warns that the management VLAN has no members now (one line)" \
+	"Warning: the management VLAN has no members now; the switch can be managed only through the console and the CLI socket" "$(sw_cmd 'vlan 1 d')"
 sleep 0.3
 kill "$mon" 2>/dev/null; wait "$mon" 2>/dev/null
 for n in 2 3 4 5 6; do	# (port 1 is not in VLAN 1 any more)
@@ -207,6 +208,7 @@ rtlp_sw ip route prepend default via 203.0.113.1 dev dummy0 metric 0 || exit 1
 # The script does nothing for this (its `deconfig` would flush the address, too, a moment later).
 printf '#!/bin/sh\nexit 0\n' > "$DHCP_SCRIPT"
 sw_cmd "ip 192.0.2.50" >/dev/null
+until_addrs 192.0.2.50/32
 assert_eq "a static address, no DHCP" "192.0.2.50/32" "$(addrs)"
 sw_cmd "ip dhcp" >/dev/null
 assert_eq "ip dhcp flushes the static address from swbr" "" "$(addrs)"
@@ -252,7 +254,9 @@ assert_contains "the lease is shown again" "(dhcp, renewal in sec:" "$(sw_cmd ip
 
 # a static address: the client is gone (reaped), the address, mask and gateway are on swbr
 assert_eq "ip <addr> prints as on the 8051" "Setting ip: 192.0.2.50" "$(sw_cmd 'ip 192.0.2.50')"
+for _ in $(seq 30); do [[ -z $(kids "$daemon") ]] && break; sleep 0.1; done	# SIGTERM now, reaped by the loop
 assert_eq "...the client is stopped and reaped" "" "$(kids "$daemon")"
+until_addrs 192.0.2.50/24	# the address follows the client's exit
 assert_eq "...the lease is gone, the address has the lease's netmask" "192.0.2.50/24" "$(addrs)"
 assert_eq "ip" "Current IP: 192.0.2.50 (static)" "$(sw_cmd ip)"
 sw_cmd "netmask 0.0.0.0" >/dev/null
@@ -264,6 +268,13 @@ assert_eq "gw: default route" "default via 192.0.2.11 dev swbr" "$(defroute)"
 info=$(sw_get information.json)
 assert_contains "information.json: static address" '"ip_address":"192.0.2.50","ip_gateway":"192.0.2.11","ip_netmask":"255.255.255.0"' "$info"
 ping_ok 1 192.0.2.50 || { echo "host1 does not reach the static address"; exit 1; }
+# the bridge itself is in the management VLAN only: a host in another VLAN does not reach the management address
+sw_cmd "vlan 10 1" >/dev/null; sw_cmd "pvid 1 10" >/dev/null
+assert_eq "swbr is still only in VLAN 1 with VLAN 10 there" "swbr 1:P:U" "$(bv | grep '^swbr ')"
+ping_ok 1 192.0.2.50 && { echo "host 1 (VLAN 10) reaches the management address, which lives in VLAN 1"; exit 1; }
+ping_ok 2 192.0.2.50 || { echo "host 2 (VLAN 1) lost the management address"; exit 1; }
+sw_cmd "pvid 1 1" >/dev/null; sw_cmd "vlan 10 d" >/dev/null
+ping_ok 1 192.0.2.50 || { echo "host1 does not reach the static address again"; exit 1; }
 assert_contains "an unreachable gateway is an error" "Error: cannot set the gateway: Network is unreachable" "$(sw_cmd 'gw 203.0.113.1')"
 assert_eq "...gw is still the old one" "Current gw: 192.0.2.11" "$(sw_cmd gw)"
 assert_eq "...and so is the route" "default via 192.0.2.11 dev swbr" "$(defroute)"
@@ -358,3 +369,99 @@ daemon=$(cat "$RUN/pid")
 kill -KILL "$daemon"; wait "$daemon" 2>/dev/null
 for _ in $(seq 20); do [[ $(udhcpc_procs) == 0 ]] && break; sleep 0.1; done
 assert_eq "SIGKILL: the DHCP client dies with the daemon" 0 "$(udhcpc_procs)"
+
+# ---- C1: a VLAN change that fails on a later port is undone (test hook: the second port's call fails once); E11 ----
+sw_stop
+RTLP_TEST_FAIL_VLAN_OP=lan2:del:10 RTLP_TEST_FAIL_MAC_SET=1 sw_start
+sw_cmd "passwd $SW_PASS" >/dev/null
+rm -f "$jar"
+sw_cmd "vlan 10 lab 1 2t 3" >/dev/null; sw_cmd "pvid 1 10" >/dev/null
+before=$(bv); list=$(sw_get vlanlist); show=$(sw_cmd 'vlan show'); page=$(vlan_json 10)
+out=$(sw_cmd "vlan 10 d")
+assert_contains "a VLAN delete that fails on its second port says where" "Error: cannot delete the VLAN on lan2: Input/output error" "$out"
+[[ $out != *"could not be put back"* ]] || { echo "the VLAN was not restored: $out"; exit 1; }
+assert_eq "...every port, tag and PVID is as before" "$before" "$(bv)"
+assert_eq "...the name is still there" "$list" "$(sw_get vlanlist)"
+assert_eq "...the PVID registers too" "$show" "$(sw_cmd 'vlan show')"
+assert_eq "...and the page of the VLAN" "$page" "$(vlan_json 10)"
+# (host 1 has 198.51.100.1 and host 2 the tagged 198.51.100.2 from the VLAN 10 test above)
+ping_ok 2 198.51.100.1 || { echo "after the failed delete host 2 does not reach host 1 in VLAN 10"; exit 1; }
+assert_eq "the failure was one shot: the same delete works now" "" "$(sw_cmd 'vlan 10 d')"
+assert_eq "...VLAN 10 is gone from /vlanlist, name included" '{"mgmt":1,"vlan":[{"id":1,"name":""}]}' "$(sw_get vlanlist)"
+# E11: the kernel refuses the MAC (test hook): that is what is said, not "cannot set the management entry"
+own_mac=$(rtlp_sw cat /sys/class/net/swbr/address)
+out=$(sw_cmd "mac 00:11:22:33:44:66")
+assert_contains "a refused MAC is reported as such" "Error: cannot set the MAC address of swbr: Cannot assign requested address" "$out"
+[[ $out != *"management entry"* ]] || { echo "a refused MAC is reported as a failed management entry: $out"; exit 1; }
+assert_eq "...swbr keeps its address" "$own_mac" "$(rtlp_sw cat /sys/class/net/swbr/address)"
+assert_eq "...and is still the management entry" "swbr 1:P:U" "$(bv | grep '^swbr ')"
+sw_stop
+RTLP_TEST_FAIL_VLAN_OP=lan3:set:20 sw_start
+sw_cmd "passwd $SW_PASS" >/dev/null
+rm -f "$jar"
+before=$(bv)
+out=$(sw_cmd "vlan 20 mine 1 2 3")
+assert_contains "a VLAN create that fails on its third port says where" "Error: cannot create the VLAN on lan3: Input/output error" "$out"
+assert_eq "...ports 1 and 2 are not left in it" "$before" "$(bv)"
+assert_eq "...VLAN 20 does not exist" '{"members":"0x0","name":"","pvid":"0x0000"}' "$(vlan_json 20)"
+assert_eq "...and has no name" '{"mgmt":1,"vlan":[{"id":1,"name":""}]}' "$(sw_get vlanlist)"
+assert_eq "...the failure was one shot: the create works now" 1 "$(sw_cmd 'vlan 20 mine 1 2 3' | grep -c 'vlan: 0x0014')"
+assert_eq "...the VLAN has its three ports" "lan3 1:P:U 20:U" "$(bv | grep '^lan3 ')"
+
+# ---- C2: `ip dhcp` with no DHCP client to start leaves the static address, route and `ip` as they were ----
+sw_stop
+SW_PATH=/nonexistent sw_start	# no busybox in the daemon's PATH
+sw_cmd "ip 192.0.2.60" >/dev/null; sw_cmd "netmask 255.255.255.0" >/dev/null; sw_cmd "gw 192.0.2.11" >/dev/null
+out=$(sw_cmd "ip dhcp")
+assert_contains "ip dhcp without busybox says why" "Error: cannot start the DHCP client" "$out"
+assert_eq "...the static address is still on swbr" "192.0.2.60/24 default via 192.0.2.11 dev swbr" "$(addrs) $(defroute)"
+assert_eq "...ip still reports it" "Current IP: 192.0.2.60 (static)" "$(sw_cmd ip)"
+assert_eq "...and gw" "Current gw: 192.0.2.11" "$(sw_cmd gw)"
+ping_ok 1 192.0.2.60 || { echo "the management address does not answer after the failed ip dhcp"; exit 1; }
+
+# ---- D2: stopping the DHCP client does not make the daemon wait for it ----
+# a stand-in `busybox` that ignores SIGTERM: the daemon sends it, answers at once and kills it after a second
+mkdir -p "$RUN/fakebin" && printf '#!/bin/sh\ntrap "" TERM\nwhile :; do sleep 1; done\n' > "$RUN/fakebin/busybox" && chmod +x "$RUN/fakebin/busybox" || exit 1
+sw_stop
+SW_PATH="$RUN/fakebin:/usr/sbin:/usr/bin:/sbin:/bin" sw_start
+daemon=$(cat "$RUN/pid")
+sw_cmd "ip dhcp" >/dev/null
+[[ -n $(kids "$daemon") ]] || { echo "no client was started"; exit 1; }
+t0=$(date +%s%N)
+sw_cmd "ip 192.0.2.70" >/dev/null
+ms=$(( ($(date +%s%N) - t0) / 1000000 ))
+(( ms < 500 )) || { echo "ip <address> took $ms ms to stop a client that ignores SIGTERM: the daemon waited for it"; exit 1; }
+t0=$(date +%s%N)
+assert_contains "the daemon answers while the client is dying" "Unknown command" "$(sw_cmd foo)"
+assert_contains "...the console too" "Unknown command" "$(sw_console foo)"
+ms=$(( ($(date +%s%N) - t0) / 1000000 ))
+(( ms < 500 )) || { echo "the daemon took $ms ms to answer while a client was dying"; exit 1; }
+assert_eq "ip shows the new address at once" "Current IP: 192.0.2.70 (static)" "$(sw_cmd ip)"
+for _ in $(seq 40); do [[ -z $(kids "$daemon") ]] && break; sleep 0.1; done
+assert_eq "the client that ignored SIGTERM was killed and reaped within about two seconds" "" "$(kids "$daemon")"
+until_addrs 192.0.2.70/32
+assert_eq "...and the address is on swbr when it has gone (not before: its script could undo it)" "192.0.2.70/32" "$(addrs)"
+
+# E7 regression: a DHCP ACK already being handled can run its lease script after SIGTERM. Hold that
+# script until the static-IP command has returned, then let it overwrite the address before exiting.
+sw_stop
+cat > "$RUN/fakebin/busybox" <<EOF
+#!/bin/sh
+trap '' TERM
+touch "$RUN/client-ready"
+while [ ! -e "$RUN/finish-lease" ]; do sleep 0.02; done
+ip -4 addr flush dev swbr
+ip addr add 192.0.2.99/24 dev swbr
+touch "$RUN/lease-finished"
+exit 0
+EOF
+rm -f "$RUN/client-ready" "$RUN/finish-lease" "$RUN/lease-finished"
+SW_PATH="$RUN/fakebin:/usr/sbin:/usr/bin:/sbin:/bin" sw_start
+for _ in $(seq 100); do [[ -e $RUN/client-ready ]] && break; sleep 0.02; done
+[[ -e $RUN/client-ready ]] || { echo "the lease-script fixture did not start"; exit 1; }
+sw_cmd "ip 192.0.2.71" >/dev/null
+touch "$RUN/finish-lease"
+for _ in $(seq 100); do [[ -e $RUN/lease-finished ]] && break; sleep 0.02; done
+[[ -e $RUN/lease-finished ]] || { echo "the late lease script did not finish"; exit 1; }
+until_addrs 192.0.2.71/32
+assert_eq "a late DHCP lease script cannot overwrite the static address after ip returns" "192.0.2.71/32" "$(addrs)"

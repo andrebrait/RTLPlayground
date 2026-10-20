@@ -53,6 +53,13 @@ static uint64_t advmask(const struct elink *e)
 #define F2G5 ETHTOOL_LINK_MODE_2500baseT_Full_BIT
 #define F5G ETHTOOL_LINK_MODE_5000baseT_Full_BIT
 #define F10G ETHTOOL_LINK_MODE_10000baseT_Full_BIT
+#define X1G ETHTOOL_LINK_MODE_1000baseX_Full_BIT
+#define X2G5 ETHTOOL_LINK_MODE_2500baseX_Full_BIT
+#define SR10 ETHTOOL_LINK_MODE_10000baseSR_Full_BIT
+#define LR10 ETHTOOL_LINK_MODE_10000baseLR_Full_BIT
+#define CR10 ETHTOOL_LINK_MODE_10000baseCR_Full_BIT
+#define KR10 ETHTOOL_LINK_MODE_10000baseKR_Full_BIT
+#define FIBRE ETHTOOL_LINK_MODE_FIBRE_BIT
 #define AN ETHTOOL_LINK_MODE_Autoneg_BIT
 #define TP ETHTOOL_LINK_MODE_TP_BIT
 
@@ -141,6 +148,29 @@ int main(void)
 	check("veth auto: nothing advertised", 0, advmask(&e));
 	memset(&e, 0, sizeof e);	/* no mask words at all (settings unreadable) */
 	check("no mask words, auto: ok, nothing", 1, speed_masks(&e, PHY_SPEED_AUTO, PHY_DUPLEX_BOTH, &any) && !any);
+
+	/* ---- an SFP+ cage (the ZX510S has two): 1000Base-X and the 10G optical/DAC modes, no copper modes ---- */
+	blank(&e);
+	setmodes(&e, MASK_SUPPORTED, L(X1G, SR10, LR10, CR10, FIBRE));
+	setmodes(&e, MASK_ADVERTISING, L(X1G, SR10, LR10, CR10, FIBRE));
+	check("SFP+ advertising 1000X and 10G: the 1000 full bit", 0x10, adv_bits(&e));
+	check("SFP+ 10g: ok, selects something", 1, speed_masks(&e, PHY_SPEED_10G, PHY_DUPLEX_BOTH, &any) && any);
+	check("SFP+ 10g: the 10G modes of the port, 1000Base-X cleared, FIBRE kept", B(10000baseSR_Full) | B(10000baseLR_Full) | B(10000baseCR_Full) | B(FIBRE), advmask(&e));
+	check("SFP+ 10g: no bit of the six", 0, adv_bits(&e));
+	check("SFP+ 1g: ok", 1, speed_masks(&e, PHY_SPEED_1G, PHY_DUPLEX_BOTH, &any) && any);
+	check("SFP+ 1g: 1000Base-X only, the 10G modes cleared", B(1000baseX_Full) | B(FIBRE), advmask(&e));
+	check("SFP+ 1g: bit 4", 0x10, adv_bits(&e));
+	check("SFP+ auto: everything the port supports", B(1000baseX_Full) | B(10000baseSR_Full) | B(10000baseLR_Full) | B(10000baseCR_Full) | B(FIBRE), (speed_masks(&e, PHY_SPEED_AUTO, PHY_DUPLEX_BOTH, &any), advmask(&e)));
+	check("SFP+ 10g half: no such mode, refused", 0, speed_masks(&e, PHY_SPEED_10G, PHY_DUPLEX_HALF, &any));
+	check("SFP+ 2g5: not supported, refused", 0, speed_masks(&e, PHY_SPEED_2G5, PHY_DUPLEX_BOTH, &any));
+	check("SFP+ 100m: not supported, refused", 0, speed_masks(&e, PHY_SPEED_100M, PHY_DUPLEX_BOTH, &any));
+	check("...nothing changed by the refusals", B(1000baseX_Full) | B(10000baseSR_Full) | B(10000baseLR_Full) | B(10000baseCR_Full) | B(FIBRE), advmask(&e));
+	blank(&e); setmodes(&e, MASK_SUPPORTED, L(X2G5, X1G, KR10, FIBRE)); setmodes(&e, MASK_ADVERTISING, L(X2G5, X1G, KR10));
+	check("2500Base-X port 2g5: ok", 1, speed_masks(&e, PHY_SPEED_2G5, PHY_DUPLEX_BOTH, &any) && any);
+	check("...2500Base-X only", B(2500baseX_Full), advmask(&e));
+	check("...bit 5", 0x20, adv_bits(&e));
+	check("backplane KR port 10g", 1, speed_masks(&e, PHY_SPEED_10G, PHY_DUPLEX_BOTH, &any) && any);
+	check("...10GBase-KR only", B(10000baseKR_Full), advmask(&e));
 
 	/* ---- duplex_masks: the 8051's phy_set_duplex ---- */
 	blank(&e); setmodes(&e, MASK_ADVERTISING, L(H10, F10, H100, F100, F1G, F2G5, AN));

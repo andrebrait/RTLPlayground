@@ -21,17 +21,30 @@
  * (udhcpc.script next to this file; --dhcp-script) puts the lease on swbr, valid for the lease
  * time and "preferred" for half of it, which is what `ip` prints as the renewal time. The daemon
  * reads the lease back once a second (mgmt_service) into the same three variables.
+ *   - `ip dhcp` starts the new client FIRST and only when it runs takes the static address away: a
+ *     client that cannot be started (no busybox) leaves the address, the routes and the old client
+ *     as they were and reports the error.
  *   - The child is reaped as soon as it exits (SIGCHLD wakes the poll loop; waitpid(WNOHANG)).
  *     While DHCP is on and the child is gone it is started again after 5 s; if it cannot be
  *     started (no busybox), DHCP is switched off and the error logged.
- *   - It is killed (SIGTERM, then SIGKILL) by `ip <address>` (which the shared code answers with
- *     dhcp_stop), by `ip dhcp` (a fresh start) and when the daemon exits (mgmt_exit). If the daemon
- *     is killed, the kernel's parent-death signal ends it. The lease stays on swbr until it runs out.
+ *   - It is stopped by `ip <address>` (which the shared code answers with dhcp_stop) and by `ip dhcp`
+ *     (a fresh start): SIGTERM at once to its process group (the client is its own group leader: the lease
+ *     script it may be running goes with it), the reaping and, after KILL_MS, the SIGKILL are done by
+ *     mgmt_service, so the poll loop never waits for it. The address that `ip <address>` sets is
+ *     applied to the kernel when the client has exited (mgmt_service; at once if there was none), not
+ *     before: a client that has its ACK and not yet seen the SIGTERM still runs its lease script, which
+ *     would flush the new address. `ip` shows the new address immediately. When the daemon exits (mgmt_exit) the
+ *     clients are stopped the same way, but there it waits for them (at most about KILL_MS): a
+ *     re-executed daemon must not meet its predecessor's client. If the daemon is killed, the
+ *     kernel's parent-death signal ends them. The lease stays on swbr until it runs out.
+ *   - The only wait in the loop: starting a client waits until it has exec'd busybox (it reports a
+ *     failed exec through a pipe), at most EXEC_WAIT_MS.
  */
 #include <errno.h>
 #include <fcntl.h>
 #include <net/if.h>
 #include <netinet/in.h>
+#include <poll.h>
 #include <signal.h>
 #include <stdio.h>
 #include <string.h>
@@ -47,6 +60,8 @@
 #include "dhcp.h"
 
 #define RESPAWN_MS 5000
+#define KILL_MS 1000		/* SIGTERM to SIGKILL */
+#define EXEC_WAIT_MS 200
 #define LEASE_POLL_MS 1000
 #define MAX_ADDRS 16
 
@@ -64,7 +79,9 @@ struct kip {
 static const char *script = "/usr/share/rtlplayground/udhcpc.script";
 static struct kip acc;		/* the last state the kernel was given, or the lease taken from it */
 static pid_t dhcp_pid;
-static int64_t respawn_at, poll_at;
+static pid_t dying_pid;		/* a client that has been sent SIGTERM and is not reaped yet */
+static bool apply_pending;	/* mgmt_apply() found a change to make while a client was dying */
+static int64_t respawn_at, poll_at, kill_at;
 
 static uint32_t rd(const uip_ipaddr_t a)
 {
@@ -255,6 +272,13 @@ void mgmt_apply(void)
 
 	if (want.host == acc.host && want.mask == acc.mask && want.gw == acc.gw)
 		return;
+	if (dying_pid) {
+		/* The client that is being stopped may be in the middle of its lease script, or about to run it
+		 * (it has the ACK and not yet seen the SIGTERM): that script would flush the address set now.
+		 * mgmt_service applies the change as soon as the client has exited. */
+		apply_pending = true;
+		return;
+	}
 	if (dhcp_state.state != DHCP_OFF) {
 		cmd_error("ip, netmask and gw come from DHCP; 'ip <address>' stops it first\n");
 		adopt(&acc);
@@ -312,11 +336,13 @@ void mgmt_apply(void)
 
 /* ---- DHCP ---- */
 
-static int spawn_udhcpc(void)
+/* Starts a client; its pid in *out. -errno if it cannot be started (fork, or busybox is not there). */
+static int spawn_udhcpc(pid_t *out)
 {
-	int ep[2], err = 0;
+	int ep[2], err = 0, pr;
 	pid_t pid;
 	ssize_t n;
+	struct pollfd p;
 
 	if (pipe2(ep, O_CLOEXEC))
 		return -errno;
@@ -331,6 +357,7 @@ static int spawn_udhcpc(void)
 		int null = open("/dev/null", O_RDWR | O_CLOEXEC);
 
 		prctl(PR_SET_PDEATHSIG, SIGKILL);
+		setpgid(0, 0);	/* its own group: the signals that stop it reach the lease script it is running, too */
 		signal(SIGPIPE, SIG_DFL);
 		if (null >= 0) {
 			dup2(null, 0);
@@ -343,51 +370,98 @@ static int spawn_udhcpc(void)
 		_exit(127);
 	}
 	close(ep[1]);
-	/* the pipe closes when the child execs; it carries an errno if the exec failed */
-	n = read(ep[0], &err, sizeof err);
+	setpgid(pid, pid);	/* (also done by the child; whichever is first) */
+	/* The pipe closes when the child execs and carries an errno if the exec failed. An exec that is
+	 * not done after EXEC_WAIT_MS is taken as good; if it fails then, the child ends and is started
+	 * again like any client that ends (mgmt_service). */
+	p = (struct pollfd){ .fd = ep[0], .events = POLLIN };
+	do
+		pr = poll(&p, 1, EXEC_WAIT_MS);
+	while (pr < 0 && errno == EINTR);
+	n = pr > 0 ? read(ep[0], &err, sizeof err) : 0;
 	close(ep[0]);
 	if (n == sizeof err) {
 		waitpid(pid, NULL, 0);
 		return -err;
 	}
-	dhcp_pid = pid;
+	*out = pid;
 	return 0;
 }
 
-static void kill_udhcpc(void)
+/* Stops a client: SIGTERM now, the reaping and the SIGKILL in mgmt_service. One client dies at a
+ * time: if another is still dying (two restarts within KILL_MS) it is killed and reaped first. */
+static void stop_udhcpc(pid_t pid)
 {
-	if (!dhcp_pid)
-		return;
-	kill(dhcp_pid, SIGTERM);
-	for (int i = 0; i < 100; i++) {
-		if (waitpid(dhcp_pid, NULL, WNOHANG)) {
-			dhcp_pid = 0;
-			return;
-		}
-		usleep(10000);
+	if (dying_pid) {
+		kill(-dying_pid, SIGKILL);
+		waitpid(dying_pid, NULL, 0);
 	}
-	/* shortcut: a child that ignores SIGTERM for a second is killed without a lease release */
-	kill(dhcp_pid, SIGKILL);
-	waitpid(dhcp_pid, NULL, 0);
-	dhcp_pid = 0;
+	kill(-pid, SIGTERM);
+	dying_pid = pid;
+	kill_at = now_ms() + KILL_MS;
+}
+
+static void reap_dying(int64_t now)
+{
+	if (!dying_pid)
+		return;
+	if (waitpid(dying_pid, NULL, WNOHANG)) {	/* reaped (or not ours any more) */
+		dying_pid = 0;
+	} else if (now >= kill_at) {
+		/* shortcut: a child that ignores SIGTERM for KILL_MS is killed without a lease release */
+		kill(-dying_pid, SIGKILL);
+		kill_at = now + KILL_MS;	/* reaped by the next call; SIGCHLD wakes the loop */
+	}
+}
+
+/* The daemon ends or re-executes: both clients are gone when this returns (a client that has not
+ * taken SIGTERM within KILL_MS is killed). */
+static void kill_udhcpc_wait(void)
+{
+	pid_t pids[2] = { dhcp_pid, dying_pid };
+
+	dhcp_pid = dying_pid = 0;
+	for (int i = 0; i < 2; i++)
+		if (pids[i])
+			kill(-pids[i], SIGTERM);
+	for (int i = 0; i < 2; i++) {
+		for (int t = 0; pids[i] && t < KILL_MS / 10; t++) {
+			if (waitpid(pids[i], NULL, WNOHANG)) {
+				pids[i] = 0;
+				break;
+			}
+			usleep(10000);
+		}
+		if (pids[i]) {
+			kill(-pids[i], SIGKILL);
+			waitpid(pids[i], NULL, 0);
+		}
+	}
 }
 
 void dhcp_start(void) __banked
 {
-	int rc;
+	struct kip k;
+	pid_t pid;
+	int rc = spawn_udhcpc(&pid);
 
-	kill_udhcpc();
-	rc = flush_addrs();
-	if (!rc)
-		rc = spawn_udhcpc();
 	if (rc) {
+		/* nothing was touched: the static address, the routes and a running client are as they were */
 		nl_error("cannot start the DHCP client", rc);
-		dhcp_state.state = DHCP_OFF;
 		return;
 	}
+	apply_pending = false;	/* the address that waited for the old client is not wanted any more */
+	/* the old client (and a lease script it is running) is told to stop before the address is taken away */
+	if (dhcp_pid)
+		stop_udhcpc(dhcp_pid);
+	dhcp_pid = pid;
+	rc = flush_addrs();
+	if (rc)
+		nl_error("cannot take the address of " SWBR " away", rc);	/* the client runs and replaces it */
 	/* no address until a lease arrives; what `ip` shows is what is on swbr */
-	memset(&acc, 0, sizeof acc);
-	adopt(&acc);
+	if (kernel_ip(&k))
+		memset(&k, 0, sizeof k);
+	adopt(&k);
 	memset(dhcp_state.current_ip, 0, 4);
 	dhcp_state.dhcp_timer = 0;
 	dhcp_state.state = DHCP_START;
@@ -397,7 +471,9 @@ void dhcp_start(void) __banked
 
 void dhcp_stop(void) __banked
 {
-	kill_udhcpc();
+	if (dhcp_pid)
+		stop_udhcpc(dhcp_pid);
+	dhcp_pid = 0;
 	dhcp_state.state = DHCP_OFF;
 	memset(&acc, 0, sizeof acc);	/* the kernel holds a lease: the next static address is applied for sure */
 }
@@ -427,6 +503,11 @@ void mgmt_service(int64_t now)
 {
 	int st = 0;
 
+	reap_dying(now);
+	if (apply_pending && !dying_pid) {
+		apply_pending = false;
+		mgmt_apply();
+	}
 	if (dhcp_pid) {
 		pid_t r = waitpid(dhcp_pid, &st, WNOHANG);
 
@@ -439,7 +520,7 @@ void mgmt_service(int64_t now)
 	if (dhcp_state.state == DHCP_OFF)
 		return;
 	if (!dhcp_pid && now >= respawn_at) {
-		int rc = spawn_udhcpc();
+		int rc = spawn_udhcpc(&dhcp_pid);
 
 		if (rc) {
 			fprintf(stderr, "rtlplayground: cannot start udhcpc: %s; DHCP is off\n", strerror(-rc));
@@ -460,7 +541,7 @@ static void on_sigchld(int sig)
 
 void mgmt_exit(void)
 {
-	kill_udhcpc();
+	kill_udhcpc_wait();
 }
 
 void mgmt_init(const char *dhcp_script)
@@ -520,13 +601,13 @@ void port_l2_static_mgmt(__xdata uint8_t *mac, __xdata uint16_t vlan, __xdata bo
 			if (mac_rc)
 				memcpy(mac, cur, 6);	/* the shared variable keeps what the bridge has */
 		}
+		if (mac_rc)
+			nl_error("cannot set the MAC address of " SWBR, mac_rc);
 		/* the management entry is moved whatever became of the MAC: the console must not be left
 		 * without its VLAN because the address was refused */
 		rc = bridge_mgmt_vlan(vlan, true);
 		if (!rc)
 			last_vlan = management_vlan;
-		if (!rc)
-			rc = mac_rc;
 	}
 	if (rc)
 		nl_error("cannot set the management entry of " SWBR, rc);

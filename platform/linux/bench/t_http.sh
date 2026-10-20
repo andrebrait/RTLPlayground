@@ -188,3 +188,36 @@ assert_contains "after /reset the daemon is back, with no password" "passwd &lt;
 assert_eq "same process" "$pid" "$(cat "$RUN/pid")"
 kill -0 "$pid" || { echo "daemon died"; exit 1; }
 assert_contains "CLI works after /reset" "Unknown command" "$(sw_cmd foo)"
+
+# ---- HTTP is for the management VLAN: swbr and loopback, not every interface that has an address ----
+# vx0, a veth end in rtlp-sw that is NOT in the bridge, has an address; its peer vx1 sits in host 2.
+mgmt_ip() {	# not saved: a restart needs it again; `ip` stops the DHCP client of the default configuration, the address follows its exit
+	local i
+	sw_cmd "ip 192.0.2.50" >/dev/null; sw_cmd "netmask 255.255.255.0" >/dev/null
+	for i in $(seq 60); do [[ $(ip -n rtlp-sw -4 -o addr show dev swbr) == *192.0.2.50/24* ]] && return 0; sleep 0.05; done
+	echo "the management address was not applied"; exit 1
+}
+mgmt_ip
+ip link add vx0 netns rtlp-sw type veth peer name vx1 netns rtlp-h2 || exit 1
+ip -n rtlp-sw addr add 198.18.7.1/24 dev vx0 && ip -n rtlp-sw link set vx0 up \
+	&& ip -n rtlp-h2 addr add 198.18.7.2/24 dev vx1 && ip -n rtlp-h2 link set vx1 up || exit 1
+hcurl() { in_host 2 curl -s -m 3 -o /dev/null -w '%{http_code}' "$@"; }
+assert_eq "control: a host on the management VLAN reaches the web UI on the management address" 200 "$(hcurl http://192.0.2.50/login.html)"
+assert_eq "an interface outside the bridge that has an address gets no web UI (connection refused)" "000" "$(hcurl http://198.18.7.1/login.html)"
+assert_eq "the loopback listener serves local tools" 200 "$(status "$SW_URL/login.html")"
+assert_eq "...also over ::1" 200 "$(ip netns exec rtlp-sw curl -s -m 3 -o /dev/null -w '%{http_code}' 'http://[::1]/login.html')"
+ll=$(ip -n rtlp-sw -6 -o addr show dev swbr scope link | awk '{sub("/.*", "", $4); print $4; exit}')
+[[ -n $ll ]] || { echo "swbr has no IPv6 link-local address"; exit 1; }
+assert_eq "swbr answers over IPv6 as well" 200 "$(hcurl -g "http://[$ll%25h2]/login.html")"
+# --http-any: the exact address on every interface, as before
+sw_stop
+SW_ARGS="--http-any" sw_start; mgmt_ip
+assert_eq "--http-any: the interface outside the bridge is served" 200 "$(hcurl http://198.18.7.1/login.html)"
+assert_eq "--http-any: so is the management VLAN" 200 "$(hcurl http://192.0.2.50/login.html)"
+sw_stop
+# an explicit --http keeps its address and port and is bound to swbr, too
+SW_ARGS="--http 0.0.0.0:8081" sw_start; mgmt_ip
+assert_eq "--http 0.0.0.0:8081 is served on the management address" 200 "$(hcurl http://192.0.2.50:8081/login.html)"
+assert_eq "...and not on the interface outside the bridge" "000" "$(hcurl http://198.18.7.1:8081/login.html)"
+assert_eq "...nor on the default port" "000" "$(hcurl http://192.0.2.50/login.html)"
+assert_eq "...loopback has it on that port" 200 "$(ip netns exec rtlp-sw curl -s -m 3 -o /dev/null -w '%{http_code}' http://127.0.0.1:8081/login.html)"

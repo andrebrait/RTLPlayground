@@ -12,6 +12,11 @@
  * returns, so the web UI's Save, which merges its changes into what it reads, writes the default's
  * lines into the file together with the change, and the next start does not lose them.
  *
+ * Trust: the daemon runs as root and runs this file, so it reads the directory and the file only when
+ * they are owned by its own uid and not writable by group or others; otherwise it says so, runs the
+ * built-in default, keeps no password and stores nothing ("no configuration store"). The directory
+ * is also locked (flock, for the life of the process): a second daemon on it refuses to start.
+ *
  * Saving is atomic: write .new and fsync it, rename the old file to .bak, rename .new into
  * place, fsync the directory. A crash leaves either the old file or, between the two renames,
  * no startup-config with .bak (the complete old file) and .new (complete only if it was synced:
@@ -43,6 +48,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -61,6 +67,7 @@ extern __xdata char save_cmd;
 #define FILE_MAX (DIR_MAX + 32)	/* room for the name and its suffix */
 
 static char dir[DIR_MAX];	/* empty: no usable directory, nothing can be stored */
+static int lock_fd = -1;	/* the flock on the directory; close-on-exec, so /reset releases and retakes it */
 static char view[CONFIG_LEN];
 
 uint16_t config_read(uint16_t offset, __xdata uint8_t * __xdata buf, __xdata uint16_t len) __banked
@@ -193,7 +200,7 @@ static void set_view(const char *text, size_t len)
 	memcpy(view, text, len);
 }
 
-void config_open(const char *d)
+int config_open(const char *d)
 {
 	char main_[FILE_MAX], bak[FILE_MAX], new_[FILE_MAX], raw[CONFIG_LEN], out[CONFIG_LEN], hash[AUTH_HASH_MAX];
 	size_t got = 0, n;
@@ -203,20 +210,30 @@ void config_open(const char *d)
 
 	if (strlen(d) >= DIR_MAX) {
 		fprintf(stderr, "rtlplayground: --cfg-dir is too long; no configuration store\n");
-		return;
+		return 0;
 	}
 	if (mkdir(d, 0700) && errno != EEXIST) {
 		fprintf(stderr, "rtlplayground: cannot create %s: %s; no configuration store\n", d, strerror(errno));
-		return;
+		return 0;
 	}
 	if (stat(d, &st) || !S_ISDIR(st.st_mode)) {
 		fprintf(stderr, "rtlplayground: %s is not a directory; no configuration store\n", d);
-		return;
+		return 0;
 	}
-	if (st.st_uid != geteuid())
-		fprintf(stderr, "rtlplayground: %s is owned by uid %u, not by us: its mode %04o is not changed\n",
-			d, (unsigned)st.st_uid, (unsigned)(st.st_mode & 07777));
-	else if ((st.st_mode & 07777) != 0700 && chmod(d, 0700))
+	lock_fd = open(d, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+	if (lock_fd < 0 || flock(lock_fd, LOCK_EX | LOCK_NB)) {
+		if (errno == EWOULDBLOCK)
+			fprintf(stderr, "rtlplayground: another daemon is running on %s\n", d);
+		else
+			fprintf(stderr, "rtlplayground: cannot lock %s: %s\n", d, strerror(errno));
+		return -1;
+	}
+	if (st.st_uid != geteuid() || (st.st_mode & 022)) {
+		fprintf(stderr, "rtlplayground: %s is owned by uid %u with mode %04o: not trusted (it must be ours and not writable by others); "
+			"running the built-in default, no password, no configuration store\n", d, (unsigned)st.st_uid, (unsigned)(st.st_mode & 07777));
+		return 0;
+	}
+	if ((st.st_mode & 07777) != 0700 && chmod(d, 0700))
 		fprintf(stderr, "rtlplayground: cannot set the mode of %s to 0700: %s\n", d, strerror(errno));
 	strcpy(dir, d);
 	path(main_, "");
@@ -236,19 +253,26 @@ void config_open(const char *d)
 	if (fd < 0) {
 		if (errno != ENOENT)
 			fprintf(stderr, "rtlplayground: cannot read %s: %s\n", main_, strerror(errno));
-		return;
+		return 0;
+	}
+	if (fstat(fd, &st) || !S_ISREG(st.st_mode) || st.st_uid != geteuid() || (st.st_mode & 022)) {
+		fprintf(stderr, "rtlplayground: %s is not trusted (it must be a file of ours and not writable by others); "
+			"running the built-in default, no password, no configuration store\n", main_);
+		close(fd);
+		dir[0] = 0;
+		return 0;
 	}
 	while (got < sizeof raw && (r = read(fd, raw + got, sizeof raw - got)) > 0)
 		got += r;
 	close(fd);
 	if (r < 0) {
 		fprintf(stderr, "rtlplayground: cannot read %s: %s\n", main_, strerror(errno));
-		return;
+		return 0;
 	}
 	n = strnlen(raw, got);	/* the text ends at its first NUL, as on the 8051 */
 	if (!rewrite(raw, n, CONFIG_LEN, out, &n, hash)) {
 		fprintf(stderr, "rtlplayground: %s does not fit %d bytes: ignored\n", main_, CONFIG_LEN);
-		return;
+		return 0;
 	}
 	set_view(out, n);
 	explicit_bzero(raw, sizeof raw);
@@ -256,6 +280,7 @@ void config_open(const char *d)
 	/* a plaintext `passwd` in a hand-edited file is a hash in view, the login of the daemon */
 	if (hash[0])
 		auth_set_hash(hash);
+	return 0;
 }
 
 /* The factory state as the commands a user would type, so the same code paths run: every port an
@@ -350,9 +375,16 @@ static bool write_new(const char *file, const char *data, size_t len)
 
 static bool sync_dir(void)
 {
-	int fd = open(dir, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+	int fd;
 	bool ok;
 
+#ifdef RTLP_TEST_HOOKS
+	if (getenv("RTLP_TEST_FAIL_SYNC_DIR")) {	/* test hook: the directory cannot be synced */
+		errno = EIO;
+		return false;
+	}
+#endif
+	fd = open(dir, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
 	if (fd < 0)
 		return false;
 	ok = fsync(fd) == 0;
@@ -362,11 +394,23 @@ static bool sync_dir(void)
 
 static bool save_text(const uint8_t *text, size_t len, bool view_is_disk);
 
+/* The rename that puts a saved file in place; true = failed, errno says why. */
+static bool install(const char *from, const char *to)
+{
+#ifdef RTLP_TEST_HOOKS
+	if (getenv("RTLP_TEST_FAIL_INSTALL")) {	/* test hook: the rename fails */
+		errno = EIO;
+		return true;
+	}
+#endif
+	return rename(from, to) != 0;
+}
+
 bool config_persist_password(const char *hash)
 {
 	static char cur[CONFIG_LEN];
 	char main_[FILE_MAX];
-	size_t n = 0;
+	size_t n = 0, sep;
 	ssize_t r = 1;
 	int fd;
 
@@ -390,12 +434,14 @@ bool config_persist_password(const char *hash)
 		}
 	}
 	n = strnlen(cur, n);
-	if (n && cur[n - 1] != '\n' && cur[n - 1] != '\r')
-		cur[n++] = '\n';
-	if (n + strlen("passwdhash ") + strlen(hash) + 1 >= sizeof cur) {
+	/* the separator (if the last line has no ending), the new line with its ending, and the NUL */
+	sep = n && cur[n - 1] != '\n' && cur[n - 1] != '\r';
+	if (n + sep + strlen("passwdhash ") + strlen(hash) + 1 + 1 > sizeof cur) {
 		fprintf(stderr, "rtlplayground: the password is not stored: the startup configuration is full\n");
 		return false;
 	}
+	if (sep)
+		cur[n++] = '\n';
 	n += snprintf(cur + n, sizeof cur - n, "passwdhash %s\n", hash);
 	/* nobody sent this text: the web UI reads back what is on the disk, as the effective text */
 	return save_text((const uint8_t *)cur, n, true);
@@ -411,7 +457,6 @@ static bool save_text(const uint8_t *text, size_t len, bool view_is_disk)
 	char main_[FILE_MAX], bak[FILE_MAX], new_[FILE_MAX], hash[AUTH_HASH_MAX];
 	static char disk[CONFIG_LEN];
 	size_t dlen;
-	bool ok;
 
 	if (!dir[0]) {
 		fprintf(stderr, "rtlplayground: configuration upload dropped: no configuration store\n");
@@ -430,14 +475,16 @@ static bool save_text(const uint8_t *text, size_t len, bool view_is_disk)
 		unlink(new_);
 		return false;
 	}
+#ifdef RTLP_TEST_HOOKS
 	if (getenv("RTLP_TEST_CRASH_AFTER_NEW"))
 		_exit(1);	/* test hook: the power fails here */
+#endif
 	if (rename(main_, bak) && errno != ENOENT) {
 		fprintf(stderr, "rtlplayground: cannot keep %s: %s\n", bak, strerror(errno));
 		unlink(new_);
 		return false;
 	}
-	if (getenv("RTLP_TEST_FAIL_INSTALL") ? (errno = EIO, true) : rename(new_, main_)) {	/* the hook fails the rename */
+	if (install(new_, main_)) {
 		fprintf(stderr, "rtlplayground: cannot install %s: %s\n", main_, strerror(errno));
 		rename(bak, main_);	/* back to the old file if there was one */
 		unlink(new_);
@@ -450,8 +497,9 @@ static bool save_text(const uint8_t *text, size_t len, bool view_is_disk)
 	if (hash[0])
 		auth_set_hash(hash);
 	explicit_bzero(disk, sizeof disk);
-	ok = sync_dir();
-	if (!ok)
-		fprintf(stderr, "rtlplayground: cannot sync %s: %s\n", dir, strerror(errno));
-	return ok;
+	/* The new file is in place and is the configuration now: a failed sync only means the rename may
+	 * not survive a power failure. That is no reason to tell the user the save failed. */
+	if (!sync_dir())
+		fprintf(stderr, "rtlplayground: the new configuration is in place but %s could not be synced: %s\n", dir, strerror(errno));
+	return true;
 }

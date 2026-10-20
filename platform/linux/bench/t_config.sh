@@ -297,16 +297,41 @@ nofail "failed install"
 [[ -f $cfg ]] || { echo "failed install: startup-config is gone"; exit 1; }
 sw_stop; sw_start
 
-# ---- an existing --cfg-dir with a lax mode is tightened; one owned by someone else is left alone and reported ----
+# ---- an existing --cfg-dir with a lax mode is tightened; a directory or file that is not trusted is not read ----
 sw_stop
 chmod 755 "$SW_CFG"; sw_start
-assert_eq "lax directory mode" 700 "$(stat -c %a "$SW_CFG")"
+assert_eq "lax directory mode (not writable by others): tightened" 700 "$(stat -c %a "$SW_CFG")"
 sw_stop
-chown 65534 "$SW_CFG"; chmod 755 "$SW_CFG"; : > "$RUN/daemon.log"; sw_start
-assert_eq "directory owned by another user: mode untouched" 755 "$(stat -c %a "$SW_CFG")"
-assert_contains "and said so" "not by us" "$(cat "$RUN/daemon.log")"
+# A root daemon runs what is in the file, so a file that somebody else could have written is not read: the built-in
+# default runs, no password is set, nothing is stored. The fixture says `hostname planted` and has a password.
+h=$(openssl passwd -6 planted-pw) || exit 1
+plant() { chown 0 "$SW_CFG" "$cfg" 2>/dev/null; chmod 700 "$SW_CFG"; printf 'passwdhash %s\nhostname planted\n' "$h" > "$cfg"; chmod 600 "$cfg"; }
+untrusted() { # <what>: a daemon start that must not have read the planted file
+	: > "$RUN/daemon.log"; sw_start
+	assert_contains "$1: said so" "not trusted" "$(cat "$RUN/daemon.log")"
+	[[ $(sw_cmd hostname) != *planted* ]] || { echo "$1: the planted hostname ran"; exit 1; }
+	login planted-pw && { echo "$1: the planted password is a login"; exit 1; }
+	assert_contains "$1: no password is set" "No password is set" "$(swcurl "$SW_URL/login.html")"
+	assert_eq "$1: the file was not touched" "passwdhash $h"$'\nhostname planted' "$(cat "$cfg")"
+	sw_stop
+}
+plant; chown 65534 "$SW_CFG"; chmod 755 "$SW_CFG"
+untrusted "directory owned by another user"
+assert_eq "...its mode is untouched" 755 "$(stat -c %a "$SW_CFG")"
+plant; chmod 775 "$SW_CFG"
+untrusted "directory writable by its group"
+plant; chmod 757 "$SW_CFG"
+untrusted "directory writable by others"
+plant; chown 65534 "$cfg"
+untrusted "file owned by another user"
+plant; chmod 660 "$cfg"
+untrusted "file writable by its group"
+plant; chmod 602 "$cfg"
+untrusted "file writable by others"
+plant; sw_start
+assert_eq "control: the same file, ours and private, is read: hostname" planted "$(sw_cmd hostname | tr -d '\r' | grep -o planted)"
+login planted-pw || { echo "control: the planted password is no login though the file is trusted"; exit 1; }
 sw_stop
-chown 0 "$SW_CFG"; chmod 700 "$SW_CFG"
 
 # ---- a file of exactly CONFIG_LEN bytes with no NUL runs as it is (like the 8051); more is cut ----
 { for i in $(seq 291); do echo "hostname seen"; done; echo "hostname abcdefghijkl"; } > "$cfg"	# 4074 + 22 bytes
@@ -320,6 +345,53 @@ sw_stop
 echo "hostname beyond" >> "$cfg"
 sw_start
 assert_eq "bytes past CONFIG_LEN are not part of the configuration" abcdefghijkl "$(sw_cmd hostname)"
+
+# ---- a file of CONFIG_LEN bytes whose last line has no ending, then the first password: the daemon must not write
+# the line separator past its buffer (ASan and UBSan runs of this test catch that), and says why it did not store the hash ----
+sw_stop
+{ for i in $(seq 291); do echo "hostname seen"; done; printf 'hostname abcdefghijklm'; } > "$cfg"
+assert_eq "test file size" 4096 "$(stat -c %s "$cfg")"
+assert_eq "...and no line ending at its end" "m" "$(tail -c 1 "$cfg")"
+: > "$RUN/daemon.log"; sw_start
+assert_contains "the first password cannot be stored in a full file" "could not be saved" "$(sw_cmd 'passwd p4096b')"
+assert_contains "...the daemon says the configuration is full" "the startup configuration is full" "$(cat "$RUN/daemon.log")"
+assert_eq "...the file is as it was" 4096 "$(stat -c %s "$cfg")"
+assert_contains "...and the daemon lives" "Unknown command" "$(sw_cmd foo)"
+sw_stop
+# one byte less of the file's text (the separator and the line still do not fit): same
+{ for i in $(seq 291); do echo "hostname seen"; done; printf 'hostname abcdefghijk'; } > "$cfg"
+sw_start
+assert_contains "a file one byte short of CONFIG_LEN: still full" "could not be saved" "$(sw_cmd 'passwd p4095')"
+sw_stop
+echo "hostname a" > "$cfg"; printf 'hostname b' >> "$cfg"
+sw_start
+assert_eq "a short file with no line ending: the password is stored" "" "$(sw_cmd 'passwd shortpw')"
+assert_eq "...on a line of its own after the last line, which got its ending" $'hostname a\nhostname b' "$(head -n 2 "$cfg")"
+assert_eq "...that line is the hash, and it is the last" 3 "$(grep -c '' "$cfg")"
+assert_eq "...(a hash)" 1 "$(tail -n 1 "$cfg" | grep -c '^passwdhash \$6\$')"
+sw_stop
+
+# ---- passwdhash with a rounds= field is refused: crypt would run for minutes in the poll loop ----
+rm -rf "$SW_CFG"; sw_start
+pad=$(head -c 86 /dev/zero | tr '\0' A)
+assert_contains "passwdhash with rounds=" "not a SHA-512 crypt hash" "$(sw_cmd "passwdhash \$6\$rounds=99999\$salt\$$pad")"
+assert_contains "a hash with an = elsewhere is refused too" "not a SHA-512 crypt hash" "$(sw_cmd "passwdhash \$6\$sa=lt\$$pad")"
+sw_stop
+
+# ---- the directory cannot be synced after the new file is in place: the save still succeeds ----
+rm -rf "$SW_CFG"
+RTLP_TEST_FAIL_SYNC_DIR=1 sw_start
+assert_eq "the first password is stored although the directory cannot be synced" "" "$(sw_cmd 'passwd sync-pw')"
+curpw=sync-pw; newest
+printf 'hostname synced\n' > "$RUN/up.txt"
+assert_eq "POST /config answers 200" 200 "$(post_cfg "$RUN/up.txt")"
+assert_eq "...and the new text is what GET /config returns" "hostname synced" "$(get_cfg | head -n 1)"
+assert_contains "...the failed sync is logged" "could not be synced" "$(cat "$RUN/daemon.log")"
+sw_stop
+sw_start
+assert_eq "after a restart the saved file runs" synced "$(sw_cmd hostname | tr -d '\r' | grep -o synced)"
+sw_stop
+rm -rf "$SW_CFG"
 
 # ---- the default and the UI's Save: a Save of any other change keeps the default's lines ----
 # The UI's Save reads GET /config, merges the history on top (app.js mergeConf: the lines it read stay, a

@@ -34,8 +34,21 @@ static const struct mode modes[] = {
 	{ ETHTOOL_LINK_MODE_2500baseT_Full_BIT,  0x20, PHY_SPEED_2G5,  true,  "2500Base-Full" },
 	{ ETHTOOL_LINK_MODE_5000baseT_Full_BIT,  0x00, PHY_SPEED_5G,   true,  "5000Base-Full" },
 	{ ETHTOOL_LINK_MODE_10000baseT_Full_BIT, 0x00, PHY_SPEED_10G,  true,  "10GBase-Full" },
+	/* The modes of SFP/SFP+ cages, optical or copper cable, and of a backplane: a port that has them
+	 * is selected by its speed like any other. All are full duplex. */
+	{ ETHTOOL_LINK_MODE_1000baseX_Full_BIT,   0x10, PHY_SPEED_1G,  true,  "1000Base-X-Full" },
+	{ ETHTOOL_LINK_MODE_1000baseKX_Full_BIT,  0x10, PHY_SPEED_1G,  true,  "1000Base-KX-Full" },
+	{ ETHTOOL_LINK_MODE_2500baseX_Full_BIT,   0x20, PHY_SPEED_2G5, true,  "2500Base-X-Full" },
+	{ ETHTOOL_LINK_MODE_10000baseCR_Full_BIT, 0x00, PHY_SPEED_10G, true,  "10GBase-CR-Full" },
+	{ ETHTOOL_LINK_MODE_10000baseSR_Full_BIT, 0x00, PHY_SPEED_10G, true,  "10GBase-SR-Full" },
+	{ ETHTOOL_LINK_MODE_10000baseLR_Full_BIT, 0x00, PHY_SPEED_10G, true,  "10GBase-LR-Full" },
+	{ ETHTOOL_LINK_MODE_10000baseLRM_Full_BIT, 0x00, PHY_SPEED_10G, true, "10GBase-LRM-Full" },
+	{ ETHTOOL_LINK_MODE_10000baseER_Full_BIT, 0x00, PHY_SPEED_10G, true,  "10GBase-ER-Full" },
+	{ ETHTOOL_LINK_MODE_10000baseKR_Full_BIT, 0x00, PHY_SPEED_10G, true,  "10GBase-KR-Full" },
+	{ ETHTOOL_LINK_MODE_10000baseKX4_Full_BIT, 0x00, PHY_SPEED_10G, true, "10GBase-KX4-Full" },
 };
 #define NMODES (sizeof modes / sizeof modes[0])
+#define NMODES_T 9	/* the Base-T modes at the front of the table: all a port that reports no modes can be asked for */
 
 /* ETHTOOL_GLINKSETTINGS answer: the fixed part, then the supported, advertised and
  * partner-advertised link mode masks of base.link_mode_masks_nwords 32-bit words each. */
@@ -80,8 +93,9 @@ static inline uint8_t adv_bits(const struct elink *e)
 
 /*
  * `port <n> <speed> [duplex]`: sets the advertised modes of e to those of the speed (duplex is
- * PHY_DUPLEX_*), or for PHY_SPEED_AUTO to every table mode the port supports. Modes outside the
- * table are left as they are. Returns false, e untouched, for a speed and duplex no table mode
+ * PHY_DUPLEX_*), or for PHY_SPEED_AUTO to every table mode the port supports; every other table mode,
+ * that of another speed, is cleared: on a port with SFP+ modes `10g` advertises the 10G modes it
+ * supports and no 1000Base-X. Modes outside the table (FEC, pause, 25G and up) are left as they are. Returns false, e untouched, for a speed and duplex no table mode
  * has (`port 1 2g5 half`), and for a mode a port that reports its modes does not support (a driver
  * such as e1000e would accept the request and advertise nothing); *any = false when nothing was selected (auto on a netdev that
  * supports none of the table modes, such as veth): the caller must not write the settings back.
@@ -98,7 +112,7 @@ static inline bool speed_masks(struct elink *e, uint8_t speed, uint8_t duplex, b
 		else
 			want[i] = modes[i].speed == speed &&
 				  (duplex == PHY_DUPLEX_BOTH || (duplex == PHY_DUPLEX_FULL) == modes[i].full) &&
-				  (!reports || mode_in(e, MASK_SUPPORTED, modes[i].bit));
+				  (reports ? mode_in(e, MASK_SUPPORTED, modes[i].bit) : i < NMODES_T);
 		found |= want[i];
 	}
 	*any = found;

@@ -19,6 +19,9 @@ for d in json.load(sys.stdin):
 table() { printf '%s\n' "$@"; }
 ports() { local n; for n in $(seq "$1" "$2"); do printf 'lan%s %s\n' "$n" "$3"; done; }
 addrs() { rtlp_sw ip -4 -o addr show dev swbr | awk '{printf "%s%s", s, $4; s=" "}'; }
+# until_addrs <expected>: waits (3 s) for swbr to have exactly these addresses. `ip <address>` that stops a DHCP client
+# has the kernel follow when the client has exited (a few ms), not before: see mgmt.c.
+until_addrs() { local i; for i in $(seq 60); do [[ $(addrs) == "$1" ]] && return 0; sleep 0.05; done; return 0; }
 # routes_of <dev>: its default routes, "default via <gw> dev <dev>"
 routes_of() { rtlp_sw ip -4 route show default | awk -v d="$1" '$4 == "dev" && $5 == d {print $1, $2, $3, $4, $5}'; }
 defroute() { routes_of swbr; }

@@ -128,3 +128,85 @@ assert_eq "cmd with a wrong cookie" "HTTP/1.1 401 Unauthorized" "$(printf 'POST 
 assert_eq "cmd with the cookie among others" "HTTP/1.1 200 OK" "$(printf 'POST /cmd HTTP/1.1\r\nContent-Type: text/plain\r\nContent-Length: 8\r\nCookie: a=b; session=%s; c=d\r\n\r\nmtu show' "$cookie" | raw 8 | first_line)"
 assert_eq "a cookie that only ends in session" "HTTP/1.1 401 Unauthorized" "$(printf 'POST /cmd HTTP/1.1\r\nContent-Type: text/plain\r\nContent-Length: 8\r\nCookie: xsession=%s\r\n\r\nmtu show' "$cookie" | raw 8 | first_line)"
 alive || { echo "daemon not responding at the end"; exit 1; }
+
+# ---- a request whose headers were accepted does not outlive its session: it is revalidated before it runs ----
+# The headers of a POST go in, the session is revoked (the password is changed on the console, or somebody logs in
+# again, which replaces the one session there is), and only then the body arrives: 401, nothing executed.
+cat > "$RUN/split.py" <<'PY'
+import os, socket, sys, time
+path, ctype, cookie, bodyfile, ready, go = sys.argv[1:7]
+body = open(bodyfile, "rb").read()
+s = socket.create_connection(("127.0.0.1", 80))
+s.sendall(("POST %s HTTP/1.1\r\nContent-Type: %s\r\nContent-Length: %d\r\nCookie: session=%s\r\n\r\n" % (path, ctype, len(body), cookie)).encode())
+open(ready, "w").close()
+for _ in range(200):
+    if os.path.exists(go): break
+    time.sleep(0.05)
+s.sendall(body)
+s.settimeout(5)
+data = b""
+try:
+    while True:
+        d = s.recv(4096)
+        if not d: break
+        data += d
+except socket.timeout: pass
+print(data.split(b"\r\n")[0].decode())
+PY
+# split_post <path> <content type> <body file> <command run between the headers and the body>: the status line
+split_post() {
+	rm -f "$RUN/ready" "$RUN/go"
+	ip netns exec rtlp-sw python3 "$RUN/split.py" "$1" "$2" "$cookie" "$3" "$RUN/ready" "$RUN/go" > "$RUN/split.out" &
+	local p=$!
+	for _ in $(seq 100); do [[ -e $RUN/ready ]] && break; sleep 0.05; done
+	[[ -e $RUN/ready ]] || { echo "split POST: the headers were not sent"; exit 1; }
+	sleep 0.3	# the daemon has read them and taken the request
+	eval "$4"
+	touch "$RUN/go"
+	wait $p
+	cat "$RUN/split.out"
+}
+relogin() { rm -f "$RUN/cookies"; sw_get status.json >/dev/null || exit 1; cookie=$(awk -F'\t' '$6 == "session" { print $7 }' "$RUN/cookies"); }
+printf 'hostname splitok' > "$RUN/body.cmd"
+assert_eq "control: a POST /cmd in two pieces with its session intact runs" "HTTP/1.1 200 OK" "$(split_post /cmd text/plain "$RUN/body.cmd" :)"
+assert_eq "...and did what it said" splitok "$(sw_cmd hostname | tr -d '\r')"
+printf 'hostname splitbad' > "$RUN/body.cmd"
+assert_eq "the password is changed between the headers and the body of a POST /cmd: 401" "HTTP/1.1 401 Unauthorized" \
+	"$(split_post /cmd text/plain "$RUN/body.cmd" 'sw_cmd "passwd bench-pw2" >/dev/null')"
+assert_eq "...and the command did not run" splitok "$(sw_cmd hostname | tr -d '\r')"
+SW_PASS=bench-pw2; relogin
+printf 'hostname splitbad2' > "$RUN/body.cmd"
+assert_eq "somebody logs in between the headers and the body of a POST /cmd: 401" "HTTP/1.1 401 Unauthorized" \
+	"$(split_post /cmd text/plain "$RUN/body.cmd" 'rm -f "$RUN/cookies"; sw_get status.json >/dev/null')"
+assert_eq "...and the command did not run" splitok "$(sw_cmd hostname | tr -d '\r')"
+relogin
+printf -- '--XX\r\nContent-Disposition: form-data; name=a; filename=b\r\n\r\nhostname cfgsplit\r\n--XX--' > "$RUN/body.cfg"
+assert_eq "the password is changed between the headers and the body of a POST /config: 401" "HTTP/1.1 401 Unauthorized" \
+	"$(split_post /config 'multipart/form-data; boundary=XX' "$RUN/body.cfg" 'sw_cmd "passwd bench-pw3" >/dev/null')"
+assert_eq "...and nothing was stored" 0 "$(cat "$SW_CFG/startup-config" 2>/dev/null | grep -c cfgsplit)"
+SW_PASS=bench-pw3; relogin
+alive || { echo "daemon not responding after the split POSTs"; exit 1; }
+
+# ---- a client that sends a byte every 2 s never trips the idle timeout, but the request has a lifetime: cut at 30 s ----
+ip netns exec rtlp-sw python3 - <<'PY' || exit 1
+import socket, time
+s = socket.create_connection(("127.0.0.1", 80))
+t0 = time.time()
+while time.time() - t0 < 45:
+    try:
+        s.sendall(b"x")
+    except OSError:
+        break
+    s.settimeout(2)
+    try:
+        if s.recv(1) == b"":
+            break
+    except socket.timeout:
+        pass
+    except OSError:
+        break
+el = time.time() - t0
+if not 28 <= el <= 33:
+    print("a dribbling HTTP client lived %.1f s, expected about 30" % el); raise SystemExit(1)
+PY
+alive || { echo "daemon not responding after the dribbling client"; exit 1; }

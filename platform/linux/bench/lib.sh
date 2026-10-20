@@ -5,7 +5,7 @@
 # command, the reply is exactly the command's output); sw_console types it into the daemon's
 # --console over a FIFO pair and reads up to the next prompt, which is what a serial console user sees.
 BENCH_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-BIN=${RTLP_BIN:-$BENCH_DIR/../output/rtlplayground}
+BIN=${RTLP_BIN:-$BENCH_DIR/../output/test/rtlplayground}	# the test build (make testbin): it has the hooks the tests use
 SWCLI=${RTLP_SWCLI:-$(dirname "$BIN")/swcli}
 WWW=${RTLP_WWW:-$BENCH_DIR/../../../output/html_min}	# the web UI the daemon serves (--www)
 DHCP_SCRIPT=${RTLP_DHCP_SCRIPT:-$BENCH_DIR/../udhcpc.script}	# the udhcpc script (--dhcp-script)
@@ -17,14 +17,14 @@ SW_TIMEOUT=${SW_TIMEOUT:-5}	# seconds without a console byte (or a CLI/HTTP answ
 
 die() { echo "bench: $*" >&2; exit 1; }
 
-# sw_start: runs the daemon inside `rtlp-sw` (HTTP on its default port 80, CLI socket $RUN/cli.sock,
-# its stderr in $RUN/daemon.log); returns once its first prompt arrived, which it prints after
-# both sockets are listening.
+# sw_start: runs the daemon inside `rtlp-sw` (HTTP on its default port 80, on swbr and on loopback; CLI socket
+# $RUN/cli.sock, its stderr in $RUN/daemon.log); returns once its first prompt arrived, which it prints after
+# both sockets are listening. SW_PATH=<dirs> gives the daemon that PATH (one without busybox: no DHCP client); SW_ARGS="..." adds options (word-split).
 sw_start() {
 	mkdir -p "$RUN" && mkfifo "$RUN/in" "$RUN/out" || die "cannot create $RUN fifos"
 	exec 3<>"$RUN/in" 4<>"$RUN/out"	# held read-write so neither end blocks or sees EOF
 	# fds 3/4 are closed in the daemon: it must not be a writer of its own input.
-	ip netns exec rtlp-sw "$BIN" --console --cli-socket "$RUN/cli.sock" --www "$WWW" --cfg-dir "$SW_CFG" --dhcp-script "$DHCP_SCRIPT" <&3 >&4 2>>"$RUN/daemon.log" 3>&- 4>&- &
+	ip netns exec rtlp-sw env ${SW_PATH:+PATH=$SW_PATH} "$BIN" --console --cli-socket "$RUN/cli.sock" --www "$WWW" --cfg-dir "$SW_CFG" --dhcp-script "$DHCP_SCRIPT" $SW_ARGS <&3 >&4 2>>"$RUN/daemon.log" 3>&- 4>&- &
 	echo $! > "$RUN/pid"
 	_sw_read_prompt >/dev/null || die "daemon gave no prompt"
 }

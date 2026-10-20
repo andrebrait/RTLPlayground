@@ -34,11 +34,12 @@ int64_t now_ms(void);
 /* The sockets the poll loop in main.c serves. Each has a fixed number of pollfd slots: fill()
  * sets them (a slot with nothing to wait for has fd -1) and lowers *wait_ms to the nearest
  * connection deadline; service() runs after poll() on the same slots. */
-#define HTTP_LISTENERS 1
+#define HTTP_LISTENERS 3	/* swbr, 127.0.0.1, ::1 */
 #define HTTP_CONNS 8
 #define HTTP_SLOTS (HTTP_LISTENERS + HTTP_CONNS)
 #define CLI_SLOTS 5		/* the listener and four connections */
-int http_open(const char *addr_port, const char *www_dir);
+/* Call after bridge_init: unless any, the listener is bound to swbr (plus loopback), see http.c. */
+int http_open(const char *addr_port, const char *www_dir, bool any);
 void http_fill(struct pollfd *fds, int64_t now, int *wait_ms);
 void http_service(struct pollfd *fds, int64_t now);
 bool http_restart_requested(void);	/* GET /reset has been answered: re-exec the daemon */
@@ -66,9 +67,12 @@ bool auth_session_valid(const char *id);
 
 /* The startup configuration (config.c): <dir>/startup-config, held in RAM as the text the web UI
  * reads back (config_read() of platform.h). config_open() creates the directory (mode 0700) if
- * needed, finishes or discards an interrupted save, and loads the file; config_startup() then
- * runs it (execute_config), or the built-in default when there is nothing to run. */
-void config_open(const char *dir);
+ * needed, takes an exclusive lock on it for the life of the process (-1: another daemon holds it;
+ * the other failures leave the daemon without a store and are logged, 0), finishes or discards an
+ * interrupted save, and loads the file unless the directory or the file is not trusted (not owned
+ * by the daemon's uid, or writable by group or others); config_startup() then runs it
+ * (execute_config), or the built-in default when there is nothing to run. */
+int config_open(const char *dir);
 void config_startup(void);
 /* The configuration upload of POST /config: the new text (not NUL-terminated). Every password
  * line is turned into a `passwdhash` line before anything reaches the disk; false = it could not
@@ -85,6 +89,10 @@ void stp_state_init(void);
 /* Ports (ports.c): takes the power-on chip temperature. Call once, before the startup
  * configuration runs. */
 void ports_init(void);
+/* The boot state of every board port, which the startup configuration then changes: administratively
+ * up, MTU 1500, every supported link mode advertised. Call after bridge_init, before the startup
+ * configuration: what a port was set to and not saved is lost at a restart, as on the 8051. */
+void ports_reset(void);
 
 /* Bridge (bridge.c): swbr holds every board port; its VLAN entries are the switch's VLAN table.
  * bridge_init creates or adopts swbr, puts the board ports in it and sets the VLAN state of a

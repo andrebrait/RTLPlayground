@@ -3,7 +3,8 @@
 # implementation of platform.h.
 #
 #   make PLATFORM=linux [BOARD=BENCH6]    from the top level, or make here
-#   make test                             the unit tests, the console test, the install test
+#   make test                             the test build (below), the unit tests, the console test, the install test
+#   make testbin                          the test build alone: bench/run.sh runs it
 #   make install DESTDIR=<root>           the daemon, swcli, the web UI, the DHCP script
 #
 # Builds output/rtlplayground (the daemon), output/swcli (its command-line client) and, through the
@@ -13,7 +14,15 @@
 
 BOARD ?= BENCH6
 ROOT   = ../..
-OUT    = output
+OUT   ?= output
+
+# The test build (HOOKS=1, output/test): the daemon with the hooks the tests use to fail a rename, cut
+# the power in the middle of a save, fail a bridge call and dump its state (-DRTLP_TEST_HOOKS), and with
+# -Werror. The default and the installed build has neither: no way to make it fail or exit on purpose,
+# and a compiler that is newer than ours cannot stop a build over a new warning.
+ifdef HOOKS
+HOOK_FLAGS = -DRTLP_TEST_HOOKS -Werror
+endif
 
 ifeq ($(origin CC),default)
 CC = gcc
@@ -22,8 +31,8 @@ endif
 # 8051 memcpy/strlen/... that clash with libc. The shim goes in first so __xdata and friends
 # vanish before any firmware header. -I. precedes the repository root: it holds the stand-ins
 # for the two headers an 8051 build generates (version.h, html_data.h).
-CFLAGS = -std=gnu11 -g -O1 -Wall -Wextra -Werror -Wno-unused-parameter -Wno-unknown-pragmas \
-         -Wno-pointer-sign -DRTLP_HOST_TEST -D_GNU_SOURCE \
+CFLAGS = -std=gnu11 -g -O1 -Wall -Wextra -Wno-unused-parameter -Wno-unknown-pragmas \
+         -Wno-pointer-sign -DRTLP_HOST_TEST -D_GNU_SOURCE $(HOOK_FLAGS) \
          -include sdcc_shim.h -I. -I$(OUT) -I$(ROOT) -I$(ROOT)/httpd -I$(ROOT)/uip
 ifeq ($(findstring clang,$(shell $(CC) --version 2>/dev/null)),)
 CFLAGS += -Wno-builtin-declaration-mismatch
@@ -44,14 +53,15 @@ OBJS = $(addprefix $(OUT)/,$(LOCAL:.c=.o)) \
 
 WWW = $(ROOT)/output/html_min
 
-all: $(OUT)/rtlplayground $(OUT)/swcli html_min
+all: bin html_min
+bin: $(OUT)/rtlplayground $(OUT)/swcli
 
 $(OUT)/rtlplayground: $(OBJS)
 	$(CC) $^ -o $@ -lcrypt -lmnl
 
 # swcli talks to the socket and nothing else: no shared code, no board.
 $(OUT)/swcli: swcli.c | $(OUT)
-	$(CC) -std=gnu11 -O1 -Wall -Wextra -Werror -D_GNU_SOURCE $< -o $@
+	$(CC) -std=gnu11 -O1 -Wall -Wextra $(HOOK_FLAGS) -D_GNU_SOURCE $< -o $@
 
 # PLATFORM= keeps the top-level makefile from delegating straight back here.
 html_min:
@@ -99,7 +109,7 @@ $(OUT)/version.h: FORCE | $(OUT)
 # shared code, no NIC. test_linkcode is plain C; the others need platform.h and the shim.
 UNIT = test_linkcode test_mibmap test_portlogic test_fdb
 $(OUT)/test_linkcode: test/test_linkcode.c linkcode.h | $(OUT)
-	$(CC) -std=gnu11 -O1 -Wall -Wextra -Werror -D_GNU_SOURCE -I. $< -o $@
+	$(CC) -std=gnu11 -O1 -Wall -Wextra $(HOOK_FLAGS) -D_GNU_SOURCE -I. $< -o $@
 $(OUT)/test_mibmap: test/test_mibmap.c mibmap.h | $(OUT) $(OUT)/version.h
 	$(CC) $(CFLAGS) $< -o $@
 $(OUT)/test_portlogic: test/test_portlogic.c portlogic.h | $(OUT) $(OUT)/version.h
@@ -108,10 +118,17 @@ $(OUT)/test_portlogic: test/test_portlogic.c portlogic.h | $(OUT) $(OUT)/version
 $(OUT)/test_fdb: test/test_fdb.c fdb.c | $(OUT) $(OUT)/version.h
 	$(CC) $(CFLAGS) $< -o $@ -lmnl
 
-test: all $(addprefix $(OUT)/,$(UNIT))
+unit: $(addprefix $(OUT)/,$(UNIT))
 	@for t in $(UNIT); do $(OUT)/$$t || exit 1; done
+
+testbin:
+	$(MAKE) HOOKS=1 OUT=output/test bin html_min
+
+test: all testbin
+	$(MAKE) HOOKS=1 OUT=output/test unit
 	sh test/console_test.sh
 	sh test/install_test.sh
+	sh test/bench_scripts_test.sh
 
 # make install DESTDIR=<root>: the daemon, swcli, the web UI and the DHCP script at the paths the
 # daemon's defaults name (--www, --dhcp-script); another PREFIX needs those two options. Root
@@ -130,7 +147,7 @@ clean:
 	rm -rf $(OUT)
 
 .SECONDARY:
-.PHONY: all test clean install FORCE html_min
+.PHONY: all bin test testbin unit clean install FORCE html_min
 FORCE:
 
 -include $(OBJS:.o=.d)

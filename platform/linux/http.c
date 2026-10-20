@@ -300,6 +300,14 @@ static void parse_cookie(struct req *r, const char *v)
 	}
 }
 
+/* True if the session cookie names the live session; refreshes its idle timer. A request that is
+ * not executed in the poll iteration that parsed its headers (a POST waiting for its body) asks
+ * again just before it runs: its session may be gone by then (a password change, a new login). */
+static bool session_ok(const struct req *r)
+{
+	return r->cookie[0] && auth_session_valid(r->cookie);
+}
+
 /* Parses the header block rbuf[0..hdr_end), modifying it. false = malformed. */
 static bool parse_request(struct hconn *c, size_t hdr_end)
 {
@@ -354,7 +362,7 @@ static bool parse_request(struct hconn *c, size_t hdr_end)
 			parse_cookie(r, v);
 		}
 	}
-	r->authenticated = r->cookie[0] && auth_session_valid(r->cookie);
+	r->authenticated = session_ok(r);
 	if (!strncasecmp(r->ctype, "multipart/form-data", 19)) {
 		const char *b = strcasestr(r->ctype, "boundary=");
 
@@ -562,13 +570,21 @@ static void route_post(struct hconn *c)
 			send_unauthorized(c);
 		else if (!r->boundary[0])
 			send_bad_request(c);
-		else if (body_complete(c, CONFIG_UPLOAD_BUF - 1))
-			run_config_body(c);
+		else if (body_complete(c, CONFIG_UPLOAD_BUF - 1)) {
+			if (session_ok(r))
+				run_config_body(c);
+			else
+				send_unauthorized(c);
+		}
 	} else if (!strcmp(r->path, "/cmd")) {
 		if (!r->authenticated)
 			send_unauthorized(c);
-		else if (body_complete(c, CMD_BUF_SIZE - 1))
-			run_cmd_body(c, (char *)c->rbuf + c->body_off);
+		else if (body_complete(c, CMD_BUF_SIZE - 1)) {
+			if (session_ok(r))
+				run_cmd_body(c, (char *)c->rbuf + c->body_off);
+			else
+				send_unauthorized(c);
+		}
 	} else if (!strcmp(r->path, "/login")) {
 		if (strncasecmp(r->ctype, "application/x-www-form-urlencoded", 33))
 			send_bad_request(c);
@@ -717,18 +733,52 @@ static const struct conn_proto proto = {
 	.size = sizeof(struct hconn), .idle_ms = IDLE_MS, .life_ms = LIFE_MS, .linger_ms = LINGER_MS,
 	.linger_max = LINGER_MAX, .rbuf = rbuf, .on_read = on_read, .on_sent = on_sent,
 };
-static struct conn_set set = { .proto = &proto, .slot = conns, .nslot = MAX_CONNS, .nlisten = 1, .lfd = { -1 } };
+static struct conn_set set = { .proto = &proto, .slot = conns, .nslot = MAX_CONNS, .nlisten = HTTP_LISTENERS, .lfd = { -1, -1, -1 } };
 
-/* ---- the listener ----------------------------------------------------------------------- */
+/* ---- the listeners ---------------------------------------------------------------------- */
 
-int http_open(const char *spec, const char *www_dir)
+/* One listening socket on host:port, bound to the device dev unless that is NULL: its fd, or -errno
+ * with nothing said. */
+static int listen_on(const char *host, const char *port, const char *dev)
+{
+	struct addrinfo hints = { .ai_flags = AI_PASSIVE | AI_NUMERICHOST | AI_NUMERICSERV, .ai_socktype = SOCK_STREAM }, *ai;
+	int fd, one = 1, zero = 0, err;
+
+	if (getaddrinfo(host, port, &hints, &ai))
+		return -EINVAL;
+	fd = socket(ai->ai_family, ai->ai_socktype | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+	if (fd < 0) {
+		err = -errno;
+		freeaddrinfo(ai);
+		return err;
+	}
+	if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one) ||
+	    (ai->ai_family == AF_INET6 && setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &zero, sizeof zero)) ||
+	    (dev && setsockopt(fd, SOL_SOCKET, SO_BINDTODEVICE, dev, strlen(dev) + 1)) ||
+	    bind(fd, ai->ai_addr, ai->ai_addrlen) || listen(fd, 16)) {
+		err = -errno;
+		close(fd);
+		fd = err;
+	}
+	freeaddrinfo(ai);
+	return fd;
+}
+
+/*
+ * The web UI is for the management VLAN: unless `any`, the listener of --http is bound to swbr
+ * (SO_BINDTODEVICE), so a frame that arrives on any other interface that has an address is not
+ * answered, and a loopback listener on the same port (127.0.0.1 and ::1, bound to lo, which keeps
+ * the two sets of sockets from conflicting) serves local tools. With `any` it is the one listener
+ * on the exact address, bound to no device. A swbr or address that does not exist (yet) leaves the
+ * web UI unserved with a message: the console and the CLI socket work without it. Any other
+ * failure of the main listener ends the daemon. Call it after bridge_init: swbr has to exist.
+ */
+int http_open(const char *spec, const char *www_dir, bool any)
 {
 	char host[64];
 	const char *colon = strrchr(spec, ':'), *port;
-	struct addrinfo hints = { .ai_flags = AI_PASSIVE | AI_NUMERICHOST | AI_NUMERICSERV, .ai_socktype = SOCK_STREAM }, *ai;
 	size_t hl;
-	int one = 1, rc;
-	int zero = 0;
+	int fd;
 
 	if (!colon) {
 		fprintf(stderr, "rtlplayground: --http wants <addr:port>, e.g. [::]:80 or 0.0.0.0:8080\n");
@@ -751,41 +801,28 @@ int http_open(const char *spec, const char *www_dir)
 	if (www_fd < 0)
 		fprintf(stderr, "rtlplayground: cannot open --www %s (%s): the web UI will not be served\n", www_dir, strerror(errno));
 
-	for (int attempt = 0; attempt < 2; attempt++) {
-		if ((rc = getaddrinfo(host, port, &hints, &ai))) {
-			fprintf(stderr, "rtlplayground: --http %s:%s: %s\n", host, port, gai_strerror(rc));
-			return -1;
-		}
-		set.lfd[0] = socket(ai->ai_family, ai->ai_socktype | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
-		if (set.lfd[0] < 0 && errno == EAFNOSUPPORT && !strcmp(host, "::")) {
-			/* a kernel without IPv6: serve IPv4 */
-			freeaddrinfo(ai);
-			strcpy(host, "0.0.0.0");
-			continue;
-		}
-		break;
+	fd = listen_on(host, port, any ? NULL : SWBR);
+	if (fd == -EAFNOSUPPORT && !strcmp(host, "::")) {	/* a kernel without IPv6: serve IPv4 */
+		strcpy(host, "0.0.0.0");
+		fd = listen_on(host, port, any ? NULL : SWBR);
 	}
-	if (set.lfd[0] < 0) {
-		fprintf(stderr, "rtlplayground: http socket: %s\n", strerror(errno));
-		freeaddrinfo(ai);
+	if (fd >= 0) {
+		set.lfd[0] = fd;
+	} else if (fd == -ENODEV || fd == -EADDRNOTAVAIL) {
+		fprintf(stderr, "rtlplayground: http %s:%s on %s: %s; the web UI is not served\n", host, port, any ? "any interface" : SWBR, strerror(-fd));
+	} else {
+		fprintf(stderr, "rtlplayground: http %s:%s: %s\n", host, port, strerror(-fd));
 		return -1;
 	}
-	if (setsockopt(set.lfd[0], SOL_SOCKET, SO_REUSEADDR, &one, sizeof one) ||
-	    (ai->ai_family == AF_INET6 && setsockopt(set.lfd[0], IPPROTO_IPV6, IPV6_V6ONLY, &zero, sizeof zero))) {
-		fprintf(stderr, "rtlplayground: http socket option: %s\n", strerror(errno));
-		freeaddrinfo(ai);
-		close(set.lfd[0]);
-		set.lfd[0] = -1;
-		return -1;
+	for (int i = 0; !any && i < 2; i++) {
+		static const char *const lo[2] = { "127.0.0.1", "::1" };
+
+		fd = listen_on(lo[i], port, "lo");
+		if (fd >= 0)
+			set.lfd[1 + i] = fd;
+		else if (fd != -EAFNOSUPPORT && !(i == 1 && fd == -EADDRNOTAVAIL))	/* no IPv6 on lo is no news */
+			fprintf(stderr, "rtlplayground: http %s:%s on lo: %s\n", lo[i], port, strerror(-fd));
 	}
-	if (bind(set.lfd[0], ai->ai_addr, ai->ai_addrlen) || listen(set.lfd[0], 16)) {
-		fprintf(stderr, "rtlplayground: http %s:%s: %s\n", host, port, strerror(errno));
-		freeaddrinfo(ai);
-		close(set.lfd[0]);
-		set.lfd[0] = -1;
-		return -1;
-	}
-	freeaddrinfo(ai);
 	return 0;
 }
 

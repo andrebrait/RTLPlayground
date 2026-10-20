@@ -47,10 +47,38 @@ static const struct conn_proto proto = {
 };
 static struct conn_set set = { .proto = &proto, .slot = conns, .nslot = MAX_CONNS, .nlisten = 1, .lfd = { -1 } };
 
+/* A socket left by an earlier run is replaced; a live one (another daemon) and anything that is not a socket
+ * is not ours to remove. A connect to a dead socket is refused at once; to a live one it succeeds, or
+ * (backlog full) would block. */
+static int path_free(const char *path, const struct sockaddr_un *sa)
+{
+	struct stat st;
+	int fd, rc;
+
+	if (lstat(path, &st))
+		return 0;
+	if (!S_ISSOCK(st.st_mode)) {
+		fprintf(stderr, "rtlplayground: %s exists and is not a socket\n", path);
+		return -1;
+	}
+	fd = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+	if (fd < 0) {
+		fprintf(stderr, "rtlplayground: cli socket: %s\n", strerror(errno));
+		return -1;
+	}
+	rc = connect(fd, (const struct sockaddr *)sa, sizeof *sa);
+	close(fd);
+	if (rc && errno == ECONNREFUSED) {
+		unlink(path);
+		return 0;
+	}
+	fprintf(stderr, "rtlplayground: %s: %s\n", path, rc ? strerror(errno) : "another daemon is listening on it");
+	return -1;
+}
+
 int cli_open(const char *path)
 {
 	struct sockaddr_un sa = { .sun_family = AF_UNIX };
-	struct stat st;
 	mode_t old;
 	int fd;
 
@@ -59,14 +87,8 @@ int cli_open(const char *path)
 		return -1;
 	}
 	strcpy(sa.sun_path, path);
-	/* A socket left by an earlier run is replaced; anything else at that path is not ours to remove. */
-	if (!lstat(path, &st)) {
-		if (!S_ISSOCK(st.st_mode)) {
-			fprintf(stderr, "rtlplayground: %s exists and is not a socket\n", path);
-			return -1;
-		}
-		unlink(path);
-	}
+	if (path_free(path, &sa))
+		return -1;
 	fd = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
 	if (fd < 0) {
 		fprintf(stderr, "rtlplayground: cli socket: %s\n", strerror(errno));

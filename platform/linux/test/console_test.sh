@@ -2,12 +2,17 @@
 # Drives the daemon's stdin/stdout console. The daemon reads its input from a file and writes
 # to a file, so its own exit status is what `$?` holds (not a pipeline's last stage), and runs
 # under `timeout -s KILL 5`: a hang is killed (status 137) and fails, as does any status but 0.
-# Run after `make PLATFORM=linux`.
+# Run after `make PLATFORM=linux test` has built the test binary (make test runs it).
 #
 # `mtu show` is only counted here (one `Port N` line per board port): the values come from
 # sysfs, which the namespace bench tests (Task 5), not this script.
-BIN=${RTLP_BIN:-$(dirname "$0")/../output/rtlplayground}
+BIN=${RTLP_BIN:-$(dirname "$0")/../output/test/rtlplayground}	# the test build: --dump-state is one of its hooks
 TMP=$(mktemp -d) || exit 1
+# As root the daemon creates swbr and starts a DHCP client: it must run in a namespace of its own.
+# A root container therefore needs permission to unshare a network namespace.
+ISOLATE=
+[ "$(id -u)" = 0 ] && ISOLATE="unshare -n"
+caller_bridge=$(ip -d -o link show swbr 2>/dev/null)
 trap 'rm -rf "$TMP"' EXIT
 fail=0
 check() { # <what> <expected> <got>
@@ -22,7 +27,7 @@ mkdir "$TMP/cfg" && echo 'hostname console-test' > "$TMP/cfg/startup-config" || 
 # status in $rc.
 run() {
 	printf "$1" > "$TMP/in"
-	timeout -s KILL 5 "$BIN" --console --dump-state --http 127.0.0.1:0 --www "$TMP" --cli-socket "$TMP/cli.sock" --cfg-dir "$TMP/cfg" < "$TMP/in" > "$TMP/raw"
+	$ISOLATE timeout -s KILL 5 "$BIN" --console --dump-state --http 127.0.0.1:0 --www "$TMP" --cli-socket "$TMP/cli.sock" --cfg-dir "$TMP/cfg" < "$TMP/in" > "$TMP/raw"
 	rc=$?
 	out=$(tr -d '\r' < "$TMP/raw")
 }
@@ -97,5 +102,6 @@ check "no config: the default sets the management VLAN" 1 "$(countx 'Management 
 check "no config: no password" 1 "$(countx 'has_password=0')"
 check "no config: no plaintext password left" 1 "$(countx 'passwd_plain_left=0')"
 check "no config: the directory was created" 700 "$(stat -c %a "$TMP/cfg")"
+check "the caller's bridge is untouched" "$caller_bridge" "$(ip -d -o link show swbr 2>/dev/null)"
 
 exit $fail
