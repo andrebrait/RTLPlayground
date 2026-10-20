@@ -19,6 +19,7 @@
 #include "cmd_parser.h"
 #include "platform.h"
 #include "rtl837x_common.h"
+#include "conn.h"
 #include "linux.h"
 
 #define MAX_CONNS (CLI_SLOTS - 1)
@@ -28,24 +29,30 @@
 #define LINGER_MAX (64 << 10)
 #define LINE_MAX_LEN 511
 
-struct conn {
-	int fd;
-	enum { READ, WRITE, LINGER } st;
-	int64_t deadline, born;
-	size_t rlen, olen, ooff, lingered;
-	char *out;
+struct cli_conn {
+	struct conn c;
+	size_t rlen;
 	char line[LINE_MAX_LEN + 1];
 };
 
-static int listen_fd = -1;
 static char sock_path[sizeof(((struct sockaddr_un *)0)->sun_path)];
 static struct conn *conns[MAX_CONNS];
+
+static enum conn_rc on_read(struct conn *b, size_t n, int64_t now);
+static uint8_t *rbuf(struct conn *b, size_t *room);
+
+static const struct conn_proto proto = {
+	.size = sizeof(struct cli_conn), .idle_ms = IDLE_MS, .life_ms = LIFE_MS, .linger_ms = LINGER_MS,
+	.linger_max = LINGER_MAX, .rbuf = rbuf, .on_read = on_read,
+};
+static struct conn_set set = { .proto = &proto, .slot = conns, .nslot = MAX_CONNS, .nlisten = 1, .lfd = { -1 } };
 
 int cli_open(const char *path)
 {
 	struct sockaddr_un sa = { .sun_family = AF_UNIX };
 	struct stat st;
 	mode_t old;
+	int fd;
 
 	if (strlen(path) >= sizeof sa.sun_path) {
 		fprintf(stderr, "rtlplayground: --cli-socket path too long\n");
@@ -60,20 +67,20 @@ int cli_open(const char *path)
 		}
 		unlink(path);
 	}
-	listen_fd = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
-	if (listen_fd < 0) {
+	fd = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+	if (fd < 0) {
 		fprintf(stderr, "rtlplayground: cli socket: %s\n", strerror(errno));
 		return -1;
 	}
 	old = umask(0177);
-	if (bind(listen_fd, (struct sockaddr *)&sa, sizeof sa) || listen(listen_fd, 8)) {
+	if (bind(fd, (struct sockaddr *)&sa, sizeof sa) || listen(fd, 8)) {
 		fprintf(stderr, "rtlplayground: cli socket %s: %s\n", path, strerror(errno));
 		umask(old);
-		close(listen_fd);
-		listen_fd = -1;
+		close(fd);
 		return -1;
 	}
 	umask(old);
+	set.lfd[0] = fd;
 	strcpy(sock_path, path);
 	return 0;
 }
@@ -85,16 +92,16 @@ void cli_close(void)
 	sock_path[0] = 0;
 }
 
-static void conn_close(struct conn **slot)
+static uint8_t *rbuf(struct conn *b, size_t *room)
 {
-	close((*slot)->fd);
-	free((*slot)->out);
-	free(*slot);
-	*slot = NULL;
+	struct cli_conn *c = (struct cli_conn *)b;
+
+	*room = LINE_MAX_LEN - c->rlen;
+	return (uint8_t *)c->line + c->rlen;
 }
 
 /* Runs the line and prepares the reply. */
-static void run_line(struct conn *c, int64_t now)
+static void run_line(struct cli_conn *c)
 {
 	const char *o;
 	size_t n;
@@ -107,128 +114,39 @@ static void run_line(struct conn *c, int64_t now)
 		c->line[c->rlen] = 0;
 	o = console_run((uint8_t *)c->line, &n, &trunc);
 	memset(c->line, 0, sizeof c->line);
-	c->out = malloc(n + sizeof CMD_TRUNCATED);
-	if (c->out) {
-		memcpy(c->out, o, n);
+	c->c.out = malloc(n + sizeof CMD_TRUNCATED);
+	if (c->c.out) {
+		memcpy(c->c.out, o, n);
 		if (trunc) {
-			memcpy(c->out + n, CMD_TRUNCATED, sizeof CMD_TRUNCATED - 1);
+			memcpy(c->c.out + n, CMD_TRUNCATED, sizeof CMD_TRUNCATED - 1);
 			n += sizeof CMD_TRUNCATED - 1;
 		}
 	}
-	c->olen = c->out ? n : 0;
-	c->st = WRITE;
-	c->deadline = now + IDLE_MS;
+	c->c.olen = c->c.out ? n : 0;
 }
 
-static bool pump_write(struct conn *c, int64_t now)
+static enum conn_rc on_read(struct conn *b, size_t n, int64_t now)
 {
-	while (c->ooff < c->olen) {
-		ssize_t n = send(c->fd, c->out + c->ooff, c->olen - c->ooff, MSG_NOSIGNAL);
+	struct cli_conn *c = (struct cli_conn *)b;
 
-		if (n < 0)
-			return errno != EAGAIN && errno != EINTR;
-		c->ooff += n;
-		c->deadline = now + IDLE_MS;
-	}
-	shutdown(c->fd, SHUT_WR);
-	c->st = LINGER;
-	c->deadline = now + LINGER_MS;
-	return false;
-}
-
-static bool pump_read(struct conn *c, int64_t now)
-{
-	ssize_t n;
-
-	if (c->st == LINGER) {
-		char junk[1024];
-
-		n = read(c->fd, junk, sizeof junk);
-		if (n < 0)
-			return errno != EAGAIN && errno != EINTR;
-		c->lingered += n;
-		return n == 0 || c->lingered >= LINGER_MAX;
-	}
-	n = read(c->fd, c->line + c->rlen, LINE_MAX_LEN - c->rlen);
-
-	if (n < 0)
-		return errno != EAGAIN && errno != EINTR;
 	c->rlen += n;
-	if (n == 0 || memchr(c->line, '\n', c->rlen)) {
-		if (n == 0 && !c->rlen)
-			return true;	/* the client left without a command */
-		run_line(c, now);
-		return pump_write(c, now);
+	if (n == 0 && !c->rlen)
+		return CONN_CLOSE;	/* the client left without a command */
+	/* a complete line, the end of the input, or no end of line in sight: the shared parser would
+	 * reject an over-long one too ... and says why */
+	if (n == 0 || memchr(c->line, '\n', c->rlen) || c->rlen >= LINE_MAX_LEN) {
+		run_line(c);
+		return CONN_REPLY;
 	}
-	if (c->rlen >= LINE_MAX_LEN) {	/* no end of line in sight: the shared parser would reject it too */
-		run_line(c, now);	/* ... and says why */
-		return pump_write(c, now);
-	}
-	c->deadline = now + IDLE_MS;
-	if (c->deadline > c->born + LIFE_MS)
-		c->deadline = c->born + LIFE_MS;
-	return false;
+	return CONN_MORE;
 }
 
 void cli_fill(struct pollfd *fds, int64_t now, int *wait_ms)
 {
-	bool room = false;
-
-	for (int i = 0; i < MAX_CONNS; i++) {
-		struct conn *c = conns[i];
-		int64_t left;
-
-		fds[1 + i] = (struct pollfd){ .fd = -1 };
-		if (!c) {
-			room = true;
-			continue;
-		}
-		fds[1 + i] = (struct pollfd){ .fd = c->fd, .events = c->st == WRITE ? POLLOUT : POLLIN };
-		left = c->deadline - now;
-		if (left < *wait_ms)
-			*wait_ms = left > 0 ? left : 0;
-	}
-	fds[0] = (struct pollfd){ .fd = room ? listen_fd : -1, .events = POLLIN };
+	conn_fill(&set, fds, now, wait_ms);
 }
 
 void cli_service(struct pollfd *fds, int64_t now)
 {
-	for (int i = 0; i < MAX_CONNS; i++) {
-		struct conn *c = conns[i];
-		bool done = false;
-
-		if (!c || fds[1 + i].fd != c->fd)
-			continue;
-		if (fds[1 + i].revents & (POLLERR | POLLNVAL))
-			done = true;
-		else if (c->st == WRITE && (fds[1 + i].revents & (POLLOUT | POLLHUP)))
-			done = pump_write(c, now);
-		else if (c->st != WRITE && (fds[1 + i].revents & (POLLIN | POLLHUP)))
-			done = pump_read(c, now);
-		if (done || now >= c->deadline)
-			conn_close(&conns[i]);
-	}
-	if (fds[0].fd >= 0 && (fds[0].revents & POLLIN)) {
-		for (;;) {
-			struct conn *c;
-			int i, fd;
-
-			/* no free slot: the rest waits in the kernel's backlog, not accepted-and-dropped */
-			for (i = 0; i < MAX_CONNS && conns[i]; i++)
-				;
-			if (i == MAX_CONNS)
-				break;
-			fd = accept4(listen_fd, NULL, NULL, SOCK_NONBLOCK | SOCK_CLOEXEC);
-			if (fd < 0)
-				break;
-			if (!(c = calloc(1, sizeof *c))) {
-				close(fd);
-				break;
-			}
-			c->fd = fd;
-			c->born = now;
-			c->deadline = now + IDLE_MS;
-			conns[i] = c;
-		}
-	}
+	conn_service(&set, fds, now);
 }

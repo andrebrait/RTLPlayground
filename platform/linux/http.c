@@ -27,13 +27,14 @@
 #include "rtl837x_common.h"
 #include "platform.h"
 #include "rtl837x_flash.h"
+#include "conn.h"
 #include "linux.h"
 
 #define HDR_MAX 8192
 /* As httpd.c: a full configuration sector plus the multipart framing around it. */
 #define CONFIG_UPLOAD_BUF (CONFIG_LEN + 384)
 #define LOGIN_BODY_MAX 512
-#define MAX_CONNS (HTTP_SLOTS - 1)
+#define MAX_CONNS HTTP_CONNS
 #define IDLE_MS 5000
 #define LIFE_MS 30000
 #define LINGER_MS 2000
@@ -62,102 +63,94 @@ struct req {
 	long clen;			/* -1: no Content-Length header */
 };
 
-struct conn {
-	int fd;
-	enum { READ, WRITE, LINGER } st;
-	int64_t deadline, born;
-	size_t rlen, scan, body_off, olen, ooff, lingered;
+struct hconn {
+	struct conn b;
+	size_t rlen, scan, body_off;
 	bool parsed, restart;
-	uint8_t *out;
 	struct req req;
 	uint8_t rbuf[HDR_MAX + CONFIG_UPLOAD_BUF];
 };
 
-static int listen_fd = -1, www_fd = -1;
+static int www_fd = -1;
 static struct conn *conns[MAX_CONNS];
 static bool restart_requested;
 
-bool http_restart_requested(void)
-{
-	return restart_requested;
-}
-
 /* ---- responses ------------------------------------------------------------------------- */
 
-static void set_out(struct conn *c, const void *p, size_t n)
+static void set_out(struct hconn *c, const void *p, size_t n)
 {
-	free(c->out);
-	c->out = malloc(n ? n : 1);
-	if (!c->out) {
-		c->olen = 0;
+	free(c->b.out);
+	c->b.out = malloc(n ? n : 1);
+	if (!c->b.out) {
+		c->b.olen = 0;
 		return;
 	}
-	memcpy(c->out, p, n);
-	c->olen = n;
+	memcpy(c->b.out, p, n);
+	c->b.olen = n;
 }
 
 #define SET_OUT_STR(c, s) set_out(c, s, sizeof(s) - 1)
 
 #define HTML_HDR(status) "HTTP/1.1 " status "\r\nConnection: close\r\nContent-Type: text/html\r\n\r\n"
 
-static void send_not_found(struct conn *c)
+static void send_not_found(struct hconn *c)
 {
 	SET_OUT_STR(c, HTML_HDR("404 Not found") "<!DOCTYPE HTML PUBLIC>\n<title>404 Not Found</title>\n<h1>Not Found</h1>\n");
 }
 
-static void send_bad_request(struct conn *c)
+static void send_bad_request(struct hconn *c)
 {
 	SET_OUT_STR(c, HTML_HDR("400 Bad Request") "<!DOCTYPE HTML PUBLIC>\n<title>400 Bad Request</title>\n<h1>Bad Request</h1>\n");
 }
 
-static void send_to_login(struct conn *c)
+static void send_to_login(struct hconn *c)
 {
 	SET_OUT_STR(c, "HTTP/1.1 302 Found\r\nConnection: close\r\nLocation: login.html\r\n\r\n");
 }
 
-static void send_unauthorized(struct conn *c)
+static void send_unauthorized(struct hconn *c)
 {
 	SET_OUT_STR(c, "HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
 }
 
-static void send_length_required(struct conn *c)
+static void send_length_required(struct hconn *c)
 {
 	SET_OUT_STR(c, "HTTP/1.1 411 Length Required\r\nConnection: close\r\n\r\n");
 }
 
-static void send_ok(struct conn *c)
+static void send_ok(struct hconn *c)
 {
 	SET_OUT_STR(c, "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n");
 }
 
-static void send_text(struct conn *c, const char *status, const char *text)
+static void send_text(struct hconn *c, const char *status, const char *text)
 {
 	char *s;
 	int n = asprintf(&s, "HTTP/1.1 %s\r\nConnection: close\r\nContent-Type: text/plain\r\n\r\n%s", status, text);
 
 	if (n < 0)
 		return;
-	free(c->out);
-	c->out = (uint8_t *)s;
-	c->olen = n;
+	free(c->b.out);
+	c->b.out = (uint8_t *)s;
+	c->b.olen = n;
 }
 
 /* What the shared page code left in outbuf, plus the rest of the configuration if send_config()
  * did not fit it. */
-static void send_page(struct conn *c)
+static void send_page(struct hconn *c)
 {
 	set_out(c, outbuf, slen);
-	while (c->out && cfg_rest_len) {
-		uint8_t *n = realloc(c->out, c->olen + cfg_rest_len);
+	while (c->b.out && cfg_rest_len) {
+		uint8_t *n = realloc(c->b.out, c->b.olen + cfg_rest_len);
 		uint16_t got;
 
 		if (!n)
 			break;
-		c->out = n;
-		got = config_read(cfg_rest_off, c->out + c->olen, cfg_rest_len);
+		c->b.out = n;
+		got = config_read(cfg_rest_off, c->b.out + c->b.olen, cfg_rest_len);
 		if (!got)
 			break;
-		c->olen += got;
+		c->b.olen += got;
 		cfg_rest_off += got;
 		cfg_rest_len -= got;
 	}
@@ -214,7 +207,7 @@ static bool static_exists(const char *name)
  * served compressed, with Content-Encoding: gzip, from <name>.gz next to it when that exists (the
  * build writes them); the type is the plain name's. login.html is always served plain: it carries
  * the notice while no password is set. */
-static bool send_static(struct conn *c, const char *name)
+static bool send_static(struct hconn *c, const char *name)
 {
 	static const char tail[] = "Cache-Control: max-age=60, must-revalidate\r\nConnection: close\r\n"
 		"Access-Control-Allow-Origin: *\r\nContent-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; "
@@ -267,9 +260,9 @@ static bool send_static(struct conn *c, const char *name)
 			got += sizeof NOTICE - 1;
 		}
 	}
-	free(c->out);
-	c->out = buf;
-	c->olen = hl + got;
+	free(c->b.out);
+	c->b.out = buf;
+	c->b.olen = hl + got;
 	return true;
 }
 
@@ -308,7 +301,7 @@ static void parse_cookie(struct req *r, const char *v)
 }
 
 /* Parses the header block rbuf[0..hdr_end), modifying it. false = malformed. */
-static bool parse_request(struct conn *c, size_t hdr_end)
+static bool parse_request(struct hconn *c, size_t hdr_end)
 {
 	struct req *r = &c->req;
 	char *p = (char *)c->rbuf, *next;
@@ -397,7 +390,7 @@ static uint16_t query_number(const char *q)
 
 /* POST bodies: 1 when the whole body (NUL-terminated in place) is in, 0 when a response is set
  * (length missing or over `max`) or more has to arrive. */
-static int body_complete(struct conn *c, long max)
+static int body_complete(struct hconn *c, long max)
 {
 	long have = c->rlen - c->body_off;
 
@@ -417,7 +410,7 @@ static int body_complete(struct conn *c, long max)
 
 /* Commands of a POST /cmd. Output is the response body; "OK" if a command printed nothing and
  * succeeded, status 400 if one failed (what the parser printed explains it). */
-static void run_cmd_body(struct conn *c, char *body)
+static void run_cmd_body(struct hconn *c, char *body)
 {
 	static const char hdr[] = "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: text/plain\r\n\r\n";
 	const char *o;
@@ -441,9 +434,9 @@ static void run_cmd_body(struct conn *c, char *body)
 	}
 	if (err_status != ERR_OK)
 		memcpy(buf + 9, "400 NO", 6);	/* as long as "200 OK" */
-	free(c->out);
-	c->out = (uint8_t *)buf;
-	c->olen = hl + n;
+	free(c->b.out);
+	c->b.out = (uint8_t *)buf;
+	c->b.olen = hl + n;
 }
 
 /* "pwd=<percent-encoded>": the decoded value, false if malformed or too long. */
@@ -473,7 +466,7 @@ static bool login_password(const char *body, char *pw, size_t size)
 	return true;
 }
 
-static void run_login_body(struct conn *c, const char *body)
+static void run_login_body(struct hconn *c, const char *body)
 {
 	char pw[128], id[33], resp[200];
 	bool ok = login_password(body, pw, sizeof pw);
@@ -540,7 +533,7 @@ static bool config_part(const uint8_t *b, size_t n, const char *bf, const uint8_
 	return false;
 }
 
-static void run_config_body(struct conn *c)
+static void run_config_body(struct hconn *c)
 {
 	const uint8_t *text;
 	size_t len;
@@ -553,7 +546,7 @@ static void run_config_body(struct conn *c)
 		send_text(c, "500 Internal Server Error", "The configuration could not be stored\n");
 }
 
-static void route_post(struct conn *c)
+static void route_post(struct hconn *c)
 {
 	struct req *r = &c->req;
 
@@ -586,7 +579,7 @@ static void route_post(struct conn *c)
 	}
 }
 
-static void route_get(struct conn *c)
+static void route_get(struct hconn *c)
 {
 	struct req *r = &c->req;
 	const char *q = r->path, *name = static_name(q);
@@ -671,11 +664,28 @@ static void route_get(struct conn *c)
 
 /* ---- connections ------------------------------------------------------------------------ */
 
-static void start_write(struct conn *c, int64_t now);
+static uint8_t *rbuf(struct conn *b, size_t *room)
+{
+	struct hconn *c = (struct hconn *)b;
+
+	*room = sizeof c->rbuf - c->rlen;
+	return c->rbuf + c->rlen;
+}
+
+static void on_sent(struct conn *b)
+{
+	if (((struct hconn *)b)->restart)
+		restart_requested = true;
+}
 
 /* Runs the request once its header block (and, for a POST, its body) is complete. */
-static void process(struct conn *c, int64_t now)
+static enum conn_rc on_read(struct conn *b, size_t n, int64_t now)
 {
+	struct hconn *c = (struct hconn *)b;
+
+	if (!n)
+		return CONN_CLOSE;
+	c->rlen += n;
 	if (!c->parsed) {
 		uint8_t *end = NULL;
 		size_t from = c->scan > 3 ? c->scan - 3 : 0;
@@ -684,16 +694,14 @@ static void process(struct conn *c, int64_t now)
 			end = memmem(c->rbuf + from, c->rlen - from, "\r\n\r\n", 4);
 		c->scan = c->rlen;
 		if (!end) {
-			if (c->rlen >= HDR_MAX) {
-				send_bad_request(c);
-				start_write(c, now);
-			}
-			return;
+			if (c->rlen < HDR_MAX)
+				return CONN_MORE;
+			send_bad_request(c);
+			return CONN_REPLY;
 		}
 		if ((size_t)(end - c->rbuf) + 4 > HDR_MAX || !parse_request(c, end - c->rbuf)) {
 			send_bad_request(c);
-			start_write(c, now);
-			return;
+			return CONN_REPLY;
 		}
 		c->parsed = true;
 		c->body_off = end - c->rbuf + 4;
@@ -702,70 +710,14 @@ static void process(struct conn *c, int64_t now)
 		route_post(c);
 	else
 		route_get(c);
-	if (c->out)
-		start_write(c, now);
+	return c->b.out ? CONN_REPLY : CONN_MORE;
 }
 
-static void conn_close(struct conn **slot)
-{
-	struct conn *c = *slot;
-
-	close(c->fd);
-	free(c->out);
-	free(c);
-	*slot = NULL;
-}
-
-static void start_write(struct conn *c, int64_t now)
-{
-	c->st = WRITE;
-	c->ooff = 0;
-	c->deadline = now + IDLE_MS;
-}
-
-/* Writes what the socket takes. true when the connection is over. */
-static bool pump_write(struct conn *c, int64_t now)
-{
-	while (c->ooff < c->olen) {
-		ssize_t n = send(c->fd, c->out + c->ooff, c->olen - c->ooff, MSG_NOSIGNAL);
-
-		if (n < 0)
-			return errno != EAGAIN && errno != EINTR;
-		c->ooff += n;
-		c->deadline = now + IDLE_MS;
-	}
-	if (c->restart)
-		restart_requested = true;
-	shutdown(c->fd, SHUT_WR);
-	c->st = LINGER;
-	c->deadline = now + LINGER_MS;
-	return false;
-}
-
-static bool pump_read(struct conn *c, int64_t now)
-{
-	uint8_t junk[1024];
-	ssize_t n;
-
-	if (c->st == LINGER) {
-		n = read(c->fd, junk, sizeof junk);
-		if (n < 0)
-			return errno != EAGAIN && errno != EINTR;
-		c->lingered += n;
-		return n == 0 || c->lingered >= LINGER_MAX;
-	}
-	n = read(c->fd, c->rbuf + c->rlen, sizeof c->rbuf - c->rlen);
-	if (n < 0)
-		return errno != EAGAIN && errno != EINTR;
-	if (n == 0)
-		return true;
-	c->rlen += n;
-	c->deadline = now + IDLE_MS;
-	if (c->deadline > c->born + LIFE_MS)
-		c->deadline = c->born + LIFE_MS;
-	process(c, now);
-	return c->st == WRITE && pump_write(c, now);
-}
+static const struct conn_proto proto = {
+	.size = sizeof(struct hconn), .idle_ms = IDLE_MS, .life_ms = LIFE_MS, .linger_ms = LINGER_MS,
+	.linger_max = LINGER_MAX, .rbuf = rbuf, .on_read = on_read, .on_sent = on_sent,
+};
+static struct conn_set set = { .proto = &proto, .slot = conns, .nslot = MAX_CONNS, .nlisten = 1, .lfd = { -1 } };
 
 /* ---- the listener ----------------------------------------------------------------------- */
 
@@ -804,8 +756,8 @@ int http_open(const char *spec, const char *www_dir)
 			fprintf(stderr, "rtlplayground: --http %s:%s: %s\n", host, port, gai_strerror(rc));
 			return -1;
 		}
-		listen_fd = socket(ai->ai_family, ai->ai_socktype | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
-		if (listen_fd < 0 && errno == EAFNOSUPPORT && !strcmp(host, "::")) {
+		set.lfd[0] = socket(ai->ai_family, ai->ai_socktype | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+		if (set.lfd[0] < 0 && errno == EAFNOSUPPORT && !strcmp(host, "::")) {
 			/* a kernel without IPv6: serve IPv4 */
 			freeaddrinfo(ai);
 			strcpy(host, "0.0.0.0");
@@ -813,91 +765,41 @@ int http_open(const char *spec, const char *www_dir)
 		}
 		break;
 	}
-	if (listen_fd < 0) {
+	if (set.lfd[0] < 0) {
 		fprintf(stderr, "rtlplayground: http socket: %s\n", strerror(errno));
 		freeaddrinfo(ai);
 		return -1;
 	}
-	if (setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one) ||
-	    (ai->ai_family == AF_INET6 && setsockopt(listen_fd, IPPROTO_IPV6, IPV6_V6ONLY, &zero, sizeof zero))) {
+	if (setsockopt(set.lfd[0], SOL_SOCKET, SO_REUSEADDR, &one, sizeof one) ||
+	    (ai->ai_family == AF_INET6 && setsockopt(set.lfd[0], IPPROTO_IPV6, IPV6_V6ONLY, &zero, sizeof zero))) {
 		fprintf(stderr, "rtlplayground: http socket option: %s\n", strerror(errno));
 		freeaddrinfo(ai);
-		close(listen_fd);
-		listen_fd = -1;
+		close(set.lfd[0]);
+		set.lfd[0] = -1;
 		return -1;
 	}
-	if (bind(listen_fd, ai->ai_addr, ai->ai_addrlen) || listen(listen_fd, 16)) {
+	if (bind(set.lfd[0], ai->ai_addr, ai->ai_addrlen) || listen(set.lfd[0], 16)) {
 		fprintf(stderr, "rtlplayground: http %s:%s: %s\n", host, port, strerror(errno));
 		freeaddrinfo(ai);
-		close(listen_fd);
-		listen_fd = -1;
+		close(set.lfd[0]);
+		set.lfd[0] = -1;
 		return -1;
 	}
 	freeaddrinfo(ai);
 	return 0;
 }
 
+bool http_restart_requested(void)
+{
+	return restart_requested;
+}
+
 void http_fill(struct pollfd *fds, int64_t now, int *wait_ms)
 {
-	bool room = false;
-
-	for (int i = 0; i < MAX_CONNS; i++) {
-		struct conn *c = conns[i];
-		int64_t left;
-
-		fds[1 + i] = (struct pollfd){ .fd = -1 };
-		if (!c) {
-			room = true;
-			continue;
-		}
-		fds[1 + i] = (struct pollfd){ .fd = c->fd, .events = c->st == WRITE ? POLLOUT : POLLIN };
-		left = c->deadline - now;
-		if (left < *wait_ms)
-			*wait_ms = left > 0 ? left : 0;
-	}
-	/* a full table leaves new connections in the kernel's backlog until a slot frees up */
-	fds[0] = (struct pollfd){ .fd = room ? listen_fd : -1, .events = POLLIN };
+	conn_fill(&set, fds, now, wait_ms);
 }
 
 void http_service(struct pollfd *fds, int64_t now)
 {
-	for (int i = 0; i < MAX_CONNS; i++) {
-		struct conn *c = conns[i];
-		bool done = false;
-
-		if (!c || fds[1 + i].fd != c->fd)
-			continue;
-		if (fds[1 + i].revents & (POLLERR | POLLNVAL))
-			done = true;
-		else if (c->st == WRITE && (fds[1 + i].revents & (POLLOUT | POLLHUP)))
-			done = pump_write(c, now);
-		else if (c->st != WRITE && (fds[1 + i].revents & (POLLIN | POLLHUP)))
-			done = pump_read(c, now);
-		if (done || now >= c->deadline)
-			conn_close(&conns[i]);
-	}
-	if (fds[0].fd >= 0 && (fds[0].revents & POLLIN)) {
-		for (;;) {
-			struct conn *c;
-			int i, fd;
-
-			/* no free slot: the rest waits in the kernel's backlog, not accepted-and-dropped */
-			for (i = 0; i < MAX_CONNS && conns[i]; i++)
-				;
-			if (i == MAX_CONNS)
-				break;
-			fd = accept4(listen_fd, NULL, NULL, SOCK_NONBLOCK | SOCK_CLOEXEC);
-			if (fd < 0)
-				break;
-			if (!(c = calloc(1, sizeof *c))) {
-				close(fd);
-				break;
-			}
-			c->fd = fd;
-			c->st = READ;
-			c->born = now;
-			c->deadline = now + IDLE_MS;
-			conns[i] = c;
-		}
-	}
+	conn_service(&set, fds, now);
 }

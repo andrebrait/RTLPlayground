@@ -34,8 +34,10 @@ int64_t now_ms(void);
 /* The sockets the poll loop in main.c serves. Each has a fixed number of pollfd slots: fill()
  * sets them (a slot with nothing to wait for has fd -1) and lowers *wait_ms to the nearest
  * connection deadline; service() runs after poll() on the same slots. */
-#define HTTP_SLOTS 9
-#define CLI_SLOTS 5
+#define HTTP_LISTENERS 1
+#define HTTP_CONNS 8
+#define HTTP_SLOTS (HTTP_LISTENERS + HTTP_CONNS)
+#define CLI_SLOTS 5		/* the listener and four connections */
 int http_open(const char *addr_port, const char *www_dir);
 void http_fill(struct pollfd *fds, int64_t now, int *wait_ms);
 void http_service(struct pollfd *fds, int64_t now);
