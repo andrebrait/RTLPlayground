@@ -3,6 +3,7 @@
  * newline goes out as CR LF, the prompt is "\n> ". Input reaches cmd_editor.c through the
  * same ring the serial ISR fills.
  */
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -33,8 +34,50 @@ void console_set_fd(int fd)
 	out_fd = fd;
 }
 
+/* Output of a command that came over HTTP or the CLI socket: it answers that client only. */
+static struct {
+	char *buf;
+	size_t len, cap;
+	bool on, truncated;
+} cap;
+
+void console_capture_begin(void)
+{
+	cap.len = 0;
+	cap.truncated = false;
+	cap.on = true;
+}
+
+const char *console_capture_end(size_t *len, bool *truncated)
+{
+	cap.on = false;
+	*len = cap.len;
+	*truncated = cap.truncated;
+	return cap.buf;
+}
+
+static void capture_char(char c)
+{
+	if (cap.len == cap.cap) {
+		size_t ncap = cap.cap ? cap.cap * 2 : 1024;
+		char *nbuf = cap.len < CAPTURE_MAX ? realloc(cap.buf, ncap) : NULL;
+
+		if (!nbuf) {
+			cap.truncated = true;
+			return;
+		}
+		cap.buf = nbuf;
+		cap.cap = ncap;
+	}
+	cap.buf[cap.len++] = c;
+}
+
 void write_char(char c)
 {
+	if (cap.on) {
+		capture_char(c);
+		return;
+	}
 	if (out_len + 2 > sizeof out_buf)
 		console_flush();
 	if (c == '\n')
@@ -128,6 +171,7 @@ static void run_command(void)
 	cmd_tokenize();
 	if (err_status == ERR_OK)
 		cmd_parser();
+	auth_take_plain();
 	print_cmd_prompt();
 }
 

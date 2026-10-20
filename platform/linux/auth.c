@@ -1,0 +1,134 @@
+/*
+ * Web login. The password is kept only as a crypt(3) SHA-512 hash ($6$): the shared `passwd`
+ * command writes plaintext into passwd[] (as on the 8051), which auth_take_plain() hashes and
+ * clears right after the command ran. There is no default password: until a hash exists
+ * nobody can log in. One session at a time, as on the 8051.
+ */
+#include <crypt.h>
+#include <stdio.h>
+#include <string.h>
+#include <sys/random.h>
+
+#include "cmd_parser.h"
+#include "platform.h"
+#include "linux.h"
+
+#define HASH_MAX 160
+#define SESSION_ID_LEN 32
+#define SESSION_TIMEOUT_DEFAULT 200	/* seconds, as httpd.c */
+
+__xdata char passwd[21];
+/* Seconds of inactivity after which the session cookie stops validating (`session` command). */
+__xdata uint16_t session_timeout = SESSION_TIMEOUT_DEFAULT;
+
+static char hash[HASH_MAX];
+static char session_id[SESSION_ID_LEN + 1];
+static int64_t last_use_ms;
+
+bool auth_has_password(void)
+{
+	return hash[0] != 0;
+}
+
+/* Equal strings, in time that does not depend on where they differ. */
+static bool same(const char *a, const char *b)
+{
+	size_t la = strlen(a), lb = strlen(b);
+	unsigned char diff = la != lb;
+
+	for (size_t i = 0; i < la && i < lb; i++)
+		diff |= a[i] ^ b[i];
+	return !diff;
+}
+
+void auth_take_plain(void)
+{
+	static const char alphabet[] = "./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+	char salt[3 + 16 + 1] = "$6$";
+	unsigned char rnd[16];
+	const char *h;
+
+	if (!passwd[0])
+		return;
+	if (getrandom(rnd, sizeof rnd, 0) != sizeof rnd) {
+		fprintf(stderr, "rtlplayground: no random bytes for a salt: password not changed\n");
+		goto out;
+	}
+	for (int i = 0; i < 16; i++)
+		salt[3 + i] = alphabet[rnd[i] & 63];
+	h = crypt(passwd, salt);
+	if (!h || h[0] == '*' || strlen(h) >= sizeof hash) {
+		fprintf(stderr, "rtlplayground: crypt failed: password not changed\n");
+		goto out;
+	}
+	strcpy(hash, h);
+	session_id[0] = 0;	/* whoever was logged in with the old password is out */
+out:
+	memset(passwd, 0, sizeof passwd);
+}
+
+bool auth_check_password(const char *pw)
+{
+	const char *h;
+
+	if (!hash[0])
+		return false;
+	h = crypt(pw, hash);
+	return h && h[0] != '*' && same(h, hash);
+}
+
+bool auth_login(char id[33])
+{
+	static const char digits[] = "0123456789abcdef";
+	unsigned char rnd[SESSION_ID_LEN / 2];
+
+	if (getrandom(rnd, sizeof rnd, 0) != sizeof rnd)
+		return false;
+	for (int i = 0; i < SESSION_ID_LEN / 2; i++) {
+		session_id[2 * i] = digits[rnd[i] >> 4];
+		session_id[2 * i + 1] = digits[rnd[i] & 15];
+	}
+	session_id[SESSION_ID_LEN] = 0;
+	last_use_ms = now_ms();
+	strcpy(id, session_id);
+	return true;
+}
+
+bool auth_session_valid(const char *id)
+{
+	int64_t now = now_ms();
+
+	if (!session_id[0] || !same(id, session_id))
+		return false;
+	if (now - last_use_ms > (int64_t)session_timeout * 1000)
+		return false;
+	last_use_ms = now;
+	return true;
+}
+
+/* passwdhash <$6$...>: sets the hash directly, how a saved configuration restores the password
+ * without plaintext. The only platform command so far. */
+bool platform_cmd(void) __banked
+{
+	const char *arg, *last;
+	size_t n;
+
+	if (!cmd_compare(0, "passwdhash"))
+		return false;
+	if (cmd_words_len != 2) {
+		cmd_error("passwdhash <$6$...>\n");
+		return true;
+	}
+	arg = (const char *)cmd_buffer + cmd_words_b[1];
+	n = strlen(arg);
+	/* $6$[rounds=N$]salt$ followed by the 86 characters of the digest */
+	last = strrchr(arg, '$');
+	if (strncmp(arg, "$6$", 3) || n >= HASH_MAX || last == arg + 2 || n - (last + 1 - arg) != 86 ||
+	    strspn(arg + 3, "$./=0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz") != n - 3) {
+		cmd_error("not a SHA-512 crypt hash\n");
+		return true;
+	}
+	memcpy(hash, arg, n + 1);
+	session_id[0] = 0;
+	return true;
+}

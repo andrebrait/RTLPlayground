@@ -20,16 +20,12 @@ __xdata uint8_t sbuf[SBUF_SIZE];
 __xdata volatile uint8_t sbuf_ptr;
 bool cmd_available;
 
-/* The HTTP response being built, and what is left of it to stream (httpd). */
+/* The response page_impl.c builds (http.c sends it). */
 uint8_t outbuf[TCP_OUTBUF_SIZE];
 uint16_t slen;
-uint16_t cont_len;
-uint32_t cont_addr;
 
-__xdata char passwd[21];
 __xdata char hostname[24];
 __xdata uint16_t management_vlan = 1;
-__xdata uint16_t session_timeout;
 __xdata uint8_t flash_buf[FLASH_BUF_SIZE];
 volatile __xdata uint32_t ticks;
 const uint8_t * const hex = (const uint8_t *)"0123456789abcdef";

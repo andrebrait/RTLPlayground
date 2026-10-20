@@ -18,7 +18,7 @@ check() { # <what> <expected> <got>
 # status in $rc.
 run() {
 	printf "$1" > "$TMP/in"
-	timeout -s KILL 5 "$BIN" --console --dump-state < "$TMP/in" > "$TMP/raw"
+	timeout -s KILL 5 "$BIN" --console --dump-state --http 127.0.0.1:0 --cli-socket "$TMP/cli.sock" < "$TMP/in" > "$TMP/raw"
 	rc=$?
 	out=$(tr -d '\r' < "$TMP/raw")
 }
@@ -46,6 +46,14 @@ check "lldp on: not supported" 1 "$(count 'Not supported on this platform yet')"
 check "lldp on: state stays off" 1 "$(countx 'lldp_enabled=0')"
 run 'lldp off\n'
 check "lldp off: no error" 0 "$(count 'Not supported')"
+
+# `passwd` leaves plaintext in the shared global; the platform hashes it and clears it after the command.
+run 'passwd secret\n'
+check "passwd: daemon exits 0" 0 "$rc"
+check "passwd: hashed" 1 "$(countx 'has_password=1')"
+check "passwd: plaintext cleared" 1 "$(countx 'passwd_plain_left=0')"
+run 'foo\n'
+check "no passwd: no password" 1 "$(countx 'has_password=0')"
 
 # Escape sequences cmd_edit() does not handle would stall it for good, and bytes of one that
 # leak into the line corrupt it: each is typed in the middle of "foo", which must be echoed

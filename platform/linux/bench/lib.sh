@@ -1,23 +1,27 @@
 # Sourced by the t_*.sh tests (bash). The test's own shell owns the daemon's console FIFOs, so
-# sw_cmd works in the process that called sw_start.
+# sw_console works in the process that called sw_start.
 #
-# Transport: until the CLI socket exists (Task 3) the daemon runs with --console on a FIFO pair
-# and sw_cmd types a line and reads the reply up to the next prompt. Task 3 swaps only sw_cmd.
+# Two ways to type a command: sw_cmd runs it through the CLI socket with swcli (one connection per
+# command, the reply is exactly the command's output); sw_console types it into the daemon's
+# --console over a FIFO pair and reads up to the next prompt, which is what a serial console user sees.
 BENCH_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 BIN=${RTLP_BIN:-$BENCH_DIR/../output/rtlplayground}
+SWCLI=${RTLP_SWCLI:-$(dirname "$BIN")/swcli}
 RUN=${RTLP_BENCH_RUN:-/run/rtlp-bench}
 SW_URL=${SW_URL:-http://127.0.0.1}	# the web UI inside `rtlp-sw`
 SW_PASS=${SW_PASS:-benchpass}
-SW_TIMEOUT=${SW_TIMEOUT:-5}	# seconds without a console byte (or an HTTP answer) before giving up
+SW_TIMEOUT=${SW_TIMEOUT:-5}	# seconds without a console byte (or a CLI/HTTP answer) before giving up
 
 die() { echo "bench: $*" >&2; exit 1; }
 
-# sw_start: runs the daemon inside `rtlp-sw`; returns once its first prompt arrived.
+# sw_start: runs the daemon inside `rtlp-sw` (HTTP on its default port 80, CLI socket $RUN/cli.sock,
+# its stderr in $RUN/daemon.log); returns once its first prompt arrived, which it prints after
+# both sockets are listening.
 sw_start() {
 	mkdir -p "$RUN" && mkfifo "$RUN/in" "$RUN/out" || die "cannot create $RUN fifos"
 	exec 3<>"$RUN/in" 4<>"$RUN/out"	# held read-write so neither end blocks or sees EOF
 	# fds 3/4 are closed in the daemon: it must not be a writer of its own input.
-	ip netns exec rtlp-sw "$BIN" --console <&3 >&4 3>&- 4>&- &
+	ip netns exec rtlp-sw "$BIN" --console --cli-socket "$RUN/cli.sock" <&3 >&4 2>>"$RUN/daemon.log" 3>&- 4>&- &
 	echo $! > "$RUN/pid"
 	_sw_read_prompt >/dev/null || die "daemon gave no prompt"
 }
@@ -25,7 +29,7 @@ sw_start() {
 # _sw_read_prompt: reads console output up to the next prompt into $REPLY_RAW (CRs removed).
 # Fails after SW_TIMEOUT seconds without a byte, or 30 s in total.
 # shortcut: the prompt is the 3 bytes "\n> ", so a reply that itself ends in them looks finished;
-# upgrade to a framed transport with the CLI socket (Task 3).
+# that is why commands go through the CLI socket (sw_cmd), whose reply ends at the connection close.
 _sw_read_prompt() {
 	local c quiet=0 n=0 cap=$((SECONDS + 30))
 	REPLY_RAW=
@@ -45,8 +49,8 @@ _sw_read_prompt() {
 	done
 }
 
-# sw_cmd "<cli line>": prints the command's output (echoed input line and next prompt removed).
-sw_cmd() {
+# sw_console "<cli line>": prints the command's output (echoed input line and next prompt removed).
+sw_console() {
 	kill -0 "$(cat "$RUN/pid" 2>/dev/null)" 2>/dev/null || die "daemon is not running"
 	# Drop what an earlier command left unread (a late reply) so it cannot answer this one.
 	# shortcut: only bytes older than 50 ms are dropped; a reply later than that still attaches.
@@ -60,9 +64,17 @@ sw_cmd() {
 	return 0
 }
 
+# sw_cmd "<cli line>": runs it through the CLI socket and prints its output.
+sw_cmd() {
+	local out
+	kill -0 "$(cat "$RUN/pid" 2>/dev/null)" 2>/dev/null || die "daemon is not running"
+	out=$(timeout -s KILL "$SW_TIMEOUT" "$SWCLI" -s "$RUN/cli.sock" "$1") || die "swcli failed for '$1'"
+	[[ -z $out ]] || printf '%s\n' "$out"
+}
+
 # sw_get <path>: GET from the web UI inside `rtlp-sw`, logged in with SW_PASS (session cookie kept
 # in $RUN). Login counts only if the jar then holds a `session` cookie; any non-2xx answer fails.
-# Untested until Task 3: the daemon serves no HTTP yet.
+# A failure calls die, which ends only the shell it runs in: call it as `x=$(sw_get p) || exit 1`.
 sw_get() {
 	local jar=$RUN/cookies code
 	if ! grep -qs $'\tsession\t' "$jar"; then

@@ -3,7 +3,11 @@
 # implementation of platform.h.
 #
 #   make PLATFORM=linux [BOARD=BENCH6]    from the top level, or make here
-#   make test                             unit tests (none yet) and the console test
+#   make test                             the console test
+#
+# Builds output/rtlplayground (the daemon), output/swcli (its command-line client) and, through the
+# top-level html_min target, the minified web UI in $(ROOT)/output/html_min that the daemon serves
+# from --www (compiled in as the default).
 
 BOARD ?= BENCH6
 ROOT   = ../..
@@ -31,15 +35,27 @@ SHARED_CFLAGS = -Wno-parentheses -Wno-misleading-indentation -Wno-incompatible-p
 # 8051 build instead of the Linux one (test/Makefile does the same for its seam check).
 SHARED = cmd_parser.c cmd_editor.c page_impl.c
 vpath %.c $(ROOT) $(ROOT)/httpd
-LOCAL  = main.c console.c state.c ports.c stubs_2a_pending.c stubs_2b.c boards/$(BOARD).c
+LOCAL  = main.c console.c state.c ports.c http.c auth.c cli_sock.c stubs_2a_pending.c stubs_2b.c boards/$(BOARD).c
 
 OBJS = $(addprefix $(OUT)/,$(LOCAL:.c=.o)) \
        $(addprefix $(OUT)/shared/,$(SHARED:.c=.o))
 
-all: $(OUT)/rtlplayground
+# The web UI the daemon serves unless told otherwise (--www).
+WWW = $(abspath $(ROOT)/output/html_min)
+CFLAGS += -DDEFAULT_WWW='"$(WWW)"'
+
+all: $(OUT)/rtlplayground $(OUT)/swcli html_min
 
 $(OUT)/rtlplayground: $(OBJS)
-	$(CC) $^ -o $@
+	$(CC) $^ -o $@ -lcrypt
+
+# swcli talks to the socket and nothing else: no shared code, no board.
+$(OUT)/swcli: swcli.c | $(OUT)
+	$(CC) -std=gnu11 -O1 -Wall -Wextra -Werror -D_GNU_SOURCE $< -o $@
+
+# PLATFORM= keeps the top-level makefile from delegating straight back here.
+html_min:
+	$(MAKE) -C $(ROOT) PLATFORM= html_min
 
 # boards/$(BOARD).c is the only file that names a board: an unknown BOARD stops here.
 boards/$(BOARD).c:
@@ -83,7 +99,7 @@ clean:
 	rm -rf $(OUT)
 
 .SECONDARY:
-.PHONY: all test clean FORCE
+.PHONY: all test clean FORCE html_min
 FORCE:
 
 -include $(OBJS:.o=.d)
