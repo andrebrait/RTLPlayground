@@ -11,10 +11,11 @@
  * information.json reports is what is configured. A failure prints an error through cmd_error().
  *   - Netmask 0.0.0.0 (nothing set yet) gives a /32. A netmask or gateway typed while there is no
  *     address stays stored and applies with the address. A gateway that is typed and not reachable
- *     through the address and netmask in force is an error (the kernel refuses the route) and the
- *     old one stays. A gateway that BECOMES unreachable because the address or netmask moved away
- *     from it is kept (stored, reported by `gw`, no route) with a warning, and the route comes back
- *     when a later change makes it reachable. The default route is only ever swbr's own.
+ *     through the address and netmask in force (which did not change in the same run of commands) is
+ *     an error (the kernel refuses the route) and the old one stays. A gateway that is not reachable
+ *     because the address or netmask moved in the same run, or moved away from it, is kept (stored,
+ *     reported by `gw`, no route) with a warning, and the route comes back when a later change makes
+ *     it reachable. The default route is only ever swbr's own.
  *
  * DHCP is BusyBox `udhcpc -i swbr -f -S -s <script>`, a child of the daemon. The script
  * (udhcpc.script next to this file; --dhcp-script) puts the lease on swbr, valid for the lease
@@ -249,7 +250,7 @@ void mgmt_apply(void)
 	struct kip want = { rd(uip_hostaddr), rd(uip_netmask), rd(uip_draddr), UINT32_MAX }, got;
 	struct kview old;
 	uint32_t m, prev_gw = acc.gw;
-	bool restore = false;
+	bool restore = false, moved = want.host != acc.host || want.mask != acc.mask;
 	int rc;
 
 	if (want.host == acc.host && want.mask == acc.mask && want.gw == acc.gw)
@@ -285,10 +286,11 @@ void mgmt_apply(void)
 			add_addr(old.local[i], old.plen[i]);
 		restore = true;
 	} else if (want.gw && (rc = add_route(want.gw))) {
-		if (want.gw != prev_gw) {	/* a gateway that was just typed: refused, the old one stays */
+		if (want.gw != prev_gw && !moved) {	/* a gateway that was just typed, the address as it was: refused, the old one stays */
 			nl_error("cannot set the gateway", rc);
 			restore = true;
-		} else {	/* the address or netmask moved away from it: it stays, until it is reachable again */
+		} else {	/* it does not fit the address and netmask that came with it or that moved away from it:
+			 * it stays, and is applied as soon as an address change makes it reachable */
 			print_string("Warning: the gateway is not reachable through this address and netmask; it is kept"
 				     " and applied as soon as it is\n");
 		}

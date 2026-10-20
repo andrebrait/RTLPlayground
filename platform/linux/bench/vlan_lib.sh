@@ -3,6 +3,9 @@ rtlp_sw() { ip netns exec rtlp-sw "$@"; }
 ping_ok() { in_host "$1" busybox ping -c 2 -W 2 "$2" >/dev/null 2>&1; }	# host N reaches IP
 swcurl() { rtlp_sw curl -s -m "$SW_TIMEOUT" --max-redirs 0 "$@"; }
 
+# sw_post "<commands, one per line>": runs them as one POST /cmd of the web UI (swcli takes one line); prints the output
+sw_post() { swcurl -c "$RUN/cookies" -d "pwd=$SW_PASS" -o /dev/null "$SW_URL/login"; swcurl -b "$RUN/cookies" --data-binary "$1" "$SW_URL/cmd"; }
+
 # bv: the bridge's VLAN table, one line per port: "<dev> <vid>[:P][:U] ..." (P = PVID, U = egress untagged)
 bv() {
 	rtlp_sw bridge -j vlan show | python3 -c '
@@ -45,14 +48,14 @@ cat > "$RUN/send.py" <<'PY'
 import socket, sys
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
 if sys.argv[1]: s.setsockopt(socket.SOL_SOCKET, socket.SO_BINDTODEVICE, sys.argv[1].encode())
-for _ in range(5): s.sendto(b"x", ("192.0.2.255", 9))
+for _ in range(5): s.sendto(b"x", (sys.argv[2] if len(sys.argv) > 2 else "192.0.2.255", 9))
 PY
 # wait_ready: until the listener just started has opened its socket (its ready file)
 wait_ready() { local i; for i in $(seq 100); do [[ -e $RUN/ready ]] && return 0; sleep 0.05; done; echo "listener not ready"; exit 1; }
 # pk <port>: the parking VLAN of logical port <port> (1-based, bench board): 4094 - (port - 1)
 pk() { echo $((4095 - $1)); }
-# frames_seen <from> <to|sw> [dev]: host <from> sends 5 broadcast frames (out of its device <dev>, default
-# its own); prints how many of them host <to> (or the bridge itself) received, tagged or not (the
+# frames_seen <from> <to|sw> [dev [broadcast address]]: host <from> sends 5 broadcast frames (out of its device <dev>, default
+# its own, to the broadcast address, default 192.0.2.255); prints how many of them host <to> (or the bridge itself) received, tagged or not (the
 # frames are told apart by their source MAC)
 frames_seen() {
 	local mac p; mac=$(in_host "$1" cat "/sys/class/net/h$1/address")
@@ -64,7 +67,7 @@ frames_seen() {
 	fi
 	p=$!
 	wait_ready
-	in_host "$1" python3 "$RUN/send.py" "${3:-}" || exit 1
+	in_host "$1" python3 "$RUN/send.py" "${3:-}" "${4:-192.0.2.255}" || exit 1
 	wait $p
 	cat "$RUN/seen"
 }

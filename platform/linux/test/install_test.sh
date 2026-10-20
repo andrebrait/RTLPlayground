@@ -12,9 +12,9 @@ check() { # <what> <expected> <got>
 make -C "$(dirname "$0")/.." install DESTDIR="$TMP/root" > "$TMP/make.log" 2>&1
 check "make install" 0 $?
 R=$TMP/root/usr
-check "daemon" "$(cmp "$OUT/rtlplayground" "$R/sbin/rtlplayground" && stat -c %a "$R/sbin/rtlplayground")" 755
-check "swcli" "$(cmp "$OUT/swcli" "$R/bin/swcli" && stat -c %a "$R/bin/swcli")" 755
-check "udhcpc.script" "$(cmp "$(dirname "$0")/../udhcpc.script" "$R/share/rtlplayground/udhcpc.script" && stat -c %a "$R/share/rtlplayground/udhcpc.script")" 755
+check "daemon" 755 "$(cmp "$OUT/rtlplayground" "$R/sbin/rtlplayground" && stat -c %a "$R/sbin/rtlplayground")"
+check "swcli" 755 "$(cmp "$OUT/swcli" "$R/bin/swcli" && stat -c %a "$R/bin/swcli")"
+check "udhcpc.script" 755 "$(cmp "$(dirname "$0")/../udhcpc.script" "$R/share/rtlplayground/udhcpc.script" && stat -c %a "$R/share/rtlplayground/udhcpc.script")"
 n=0
 for f in "$WWW"/*; do
 	b=${f##*/}

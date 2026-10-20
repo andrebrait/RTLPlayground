@@ -81,8 +81,10 @@ assert_eq "/vlanlist while a port is parked" '{"mgmt":1,"vlan":[{"id":1,"name":"
 out=$(sw_cmd "vlan show")
 [[ $out != *0x0ff* ]] || { echo "a parking VLAN is in vlan show: $out"; exit 1; }
 assert_contains "vlan show still shows the register of port 4" $'4\t0x0063\tAny' "$out"
-assert_contains "vlan 4094 is refused" "Error: VLANs from 4094 - the highest logical port number up are reserved" "$(sw_cmd 'vlan 4094 1')"
-assert_contains "vlan 4089 is refused" "are reserved" "$(sw_cmd 'vlan 4089 1')"
+assert_contains "vlan 4094 is refused" "Error: this VLAN is reserved here" "$(sw_cmd 'vlan 4094 1')"
+assert_contains "vlan 4089 is refused" "Error: this VLAN is reserved here" "$(sw_cmd 'vlan 4089 1')"
+assert_contains "vlan 4094 foo is refused" "Error: this VLAN is reserved here" "$(sw_cmd 'vlan 4094 foo 1')"
+assert_eq "...and leaves no name behind" '{"members":"0x0","name":"","pvid":"0x0000"}' "$(vlan_json 4094)"
 assert_contains "vlan 4094 d is refused" "Error: this VLAN is reserved here" "$(sw_cmd 'vlan 4094 d')"
 assert_contains "pvid 1 4094 is refused" "Error: this VLAN is reserved here" "$(sw_cmd 'pvid 1 4094')"
 assert_eq "...port 1 is as it was" "lan1 10:P:U" "$(bv | grep '^lan1 ')"
@@ -287,6 +289,15 @@ assert_contains "an address outside the gateway's subnet warns" "Warning: the ga
 assert_eq "...gw kept, no route" "Current gw: 192.0.2.11|" "$(sw_cmd gw)|$(defroute)"
 sw_cmd "ip 192.0.2.50" >/dev/null
 assert_eq "back in the subnet: the route is back" "192.0.2.50/24 default via 192.0.2.11 dev swbr" "$(addrs) $(defroute)"
+# one run of commands moves the address to another subnet and types a gateway that does not fit it
+out=$(sw_post $'ip 198.18.0.7\nnetmask 255.255.255.0\ngw 198.19.0.1')
+assert_contains "address moved, the typed gateway does not fit: a warning" "Warning: the gateway is not reachable" "$out"
+[[ $out != *Error* ]] || { echo "an error for a gateway that came with its address: $out"; exit 1; }
+assert_eq "...the address moved, the gateway is kept and shown, there is no route" "198.18.0.7/24 Current gw: 198.19.0.1|" "$(addrs) $(sw_cmd gw)|$(defroute)"
+sw_cmd "ip 198.19.0.7" >/dev/null
+assert_eq "an address change that makes it reachable adds the route" "198.19.0.7/24 default via 198.19.0.1 dev swbr" "$(addrs) $(defroute)"
+sw_post $'ip 192.0.2.50\nnetmask 255.255.255.0\ngw 192.0.2.11' >/dev/null
+assert_eq "back to the first subnet and gateway" "192.0.2.50/24 default via 192.0.2.11 dev swbr" "$(addrs) $(defroute)"
 # swbr's default route is its own: one through another interface is left alone
 sw_cmd "gw 192.0.2.12" >/dev/null
 assert_eq "gw: swbr's route changes" "default via 192.0.2.12 dev swbr" "$(defroute)"
@@ -316,6 +327,22 @@ assert_eq "SIGTERM: the DHCP client is gone with the daemon" 0 "$(udhcpc_procs)"
 assert_eq "SIGTERM: swbr stays, and with it the switching" "swbr" "$(rtlp_sw ip -o link show swbr | awk -F'[ :]+' '{print $2}')"
 ping_ok 1 192.0.2.12 || { echo "no switching after the daemon ended"; exit 1; }
 ifindex=$(rtlp_sw cat /sys/class/net/swbr/ifindex)
+
+# udhcpc.script: a renewal with the router the route already has does not touch the route (no gap);
+# another router replaces it; the route of another interface (dummy0) is never touched
+run_script() { rtlp_sw env interface=swbr ip=192.0.2.60 mask=24 broadcast=192.0.2.255 router="$1" lease=60 sh "$BENCH_DIR/../udhcpc.script" "$2"; }
+rtlp_sw ip -4 addr flush dev swbr
+run_script 192.0.2.11 bound || exit 1
+assert_eq "script bound: the route" "default via 192.0.2.11 dev swbr" "$(defroute)"
+rtlp_sw ip -4 route del default dev swbr && rtlp_sw ip -4 route append default via 192.0.2.11 dev swbr proto 77 || exit 1	# a mark on the route object
+run_script 192.0.2.11 renew || exit 1
+assert_contains "script renew, same router: the route object is the same (its mark is still on it)" "proto 77" "$(rtlp_sw ip -4 route show default dev swbr)"
+run_script 192.0.2.12 renew || exit 1
+assert_eq "script renew, other router: the route follows" "default via 192.0.2.12 dev swbr" "$(defroute)"
+assert_eq "...and dummy0's route is still there" "default via 203.0.113.1 dev dummy0" "$(dummy_route)"
+run_script "" renew || exit 1
+assert_eq "script renew, no router: swbr's route is gone" "" "$(defroute)"
+assert_eq "...dummy0's is not" "default via 203.0.113.1 dev dummy0" "$(dummy_route)"
 
 # restart: swbr is adopted (same netdev, same address), VLANs a previous run left are removed
 rtlp_sw bridge vlan add vid 77 dev lan2 || exit 1

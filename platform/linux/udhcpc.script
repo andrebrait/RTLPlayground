@@ -16,9 +16,17 @@ bound|renew)
 	else
 		ip -4 addr replace "$@" || exit 1
 	fi
-	# only this interface's own default route: `replace` would swap one through another interface
-	ip -4 route del default dev "$interface" 2>/dev/null
-	[ -n "$router" ] && ip -4 route append default via "${router%% *}" dev "$interface"
+	# only this interface's own default route (`replace` would swap one through another interface),
+	# and a renewal with the same router leaves it alone: no moment without a route
+	r=${router%% *}
+	keep=
+	case "$(ip -4 route show default dev "$interface")" in
+	"default via $r"|"default via $r "*) [ -n "$r" ] && keep=1 ;;
+	esac
+	if [ -z "$keep" ]; then
+		ip -4 route del default dev "$interface" 2>/dev/null
+		[ -n "$r" ] && ip -4 route append default via "$r" dev "$interface"
+	fi
 	;;
 esac
 exit 0

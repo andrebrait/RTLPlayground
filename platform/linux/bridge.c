@@ -21,7 +21,10 @@
  * is ADOPTED without touching a VLAN or a PVID, so the traffic keeps flowing exactly as it did: the
  * PVID registers are read back from the kernel, the startup configuration then applies as a diff
  * (apply_vlan changes only what differs), and bridge_commit() removes the VLANs the configuration
- * did not create. VLAN 1 is the exception the 8051 makes: it exists at boot unless the configuration
+ * did not create. A port found PARKED has no known register or mode: it keeps its parking VLAN
+ * (register 0, mode `tagged`) until the configuration has set them, and at bridge_commit() a register
+ * still 0 becomes 1 and a mode nobody set becomes `any` -- unparking it before would let its
+ * untagged frames into VLAN 1 for as long as the startup configuration takes. VLAN 1 is the exception the 8051 makes: it exists at boot unless the configuration
  * deletes it, so a configuration that says nothing about it gets the boot state of VLAN 1.
  *
  * States of the 8051 that a bridge cannot hold, and what is done instead:
@@ -34,10 +37,13 @@
  *    its own parking VLAN as PVID (untagged member, no other member, not a member of the bridge
  *    itself) and an untagged frame is dropped on any driver because nobody is there to receive it.
  *    The parking VLAN of logical port N is 4094 - N (park_vid()); every port has its own, because
- *    two parked ports in one VLAN would pass frames between them. The VIDs 4094 down to 4094 -
- *    machine.max_port are reserved for this on Linux (the 8051 parser allows them): vlan_create(),
- *    vlan_delete() and port_pvid_set() refuse them, vlan_entry_get() reports them as no VLAN, so
- *    /vlan.json, /vlanlist and `vlan show` never show one. The register of the port is kept; the
+ *    two parked ports in one VLAN would pass frames between them. RESERVED RANGE (for doc/linux.md):
+ *    exactly one VID per board port, 4094 - N for each logical port N the board has (4089..4094 on
+ *    the six-port bench board; a board without a logical port N does not reserve 4094 - N). The 8051
+ *    parser allows them, on Linux vlan_create(), vlan_delete() and port_pvid_set() refuse them,
+ *    vlan_entry_get() reports them as no VLAN, so /vlan.json, /vlanlist and `vlan show` never show
+ *    one, and the daemon owns them: at start, any entry in a parking VID that is not that port's own
+ *    (another port's, the bridge's own) is removed (clean_reserved()). The register of the port is kept; the
  *    port leaves the parking VLAN when it joins the VLAN the register names and goes back when
  *    that VLAN is deleted, before the entry is, so there is no moment without a PVID.
  *    A host can still send frames tagged with its own parking VID: they go nowhere either.
@@ -79,6 +85,9 @@ static bool mgmt_active = true;		/* false between the removal and the re-adding 
 /* what the startup configuration did, for bridge_commit() */
 static bool created[VID_MAX + 1];
 static bool vlan1_decided;
+/* an adopted bridge shows a parked port's register and mode as unknown until the configuration has
+ * said them (bridge_init); a register of 0 is "not known yet" */
+static bool mode_unknown[BOARD_PORTS];
 
 static struct {
 	uint16_t member[VID_MAX + 1];	/* bit per logical port, bit CPU_PORT = the bridge itself */
@@ -99,9 +108,10 @@ static uint16_t park_vid(uint8_t port)
 	return VID_MAX - port;
 }
 
+/* One VID per board port is reserved, see the top. */
 static bool reserved(uint16_t vid)
 {
-	return vid >= park_vid(machine.max_port);
+	return vid <= VID_MAX && VID_MAX - vid < BOARD_PORTS && on_board(VID_MAX - vid);
 }
 
 static void report_port(const char *what, uint8_t port, int err)
@@ -326,6 +336,29 @@ static int sync_all(void)
 	return rc;
 }
 
+/* Removes from every parking VLAN what is not its own port: other ports' entries (a port whose PVID
+ * it was is parked first) and the bridge's own entry. */
+static int clean_reserved(void)
+{
+	for (uint8_t p = 0; p < BOARD_PORTS; p++) {
+		uint16_t v = park_vid(p);
+
+		for (uint8_t q = 0; on_board(p) && q <= CPU_PORT; q++) {
+			int rc = 0;
+
+			if (q == p || !(snap.member[v] >> q & 1))
+				continue;
+			if (q != CPU_PORT && snap.pvid[q] == v)
+				rc = vlan_op(RTM_SETLINK, q, BRIDGE_VLAN_INFO_PVID | BRIDGE_VLAN_INFO_UNTAGGED, park_vid(q));
+			if (!rc)
+				rc = vlan_op(RTM_DELLINK, q, 0, v);
+			if (rc)
+				return rc;
+		}
+	}
+	return 0;
+}
+
 /* ---- bridge lifecycle ---- */
 
 static int link_set(int ifindex, const char *name, bool bridge, int master)
@@ -389,14 +422,22 @@ void bridge_init(void)
 		return;
 	}
 	for (uint8_t p = 0; p < BOARD_PORTS; p++) {
-		/* adopted: the PVID the port has, if it is one a user set (not a parking VLAN, not none) */
-		pvid_reg[p] = adopted && snap.pvid[p] && !reserved(snap.pvid[p]) ? snap.pvid[p] : 1;
-		ingress_mode[p] = VLAN_ALL;
+		bool user = adopted && snap.pvid[p] && !reserved(snap.pvid[p]);
+
+		/* adopted: the PVID a port has on a user VLAN is its register; a parked port (or one with
+		 * none) is not known yet, see the top */
+		pvid_reg[p] = user ? snap.pvid[p] : adopted ? 0 : 1;
+		ingress_mode[p] = user || !adopted ? VLAN_ALL : VLAN_TAGGED;
+		mode_unknown[p] = !user && adopted;
 	}
-	if (!adopted)
+	rc = clean_reserved();
+	if (!rc && !adopted)
 		rc = apply_vlan(1, board_mask() | PMASK_CPU, 0, &bad);
-	if (!rc)
+	if (!rc && !adopted)
 		rc = sync_all();
+	for (uint8_t p = 0; !rc && adopted && p < BOARD_PORTS; p++)
+		if (on_board(p) && snap.pvid[p] != park_vid(p) && mode_unknown[p])
+			rc = sync_port(p);	/* a port with no PVID, or in another port's parking VLAN */
 	if (rc)
 		log_fail("set up the VLANs of", SWBR, rc);
 	snap.ok = false;
@@ -407,6 +448,17 @@ void bridge_commit(void)
 	uint8_t bad = 0;
 	int rc = snap_refresh();
 
+	for (uint8_t p = 0; p < BOARD_PORTS; p++) {
+		if (!on_board(p))
+			continue;
+		if (!pvid_reg[p])
+			pvid_reg[p] = 1;
+		if (mode_unknown[p])
+			ingress_mode[p] = VLAN_ALL;
+		mode_unknown[p] = false;
+	}
+	if (!rc)
+		rc = clean_reserved();
 	for (uint16_t vid = 1; !rc && vid <= VID_MAX; vid++)
 		if (!reserved(vid) && snap.member[vid] && !created[vid] && (vid != 1 || vlan1_decided))
 			rc = apply_vlan(vid, 0, 0, &bad);
@@ -474,7 +526,8 @@ void vlan_create(void) __banked
 	int rc;
 
 	if (vid && reserved(vid)) {
-		cmd_error("VLANs from 4094 - the highest logical port number up are reserved here (parking VLANs of ports without PVID)\n");
+		vlan_name_remove(vid);	/* the shared parser has stored the name before it called us */
+		cmd_error("this VLAN is reserved here (parking VLAN of a port)\n");
 		return;
 	}
 	if (!vid || vid >= 0xfff) {
@@ -518,11 +571,11 @@ void vlan_delete(uint16_t vlan) __banked
 
 	if (!vlan || vlan >= 0xfff)
 		return;
+	vlan_name_remove(vlan);
 	if (reserved(vlan)) {
-		cmd_error("this VLAN is reserved here\n");
+		cmd_error("this VLAN is reserved here (parking VLAN of a port)\n");
 		return;
 	}
-	vlan_name_remove(vlan);
 	rc = snap_refresh();
 	if (!rc)
 		rc = apply_vlan(vlan, 0, 0, &bad);
@@ -547,7 +600,7 @@ void port_pvid_set(uint8_t port, __xdata uint16_t pvid) __banked
 		return;
 	}
 	if (reserved(pvid)) {
-		cmd_error("this VLAN is reserved here\n");
+		cmd_error("this VLAN is reserved here (parking VLAN of a port)\n");
 		return;
 	}
 	old = pvid_reg[port];
@@ -587,6 +640,7 @@ bool port_ingress_filter(__xdata uint8_t port, __xdata vlan_ingress_mode_t type)
 	}
 	old = ingress_mode[port];
 	ingress_mode[port] = type;
+	mode_unknown[port] = false;
 	rc = snap_refresh();
 	if (!rc)
 		rc = sync_port(port);
