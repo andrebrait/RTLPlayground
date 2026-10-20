@@ -15,7 +15,9 @@
 #define PASSWORD "1234"
 #define SESSION_TIMEOUT 2000
 
+#ifndef PORTS
 #define PORTS 6
+#endif
 #define NSFP 1
 
 #define N_COUNTERS 52
