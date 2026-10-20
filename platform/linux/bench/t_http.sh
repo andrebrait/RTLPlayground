@@ -221,3 +221,47 @@ assert_eq "--http 0.0.0.0:8081 is served on the management address" 200 "$(hcurl
 assert_eq "...and not on the interface outside the bridge" "000" "$(hcurl http://198.18.7.1:8081/login.html)"
 assert_eq "...nor on the default port" "000" "$(hcurl http://192.0.2.50/login.html)"
 assert_eq "...loopback has it on that port" 200 "$(ip netns exec rtlp-sw curl -s -m 3 -o /dev/null -w '%{http_code}' http://127.0.0.1:8081/login.html)"
+sw_stop
+
+# ---- N3: a taken port fails the start with the network untouched ----
+rtlp_sw() { ip netns exec rtlp-sw "$@"; }
+rtlp_sw ip link del swbr 2>/dev/null
+rtlp_sw ip link show swbr >/dev/null 2>&1 && { echo "cannot remove swbr for the test"; exit 1; }
+ip netns exec rtlp-sw python3 -c 'import socket,time; s=socket.socket(); s.bind(("127.0.0.1",8099)); s.listen(1); time.sleep(30)' &
+holder=$!
+sleep 0.5
+mkdir -p "$RUN/cfg3"
+out=$(ip netns exec rtlp-sw timeout -s KILL 10 "$BIN" --cli-socket "$RUN/cli3.sock" --www "$WWW" --cfg-dir "$RUN/cfg3" --dhcp-script "$DHCP_SCRIPT" --http 127.0.0.1:8099 </dev/null 2>&1)
+rc=$?
+kill "$holder" 2>/dev/null; wait "$holder" 2>/dev/null
+assert_eq "a daemon whose HTTP port is taken exits with status 1" 1 "$rc"
+assert_contains "...and says why" "Address already in use" "$out"
+rtlp_sw ip link show swbr >/dev/null 2>&1 && { echo "assert failed: the failed start left swbr behind (the network was touched)"; exit 1; }
+echo "ok:   the failed start did not create swbr"
+rm -rf "$RUN/cfg3" "$RUN/cli3.sock"
+
+# ---- N3: an explicit --http address that is not on swbr yet is bound when it appears ----
+SW_ARGS="--http 192.0.2.77:8082" sw_start; mgmt_ip
+assert_eq "the address is not on swbr yet: not served" "000" "$(hcurl http://192.0.2.77:8082/login.html)"
+assert_contains "...and the daemon said it will try again" "trying again" "$(cat "$RUN/daemon.log")"
+ip -n rtlp-sw addr add 192.0.2.77/24 dev swbr || exit 1
+code=000
+for _ in $(seq 40); do code=$(hcurl http://192.0.2.77:8082/login.html); [[ $code == 200 ]] && break; sleep 0.25; done
+assert_eq "the address appears on swbr: the web UI is served on it within a few seconds" 200 "$code"
+sw_stop
+
+# ---- N1: a batch that goes from DHCP to a static address reports the errors and warnings of the change ----
+# (the client is still dying when mgmt_apply runs: the change must not be deferred past the command run)
+rm -f "$jar"
+SW_PASS=bench-pw
+sw_start
+sw_cmd "passwd bench-pw" >/dev/null
+sw_get status.json >/dev/null
+out=$(swcurl -b "$jar" --data-binary $'ip 192.0.2.50\nnetmask 255.0.255.0' -w '\n%{http_code}' "$SW_URL/cmd")
+assert_contains "dhcp -> static with a bad netmask: the error is in the response" "the netmask must be a run of one bits" "$out"
+assert_eq "...and the status is 400" 400 "${out##*$'\n'}"
+sw_cmd "ip dhcp" >/dev/null
+out=$(swcurl -b "$jar" --data-binary $'ip 192.0.2.50\nnetmask 255.255.255.0\ngw 203.0.113.1' -w '\n%{http_code}' "$SW_URL/cmd")
+assert_contains "dhcp -> static, a gateway the address cannot reach: the warning is in the response" "the gateway is not reachable through this address and netmask; it is kept" "$out"
+assert_eq "...status 200 (a warning is no error)" 200 "${out##*$'\n'}"
+sw_stop

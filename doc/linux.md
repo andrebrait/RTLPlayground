@@ -89,7 +89,7 @@ rtlplayground [--console] [--http <addr:port> [--http-any]] [--cli-socket <path>
 | Option | Default | Meaning |
 |---|---|---|
 | `--console` | off | Read commands from standard input and write the prompt and output to standard output, like the serial console of the 8051. Without it the daemon does not touch its standard streams. |
-| `--http <addr:port>` | `[::]:80` | Where the web interface listens. The address is numeric, IPv6 in brackets, e.g. `0.0.0.0:8080`. On a kernel without IPv6 the default falls back to `0.0.0.0:80`. **The listener is bound to `swbr`** (`SO_BINDTODEVICE`), so the web interface answers on the management VLAN only, not on any other interface that has an address; a loopback listener (`127.0.0.1` and `::1`, same port) serves local tools. The default `[::]:80` therefore serves IPv4 and IPv6 on `swbr` and loopback; an explicit address keeps that address and port and is bound to `swbr` all the same. If `swbr` or the address does not exist, the daemon says so and runs without the web interface (console and CLI socket work). |
+| `--http <addr:port>` | `[::]:80` | Where the web interface listens. The address is numeric, IPv6 in brackets, e.g. `0.0.0.0:8080`. On a kernel without IPv6 the default falls back to `0.0.0.0:80`. **The listener is bound to `swbr`** (`SO_BINDTODEVICE`), so the web interface answers on the management VLAN only, not on any other interface that has an address; a loopback listener (`127.0.0.1` and `::1`, same port) serves local tools. The default `[::]:80` therefore serves IPv4 and IPv6 on `swbr` and loopback; an explicit address keeps that address and port and is bound to `swbr` all the same. The port is bound before the network is touched: a port that is taken ends the start with nothing changed. If `swbr` does not exist yet or the address is not on `swbr`, the daemon says so, runs without the web interface (console and CLI socket work) and tries again every 3 seconds, so the web interface appears when the address does. |
 | `--http-any` | off | With `--http`: do not bind to `swbr`; listen on exactly that address on every interface that has it (and no extra loopback listener). For setups where the management interface is not `swbr`. |
 | `--cli-socket <path>` | `/run/rtlplayground.sock` | The Unix socket `swcli` connects to (mode 0600). `swcli` looks for the same path unless it is given `-s`. A socket nobody listens on (a killed daemon's) is replaced; a live one is not: the daemon refuses to start. |
 | `--www <dir>` | `/usr/share/rtlplayground/www` | The directory of the web interface (`make` leaves it in `output/html_min` of the repository root, not under `platform/linux`). |
@@ -101,10 +101,11 @@ the DHCP client. It runs one `poll()` loop, which waits only in `poll()` (at mos
 The exceptions are named: every netlink request is synchronous (the kernel answers at once), starting
 the DHCP client waits for it to exec BusyBox for at most 200 ms, and a daemon that exits or restarts
 waits (at most about a second) for the DHCP client to end. Stopping the client for `ip <address>` or
-`ip dhcp` does not wait: it gets `SIGTERM` at once and is reaped, and killed if it must be, by the loop;
-the address that `ip <address>` sets then reaches the kernel as soon as the client has exited (milliseconds, a
-second at most), not before, because a client that already has its lease would still run the lease script
-that flushes it.
+`ip dhcp` does not wait: it gets `SIGTERM` at once and is reaped, and killed if it must be, by the loop.
+The one wait is in a command run that sets a static address while the stopped client is still dying (`ip <address>` after
+DHCP): it waits for the client to be gone, at most 300 ms and then `SIGKILL`, before the address is applied, because a client
+that already has its lease would still run the lease script that flushes it, and because the errors and
+warnings of the change belong to the command (or web request) that made it.
 On `SIGTERM` or `SIGINT` it stops; `GET /reset` (the *Reboot switch* button) makes it execute itself again with
 the same arguments, so the configuration is read anew. The daemon does not fork or write a PID file;
 let the init system supervise it. The process is named `rtlplayground` also after `/reset`.
@@ -222,7 +223,11 @@ in every VLAN, as the 8051 pages expect. The management address is reachable fro
 A VLAN with no board port that is not the management VLAN has no bridge entry and does not exist (the
 8051 can hold one with only the CPU). Deleting the management VLAN prints a warning: management
 is then possible only through the console and the CLI socket. A VLAN change that fails on some
-port is undone (members, tagging, PVIDs and name are as before; if even that fails it says so).
+port is undone (members, tagging and PVIDs are as before; if even that fails it says so). Accepted
+residual: the name is not part of the undo when `vlan N <name> ...` fails on a VLAN that already exists,
+because the shared parser has stored the new name before the platform is called; the old name is lost
+(the VLAN keeps its members). A failed create of a new VLAN, and a failed delete, leave no name behind
+and the old one, respectively.
 
 The kernel is the single source of truth: reads are netlink dumps, not copies. If the bridge
 already exists at start (daemon restart or `/reset`) it is adopted without interrupting traffic and the

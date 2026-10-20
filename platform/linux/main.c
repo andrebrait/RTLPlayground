@@ -2,7 +2,8 @@
  * The daemon: one poll() loop over the console (with --console: stdin in, stdout out), the HTTP
  * listeners and their connections, and the CLI socket. The loop itself waits only in poll(); the
  * exceptions are named in doc/linux.md (synchronous netlink calls, the exec check of the DHCP
- * client, and the bounded wait for it at exit).
+ * client, the bounded wait for a stopped DHCP client in a command that sets a static address, and
+ * the one at exit).
  */
 #include <errno.h>
 #include <poll.h>
@@ -82,16 +83,15 @@ int main(int argc, char **argv)
 
 	cmd_editor_init();
 	/* Nothing of the network is touched before this has shown that no other daemon runs on the
-	 * configuration directory and the CLI socket. */
-	if (config_open(cfg) || cli_open(cli))
+	 * configuration directory and the CLI socket and that the web port is free. */
+	if (config_open(cfg) || cli_open(cli) || http_open(http, www, http_any))
 		return 1;
 	ports_init();
 	bridge_init();
 	ports_reset();
 	mgmt_init(dhcp_script);
 	stp_state_init();
-	if (http_open(http, www, http_any))	/* swbr has to exist */
-		return 1;
+	http_retry(now_ms());	/* the listener that needed swbr */
 	/* Runs the startup configuration (or the default); the shared parser records commands in the
 	 * history only from here on. */
 	config_startup();

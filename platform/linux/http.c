@@ -764,18 +764,66 @@ static int listen_on(const char *host, const char *port, const char *dev)
 	return fd;
 }
 
+/* What --http names, kept for the retry of a listener that could not be bound yet. */
+static char main_host[64], main_port[16];
+static bool main_any, main_pending, main_said;
+static int64_t retry_at;
+#define RETRY_MS 3000
+
+/* The main listener on the address --http names. 0: bound, or waiting for the address (swbr or the
+ * address does not exist yet: retried by http_retry); -1: another failure, said. */
+static int bind_main(void)
+{
+	char host[sizeof main_host];
+	int fd;
+
+	strcpy(host, main_host);
+	fd = listen_on(host, main_port, main_any ? NULL : SWBR);
+	if (fd == -EAFNOSUPPORT && !strcmp(host, "::")) {	/* a kernel without IPv6: serve IPv4 */
+		strcpy(main_host, "0.0.0.0");
+		fd = listen_on(main_host, main_port, main_any ? NULL : SWBR);
+	}
+	if (fd >= 0) {
+		set.lfd[0] = fd;
+		main_pending = false;
+		return 0;
+	}
+	if (fd == -ENODEV || fd == -EADDRNOTAVAIL) {
+		main_pending = true;
+		return 0;
+	}
+	fprintf(stderr, "rtlplayground: http %s:%s: %s\n", main_host, main_port, strerror(-fd));
+	return -1;
+}
+
+/* A main listener that is waiting for swbr or its address is tried again every RETRY_MS. A failure
+ * of another kind now (a port that is taken) is logged and stays in the retry. */
+void http_retry(int64_t now)
+{
+	if (!main_pending || now < retry_at)
+		return;
+	retry_at = now + RETRY_MS;
+	if (bind_main() < 0)
+		main_pending = true;
+	else if (main_pending && !main_said) {	/* it still waits after swbr exists: the address is not there */
+		main_said = true;
+		fprintf(stderr, "rtlplayground: http %s:%s on %s: not available yet; trying again every %d s\n", main_host, main_port,
+			main_any ? "any interface" : SWBR, RETRY_MS / 1000);
+	}
+}
+
 /*
  * The web UI is for the management VLAN: unless `any`, the listener of --http is bound to swbr
  * (SO_BINDTODEVICE), so a frame that arrives on any other interface that has an address is not
  * answered, and a loopback listener on the same port (127.0.0.1 and ::1, bound to lo, which keeps
  * the two sets of sockets from conflicting) serves local tools. With `any` it is the one listener
- * on the exact address, bound to no device. A swbr or address that does not exist (yet) leaves the
- * web UI unserved with a message: the console and the CLI socket work without it. Any other
- * failure of the main listener ends the daemon. Call it after bridge_init: swbr has to exist.
+ * on the exact address, bound to no device. Call it before the network is touched, so that a port
+ * that is taken fails the start with nothing changed. A swbr (not created yet) or an address that is
+ * not on swbr (yet) leaves the main listener to http_retry: call that after bridge_init, and the loop
+ * does it every few seconds. Any other failure of the main listener ends the daemon.
  */
 int http_open(const char *spec, const char *www_dir, bool any)
 {
-	char host[64];
 	const char *colon = strrchr(spec, ':'), *port;
 	size_t hl;
 	int fd;
@@ -790,38 +838,32 @@ int http_open(const char *spec, const char *www_dir, bool any)
 		spec++;
 		hl -= 2;
 	}
-	if (hl >= sizeof host) {
+	if (hl >= sizeof main_host || strlen(port) >= sizeof main_port) {
 		fprintf(stderr, "rtlplayground: --http address too long\n");
 		return -1;
 	}
-	memcpy(host, spec, hl);
-	host[hl] = 0;
+	memcpy(main_host, spec, hl);
+	main_host[hl] = 0;
+	strcpy(main_port, port);
+	main_any = any;
 
 	www_fd = open(www_dir, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
 	if (www_fd < 0)
 		fprintf(stderr, "rtlplayground: cannot open --www %s (%s): the web UI will not be served\n", www_dir, strerror(errno));
 
-	fd = listen_on(host, port, any ? NULL : SWBR);
-	if (fd == -EAFNOSUPPORT && !strcmp(host, "::")) {	/* a kernel without IPv6: serve IPv4 */
-		strcpy(host, "0.0.0.0");
-		fd = listen_on(host, port, any ? NULL : SWBR);
-	}
-	if (fd >= 0) {
-		set.lfd[0] = fd;
-	} else if (fd == -ENODEV || fd == -EADDRNOTAVAIL) {
-		fprintf(stderr, "rtlplayground: http %s:%s on %s: %s; the web UI is not served\n", host, port, any ? "any interface" : SWBR, strerror(-fd));
-	} else {
-		fprintf(stderr, "rtlplayground: http %s:%s: %s\n", host, port, strerror(-fd));
+	if (bind_main())
 		return -1;
-	}
 	for (int i = 0; !any && i < 2; i++) {
 		static const char *const lo[2] = { "127.0.0.1", "::1" };
 
-		fd = listen_on(lo[i], port, "lo");
+		fd = listen_on(lo[i], main_port, "lo");
 		if (fd >= 0)
 			set.lfd[1 + i] = fd;
-		else if (fd != -EAFNOSUPPORT && !(i == 1 && fd == -EADDRNOTAVAIL))	/* no IPv6 on lo is no news */
-			fprintf(stderr, "rtlplayground: http %s:%s on lo: %s\n", lo[i], port, strerror(-fd));
+		else if (fd == -EADDRINUSE) {
+			fprintf(stderr, "rtlplayground: http %s:%s on lo: %s\n", lo[i], main_port, strerror(-fd));
+			return -1;
+		} else if (fd != -EAFNOSUPPORT && !(i == 1 && fd == -EADDRNOTAVAIL))	/* no IPv6 on lo is no news */
+			fprintf(stderr, "rtlplayground: http %s:%s on lo: %s\n", lo[i], main_port, strerror(-fd));
 	}
 	return 0;
 }
@@ -838,5 +880,6 @@ void http_fill(struct pollfd *fds, int64_t now, int *wait_ms)
 
 void http_service(struct pollfd *fds, int64_t now)
 {
+	http_retry(now);
 	conn_service(&set, fds, now);
 }

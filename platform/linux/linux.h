@@ -38,8 +38,10 @@ int64_t now_ms(void);
 #define HTTP_CONNS 8
 #define HTTP_SLOTS (HTTP_LISTENERS + HTTP_CONNS)
 #define CLI_SLOTS 5		/* the listener and four connections */
-/* Call after bridge_init: unless any, the listener is bound to swbr (plus loopback), see http.c. */
+/* Call before the network is touched: unless any, the listener is bound to swbr (plus loopback), see
+ * http.c. http_retry binds what had to wait for swbr or its address (call it after bridge_init). */
 int http_open(const char *addr_port, const char *www_dir, bool any);
+void http_retry(int64_t now);
 void http_fill(struct pollfd *fds, int64_t now, int *wait_ms);
 void http_service(struct pollfd *fds, int64_t now);
 bool http_restart_requested(void);	/* GET /reset has been answered: re-exec the daemon */

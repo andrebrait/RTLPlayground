@@ -420,7 +420,8 @@ assert_eq "...and gw" "Current gw: 192.0.2.11" "$(sw_cmd gw)"
 ping_ok 1 192.0.2.60 || { echo "the management address does not answer after the failed ip dhcp"; exit 1; }
 
 # ---- D2: stopping the DHCP client does not make the daemon wait for it ----
-# a stand-in `busybox` that ignores SIGTERM: the daemon sends it, answers at once and kills it after a second
+# a stand-in `busybox` that ignores SIGTERM: the daemon sends it and answers at once; it is killed after a second
+# by the loop, or after 300 ms by the command that sets the static address (which has to wait for it)
 mkdir -p "$RUN/fakebin" && printf '#!/bin/sh\ntrap "" TERM\nwhile :; do sleep 1; done\n' > "$RUN/fakebin/busybox" && chmod +x "$RUN/fakebin/busybox" || exit 1
 sw_stop
 SW_PATH="$RUN/fakebin:/usr/sbin:/usr/bin:/sbin:/bin" sw_start
@@ -442,26 +443,28 @@ assert_eq "the client that ignored SIGTERM was killed and reaped within about tw
 until_addrs 192.0.2.70/32
 assert_eq "...and the address is on swbr when it has gone (not before: its script could undo it)" "192.0.2.70/32" "$(addrs)"
 
-# E7 regression: a DHCP ACK already being handled can run its lease script after SIGTERM. Hold that
-# script until the static-IP command has returned, then let it overwrite the address before exiting.
+# E7 regression: a DHCP ACK already being handled can run its lease script after SIGTERM. The stand-in
+# client runs such a script (flush, a lease) 100 ms after its SIGTERM and only then exits: the static
+# address that `ip` sets must come after that, not before it.
 sw_stop
 cat > "$RUN/fakebin/busybox" <<EOF
 #!/bin/sh
-trap '' TERM
+late() {
+	sleep 0.1
+	ip -4 addr flush dev swbr
+	ip addr add 192.0.2.99/24 dev swbr
+	touch "$RUN/lease-finished"
+	exit 0
+}
+trap late TERM
 touch "$RUN/client-ready"
-while [ ! -e "$RUN/finish-lease" ]; do sleep 0.02; done
-ip -4 addr flush dev swbr
-ip addr add 192.0.2.99/24 dev swbr
-touch "$RUN/lease-finished"
-exit 0
+while :; do sleep 0.02; done
 EOF
-rm -f "$RUN/client-ready" "$RUN/finish-lease" "$RUN/lease-finished"
+rm -f "$RUN/client-ready" "$RUN/lease-finished"
 SW_PATH="$RUN/fakebin:/usr/sbin:/usr/bin:/sbin:/bin" sw_start
 for _ in $(seq 100); do [[ -e $RUN/client-ready ]] && break; sleep 0.02; done
 [[ -e $RUN/client-ready ]] || { echo "the lease-script fixture did not start"; exit 1; }
 sw_cmd "ip 192.0.2.71" >/dev/null
-touch "$RUN/finish-lease"
-for _ in $(seq 100); do [[ -e $RUN/lease-finished ]] && break; sleep 0.02; done
-[[ -e $RUN/lease-finished ]] || { echo "the late lease script did not finish"; exit 1; }
+[[ -e $RUN/lease-finished ]] || { echo "ip returned before the stopped client had run its lease script and exited"; exit 1; }
 until_addrs 192.0.2.71/32
 assert_eq "a late DHCP lease script cannot overwrite the static address after ip returns" "192.0.2.71/32" "$(addrs)"

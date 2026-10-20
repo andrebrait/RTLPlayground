@@ -39,6 +39,8 @@ jobs:
         run: make clean && make CI=1 MACHINE="KP_9000_6XHML_X2" HEALTH=1
       - name: Build the Linux daemon
         run: make PLATFORM=linux
+      - name: Build the Linux daemon as installed (no test hooks) with -Werror, so the code the hooks hide is warning-checked too
+        run: make -C platform/linux OUT=output/prod HOOK_FLAGS=-Werror bin
       - name: Test the Linux daemon
         run: make PLATFORM=linux test
       - name: Size guard against merge base

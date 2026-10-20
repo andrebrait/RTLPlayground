@@ -30,15 +30,17 @@
  *   - It is stopped by `ip <address>` (which the shared code answers with dhcp_stop) and by `ip dhcp`
  *     (a fresh start): SIGTERM at once to its process group (the client is its own group leader: the lease
  *     script it may be running goes with it), the reaping and, after KILL_MS, the SIGKILL are done by
- *     mgmt_service, so the poll loop never waits for it. The address that `ip <address>` sets is
- *     applied to the kernel when the client has exited (mgmt_service; at once if there was none), not
- *     before: a client that has its ACK and not yet seen the SIGTERM still runs its lease script, which
- *     would flush the new address. `ip` shows the new address immediately. When the daemon exits (mgmt_exit) the
+ *     mgmt_service, so the poll loop never waits for it. The one exception is a command run that
+ *     changes the static address while a client is dying: mgmt_apply() waits for it (at most
+ *     DYING_WAIT_MS, then SIGKILL) and only then applies, because a client that has its ACK and not yet
+ *     seen the SIGTERM still runs its lease script, which would flush the new address; waiting there
+ *     (not later from the loop) keeps the errors and warnings of the change in the output and the
+ *     status of the command that made it. When the daemon exits (mgmt_exit) the
  *     clients are stopped the same way, but there it waits for them (at most about KILL_MS): a
  *     re-executed daemon must not meet its predecessor's client. If the daemon is killed, the
  *     kernel's parent-death signal ends them. The lease stays on swbr until it runs out.
- *   - The only wait in the loop: starting a client waits until it has exec'd busybox (it reports a
- *     failed exec through a pipe), at most EXEC_WAIT_MS.
+ *   - The waits in the loop: starting a client waits until it has exec'd busybox (it reports a
+ *     failed exec through a pipe), at most EXEC_WAIT_MS; and the static address after DHCP, above.
  */
 #include <errno.h>
 #include <fcntl.h>
@@ -61,6 +63,7 @@
 
 #define RESPAWN_MS 5000
 #define KILL_MS 1000		/* SIGTERM to SIGKILL */
+#define DYING_WAIT_MS 300	/* what a command that sets a static address waits for the stopped client */
 #define EXEC_WAIT_MS 200
 #define LEASE_POLL_MS 1000
 #define MAX_ADDRS 16
@@ -80,7 +83,6 @@ static const char *script = "/usr/share/rtlplayground/udhcpc.script";
 static struct kip acc;		/* the last state the kernel was given, or the lease taken from it */
 static pid_t dhcp_pid;
 static pid_t dying_pid;		/* a client that has been sent SIGTERM and is not reaped yet */
-static bool apply_pending;	/* mgmt_apply() found a change to make while a client was dying */
 static int64_t respawn_at, poll_at, kill_at;
 
 static uint32_t rd(const uip_ipaddr_t a)
@@ -262,6 +264,8 @@ static void adopt(const struct kip *k)
 
 /* ---- static addresses ---- */
 
+static void wait_dying(void);
+
 void mgmt_apply(void)
 {
 	struct kip want = { rd(uip_hostaddr), rd(uip_netmask), rd(uip_draddr), UINT32_MAX }, got;
@@ -272,13 +276,11 @@ void mgmt_apply(void)
 
 	if (want.host == acc.host && want.mask == acc.mask && want.gw == acc.gw)
 		return;
-	if (dying_pid) {
-		/* The client that is being stopped may be in the middle of its lease script, or about to run it
-		 * (it has the ACK and not yet seen the SIGTERM): that script would flush the address set now.
-		 * mgmt_service applies the change as soon as the client has exited. */
-		apply_pending = true;
-		return;
-	}
+	/* The client that is being stopped may be in the middle of its lease script, or about to run it
+	 * (it has the ACK and not yet seen the SIGTERM): that script would flush the address set now.
+	 * So the change waits for the client to be gone, here, inside the command run, so that its errors
+	 * and warnings reach the output and the status of this very command. */
+	wait_dying();
 	if (dhcp_state.state != DHCP_OFF) {
 		cmd_error("ip, netmask and gw come from DHCP; 'ip <address>' stops it first\n");
 		adopt(&acc);
@@ -401,6 +403,24 @@ static void stop_udhcpc(pid_t pid)
 	kill_at = now_ms() + KILL_MS;
 }
 
+/* A client that has been sent SIGTERM is gone when this returns: waited for at most DYING_WAIT_MS,
+ * then killed. Only for a command that changes the static address (mgmt_apply); the loop itself
+ * never waits for a client. */
+static void wait_dying(void)
+{
+	for (int t = 0; dying_pid && t < DYING_WAIT_MS / 10; t++) {
+		if (waitpid(dying_pid, NULL, WNOHANG))
+			dying_pid = 0;
+		else
+			usleep(10000);
+	}
+	if (dying_pid) {
+		kill(-dying_pid, SIGKILL);
+		waitpid(dying_pid, NULL, 0);
+		dying_pid = 0;
+	}
+}
+
 static void reap_dying(int64_t now)
 {
 	if (!dying_pid)
@@ -450,7 +470,6 @@ void dhcp_start(void) __banked
 		nl_error("cannot start the DHCP client", rc);
 		return;
 	}
-	apply_pending = false;	/* the address that waited for the old client is not wanted any more */
 	/* the old client (and a lease script it is running) is told to stop before the address is taken away */
 	if (dhcp_pid)
 		stop_udhcpc(dhcp_pid);
@@ -504,10 +523,6 @@ void mgmt_service(int64_t now)
 	int st = 0;
 
 	reap_dying(now);
-	if (apply_pending && !dying_pid) {
-		apply_pending = false;
-		mgmt_apply();
-	}
 	if (dhcp_pid) {
 		pid_t r = waitpid(dhcp_pid, &st, WNOHANG);
 
