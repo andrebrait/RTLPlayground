@@ -1,3 +1,12 @@
+ifeq ($(PLATFORM),linux)
+# The Linux daemon is built by its own makefile; BOARD and the goal pass through.
+.PHONY: all test clean
+all test clean:
+	$(MAKE) -C platform/linux $@
+else ifneq ($(PLATFORM),)
+$(error PLATFORM=$(PLATFORM) is not supported; use PLATFORM=linux or leave it unset for the 8051 firmware)
+else
+
 VERSION=0.1.0
 IMAGESIZE = 524288
 DEFAULT_CONFIG_LOCATION = 454656
@@ -223,3 +232,5 @@ machine_check:
 	@rm -rf $(BUILDDIR)/tmp
 
 -include $(DEPS)
+
+endif

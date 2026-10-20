@@ -16,7 +16,7 @@ Exit status is non-zero if any check fails, a sanitizer trips, or the watchdog
 fires — so it drops straight into CI.
 
 ## How it works
-- **`sdcc_shim.h`** (force-included) erases SDCC 8051 keywords (`__xdata`,
+- **`../platform/linux/sdcc_shim.h`** (force-included; shared with the Linux daemon build) erases SDCC 8051 keywords (`__xdata`,
   `__code`, `__banked`, …) so firmware sources compile under host gcc. It changes
   no logic — the code under test is byte-for-byte the firmware source.
 - **`hw_mock.c` / `hw_mock.h`** simulate the ASIC edge: a flat register file

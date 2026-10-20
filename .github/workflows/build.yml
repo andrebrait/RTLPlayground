@@ -26,7 +26,7 @@ jobs:
       - name: Install dependencies
         run: |
           apt update
-          apt install make gcc sdcc xxd python-is-python3 libjson-c-dev zlib1g-dev -y
+          apt install make gcc sdcc xxd python-is-python3 libjson-c-dev zlib1g-dev libmnl-dev -y
       - name: Run the host-side unit tests
         run: make -C test
       - name: Check that every machine definition can be compiled
@@ -37,6 +37,10 @@ jobs:
         run: make CI=1 MACHINE="KP_9000_9XHML_X_V3_1"
       - name: Make project with the health instrumentation
         run: make clean && make CI=1 MACHINE="KP_9000_6XHML_X2" HEALTH=1
+      - name: Build the Linux daemon
+        run: make PLATFORM=linux
+      - name: Test the Linux daemon
+        run: make PLATFORM=linux test
       - name: Size guard against merge base
         if: github.event_name == 'pull_request'
         run: tools/size_guard.sh "$(git merge-base HEAD origin/main)"

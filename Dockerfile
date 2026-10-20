@@ -9,6 +9,11 @@ RUN apt-get update && apt-get install -y \
     libjson-c-dev \
     git \
     zlib1g-dev \
+    libmnl-dev \
+    iproute2 \
+    busybox \
+    ethtool \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # git safe.directory for mounted repos (Makefile uses git describe)
