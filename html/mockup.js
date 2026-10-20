@@ -362,6 +362,140 @@ VARIANTS.G2MC=function(){VARIANTS.G2M();closeModal()};
 VARIANTS.FL=function(){VARIANTS.F();linkModal(S.ports[0])};
 VARIANTS.ML=function(){VARIANTS.M();linkModal(S.ports[0])};
 VARIANTS.FL3=function(){VARIANTS.F();linkModal(S.ports[2])};
+
+// J: Enabled | Port | Name | Link (i) | Speed | MTU | Flow control (i) | EEE (i), one Apply for the whole page.
+// Every control is a draft; changed ports are highlighted and only they are sent on Apply.
+function infoModal(title,body){modal(title,body);$("modal").style.width="fit-content"}
+function tick(on){return on?badge("\u2713","ok"):'<span class="mut">-</span>'}
+function capTable(rows){
+  var tb=h("table",{class:"t",style:"width:auto"}),r=tb.createTHead().insertRow();
+  ["",t("e_adv"),t("e_lp")].forEach(function(s){r.appendChild(h("th",{text:s}))});
+  var b=tb.createTBody();
+  rows.forEach(function(x){var tr=b.insertRow();tr.insertCell().textContent=x[0];tr.insertCell().innerHTML=tick(x[1]);tr.insertCell().innerHTML=tick(x[2])});
+  return tb;
+}
+function sfpNote(){return h("p",{class:"small mut",style:"max-width:16em",text:"SFP ports do not advertise this."})}
+function fcInfo(p){
+  var f=FC[p.portNum];
+  infoModal(t("c_port")+" "+p.portNum+": "+t("nav_fc"),p.isSFP?sfpNote():capTable([["Pause",f&1,f&4],["Asym",f&2,f&8]]));
+}
+function eeeInfo(p){
+  var a=parseInt(EEE[p.portNum].adv,2),l=parseInt(EEE[p.portNum].lp,2);
+  infoModal(t("c_port")+" "+p.portNum+": "+t("nav_eee"),p.isSFP?sfpNote():capTable([["2.5G",a&1,l&1],["1G",a&2,l&2],["100M",a&4,l&4]]));
+}
+function iBtn(fn){return h("button",{title:"Details",style:"background:none;border:0;padding:0 0 0 4px;cursor:pointer;color:var(--ac);font-size:15px;vertical-align:middle",text:"\u24d8",onclick:fn})}
+var J={orig:[],rows:[]};
+function jControls(p){
+  var i=p.portNum-1,r={};
+  r.en=sw(p.enabled).firstChild;
+  r.name=h("input",{class:"in",size:"9",maxlength:"15",value:p.name||"",placeholder:"-"});
+  r.spd=h("select",{class:"in"});
+  (p.isSFP?SFPRATES:SPEEDS).forEach(function(o){r.spd.appendChild(h("option",{value:o[0],text:speedLabel(o[1])}))});
+  r.mtu=h("input",{class:"in",id:"pmtu"+i,type:"number",min:"64",max:"16383",style:"width:5.5em"});
+  r.fc=p.isSFP?null:sw(FC[p.portNum]&1).firstChild;
+  r.eee=p.isSFP?null:sw(parseInt(EEE[p.portNum].adv,2)).firstChild;
+  [r.en,r.name,r.spd,r.mtu,r.fc,r.eee].forEach(function(c){if(c){c.addEventListener("input",jUpdate);c.addEventListener("change",jUpdate)}});
+  J.rows[i]=r;
+  return r;
+}
+function jFeat(ctl,st,info,p){
+  return h("span",{style:"white-space:nowrap;display:inline-flex;gap:6px;align-items:center"},
+    [ctl?ctl.parentNode:h("span",{html:badge(t("e_na"))}),h("span",{html:st}),iBtn(function(){info(p)})]);
+}
+function jRead(i){var r=J.rows[i];return{en:r.en.checked,name:r.name.value.trim(),spd:r.spd.value,mtu:r.mtu.value,fc:r.fc&&r.fc.checked,eee:r.eee&&r.eee.checked}}
+function jSnapshot(){J.rows.forEach(function(_,i){J.orig[i]=jRead(i)})}
+// Full desired state of one port: what the screen shows, whatever the switch had before
+function jCmds(p,s){
+  var n=p.portNum,c=[];
+  if(s.name)c.push("port "+n+" name "+s.name);
+  if(s.en){
+    if(p.isSFP){c.push("port "+n+" on");c.push("sfp "+S.sfpSlot[n-1]+" "+s.spd)}
+    else c.push("port "+n+" "+s.spd);
+  }
+  if(s.mtu)c.push("mtu "+n+" "+s.mtu);
+  if(!p.isSFP){c.push("port "+n+" fc "+(s.fc?"on":"off"));c.push("eee "+(s.eee?"on":"off")+" "+n)}
+  if(!s.en)c.push("port "+n+" off");
+  return c;
+}
+function jUpdate(){
+  var ports=0,cmds=[];
+  J.rows.forEach(function(r,i){
+    var a=J.orig[i],b=jRead(i),row=r.row,dirty=false;
+    if(!a)return;
+    ["en","name","spd","mtu","fc","eee"].forEach(function(k){
+      var ch=a[k]!==b[k],el=r[k];if(ch)dirty=true;
+      if(!el)return;
+      var tgt=el.type==="checkbox"?el.nextSibling:el;
+      tgt.style.outline=ch?"2px solid var(--ac)":"";tgt.style.outlineOffset=ch?"2px":"";
+    });
+    row.style.background=dirty?"var(--sel)":"";
+    if(dirty){ports++;cmds=cmds.concat(jCmds(S.ports[i],b))}
+  });
+  $("jcount").textContent=ports?ports+" port"+(ports>1?"s":"")+" changed":"No changes";
+  $("jprev").textContent=cmds.join("  \u00b7  ");
+  $("japply").disabled=!ports;
+}
+function jBar(){
+  return h("div",{class:"mockx",style:"position:sticky;bottom:0;z-index:5;display:flex;gap:12px;align-items:center;background:var(--panel);border-top:1px solid var(--bd);padding:10px 2px 2px;margin-top:8px"},[
+    h("b",{id:"jcount",style:"white-space:nowrap",text:"No changes"}),
+    h("span",{id:"jprev",class:"mono mut",style:"flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"}),
+    h("button",{class:"pri",id:"japply",text:t("c_apply")})]);
+}
+// Edits shown in the screenshots: port 2 renamed, port 3 flow control off, port 5 MTU 9000
+function jDemo(){
+  var r=J.rows;
+  r[1].name.value="nas";r[2].fc.checked=false;r[4].mtu.value="9000";
+  jUpdate();
+}
+VARIANTS.J=function(){
+  J={orig:[],rows:[]};
+  setHead([[t("c_enabled")],[t("c_port")],[t("c_name")],[t("c_link")],[t("pt_speed")],[t("pt_mtu")],[t("nav_fc")],[t("nav_eee")]]);
+  var tb=$("ptable").tBodies[0];
+  S.ports.forEach(function(p){
+    var i=p.portNum-1,r=jControls(p),tr=tb.insertRow();r.row=tr;
+    tr.insertCell().appendChild(r.en.parentNode);
+    tr.insertCell().textContent=p.portNum+(p.isSFP?" (SFP)":"");
+    tr.insertCell().appendChild(r.name);
+    var lk=tr.insertCell();lk.id="plink"+i;lk.style.whiteSpace="nowrap";
+    tr.insertCell().appendChild(r.spd);
+    tr.insertCell().appendChild(r.mtu);
+    tr.insertCell().appendChild(jFeat(r.fc,fcNeg(p),fcInfo,p));
+    tr.insertCell().appendChild(jFeat(r.eee,eeeSt(p),eeeInfo,p));
+  });
+  $("ptable").closest(".scrollx").after(jBar());
+  loadMtu().then(function(){jSnapshot();jUpdate();if(JDEMO)setTimeout(jDemo,300)});
+};
+// JM: phone cards with the same controls and the same page-wide Apply bar
+VARIANTS.JM=function(){
+  J={orig:[],rows:[]};
+  var wrap=$("ptable").closest(".scrollx");wrap.style.display="none";
+  var list=h("div",{class:"mockx",style:"display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px"});
+  S.ports.forEach(function(p){
+    var i=p.portNum-1,r=jControls(p);
+    r.name.style.cssText="width:100%;box-sizing:border-box";r.spd.style.width="100%";
+    var g=h("div",{style:"display:grid;grid-template-columns:7.5em 1fr;gap:6px 10px;align-items:center"});
+    [[t("c_name"),r.name],[t("c_link"),h("span",{id:"plink"+i})],[t("pt_speed"),r.spd],[t("pt_mtu"),r.mtu],
+     [t("nav_fc"),jFeat(r.fc,fcNeg(p),fcInfo,p)],[t("nav_eee"),jFeat(r.eee,eeeSt(p),eeeInfo,p)]].forEach(function(kv){
+      g.appendChild(h("span",{class:"mut small",text:kv[0]}));g.appendChild(h("div",null,[kv[1]]));
+    });
+    r.row=h("div",{style:"border:1px solid var(--bd);border-radius:8px;padding:10px 12px"},[
+      h("div",{style:"display:flex;gap:10px;align-items:center;margin-bottom:8px"},[r.en.parentNode,h("b",{text:t("c_port")+" "+p.portNum+(p.isSFP?" (SFP)":"")})]),g]);
+    list.appendChild(r.row);
+  });
+  wrap.after(list);
+  list.after(jBar());
+  loadMtu().then(function(){jSnapshot();jUpdate();if(JDEMO)setTimeout(jDemo,300)});
+};
+var JDEMO=false;
+["J","JM"].forEach(function(v){var f=VARIANTS[v];VARIANTS[v]=function(){LINKINFO=true;f()};VARIANTS[v+"D"]=function(){JDEMO=true;VARIANTS[v]()}});
+VARIANTS.JFC=function(){VARIANTS.J();fcInfo(S.ports[2])};
+VARIANTS.JEEE=function(){VARIANTS.J();eeeInfo(S.ports[0])};
+// ST: Devices learned moves to the Statistics page (appended after RX bad, since statsStatus fills cells 0-6)
+VARIANTS.ST=function(){
+  showTab("stats");statsStatus();
+  var th=$("stable").tHead.rows[0];th.insertBefore(h("th",{class:"num",text:t("pt_conn")}),th.lastElementChild);
+  S.ports.forEach(function(p){var r=$("stable").tBodies[0].rows[p.portNum-1];var c=r.insertCell(7);c.className="num";c.textContent=parseInt(p.macs,16)&0x1fff});
+};
 function fcFlags(b){return["Pause","Asym"].filter(function(s,i){return b&(1<<i)}).join(", ")||"-"}
 function mockStatus(){
   fakeData();updateStrip();
