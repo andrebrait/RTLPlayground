@@ -167,12 +167,21 @@ bool auth_session_valid(const char *id)
 	return true;
 }
 
+bool auth_hash_valid(const char *arg)
+{
+	size_t n = strlen(arg);
+	/* $6$[rounds=N$]salt$ followed by the 86 characters of the digest */
+	const char *last = strrchr(arg, '$');
+
+	return !strncmp(arg, "$6$", 3) && n < AUTH_HASH_MAX && last != arg + 2 && n - (last + 1 - arg) == 86 &&
+	       strspn(arg + 3, "$./=0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz") == n - 3;
+}
+
 /* passwdhash <$6$...>: sets the hash directly, how a saved configuration restores the password
  * without plaintext. The only platform command so far. */
 bool platform_cmd(void) __banked
 {
-	const char *arg, *last;
-	size_t n;
+	const char *arg;
 
 	if (!cmd_compare(0, "passwdhash"))
 		return false;
@@ -181,15 +190,11 @@ bool platform_cmd(void) __banked
 		return true;
 	}
 	arg = (const char *)cmd_buffer + cmd_words_b[1];
-	n = strlen(arg);
-	/* $6$[rounds=N$]salt$ followed by the 86 characters of the digest */
-	last = strrchr(arg, '$');
-	if (strncmp(arg, "$6$", 3) || n >= AUTH_HASH_MAX || last == arg + 2 || n - (last + 1 - arg) != 86 ||
-	    strspn(arg + 3, "$./=0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz") != n - 3) {
+	if (!auth_hash_valid(arg)) {
 		cmd_error("not a SHA-512 crypt hash\n");
 		return true;
 	}
-	memcpy(hash, arg, n + 1);
+	strcpy(hash, arg);
 	session_id[0] = 0;
 	return true;
 }

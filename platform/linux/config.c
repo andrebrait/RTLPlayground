@@ -7,9 +7,19 @@
  *
  * Saving is atomic: write .new and fsync it, rename the old file to .bak, rename .new into
  * place, fsync the directory. A crash leaves either the old file or, between the two renames,
- * .new next to .bak; config_open() completes the second case and drops a stale .new otherwise.
+ * no startup-config with .bak (the complete old file) and .new (complete only if it was synced:
+ * nothing says so). Startup never promotes .new: with that signature it restores .bak, and it
+ * always deletes a leftover .new. The save that was interrupted is lost, the old file survives.
  *
- * Passwords: only a crypt SHA-512 hash reaches the disk. Per `passwd` line of an upload:
+ * A file of CONFIG_LEN bytes with no NUL is run as it is (the 8051 does the same; a last line
+ * with no line ending is not executed there either, nor here). One longer than that is cut at
+ * CONFIG_LEN, the size of the flash area. An upload must leave room for its NUL.
+ *
+ * Line ends: a line ends at its first CR or LF, as in execute_config().
+ *
+ * Passwords: only a crypt SHA-512 hash reaches the disk, and only one password line: of all the
+ * lines of an upload that are passwd or a valid passwdhash only the last is written (the web UI's
+ * Save adds a passwdhash line per password change, it does not know that line). Per such line:
  *   passwd <value>      -> passwdhash <hash of value>, and that becomes the login password
  *   passwd ****...      -> passwdhash <current hash>, or no line while no password is set. All
  *                          asterisks is what the history scrub leaves of a password (auth.c), which
@@ -61,67 +71,110 @@ static void path(char *buf, const char *suffix)
 	snprintf(buf, FILE_MAX, "%s/" NAME "%s", dir, suffix);
 }
 
-/* Copies in[0, len) to out line by line, applying the password rules above, and sets *outlen. A
- * plaintext password that became the one to use is hashed into newhash (else ""). false if a
- * hash could not be made or the result needs CONFIG_LEN bytes or more (the text and its NUL
- * must fit the area). */
-static bool rewrite(const char *in, size_t len, char *out, size_t *outlen, char newhash[AUTH_HASH_MAX])
+enum kind { OTHER, DROP, STARS, PLAIN, HASH };
+
+struct line {
+	size_t len;		/* up to the first CR or LF, as execute_config() ends a command */
+	enum kind kind;
+	const char *val;	/* PLAIN: the password; HASH: the hash (both to the end of the line) */
+	size_t vlen;
+};
+
+static bool word_at(const char *l, size_t len, size_t s, const char *w, size_t wl, size_t *vs)
 {
-	size_t o = 0, p = 0;
+	if (len - s < wl || memcmp(l + s, w, wl) || (len - s > wl && l[s + wl] != ' '))
+		return false;
+	*vs = s + wl;
+	while (*vs < len && l[*vs] == ' ')
+		(*vs)++;
+	return true;
+}
+
+static void classify(const char *p, size_t max, struct line *ln)
+{
+	size_t s = 0, vs;
+
+	for (ln->len = 0; ln->len < max && p[ln->len] != '\r' && p[ln->len] != '\n'; ln->len++)
+		;
+	ln->kind = OTHER;
+	while (s < ln->len && p[s] == ' ')
+		s++;
+	if (word_at(p, ln->len, s, "passwd", 6, &vs) && vs < ln->len) {
+		bool stars = true;
+
+		for (size_t i = vs; i < ln->len; i++)
+			stars &= p[i] == '*';
+		ln->kind = !stars ? PLAIN : auth_hash()[0] ? STARS : DROP;
+		ln->val = p + vs;
+		ln->vlen = ln->len - vs;
+	} else if (word_at(p, ln->len, s, "passwdhash", 10, &vs) && vs < ln->len && ln->len - vs < AUTH_HASH_MAX) {
+		char h[AUTH_HASH_MAX];
+
+		memcpy(h, p + vs, ln->len - vs);
+		h[ln->len - vs] = 0;
+		if (auth_hash_valid(h)) {
+			ln->kind = HASH;
+			ln->val = p + vs;
+			ln->vlen = ln->len - vs;
+		}
+	}
+}
+
+/* Copies in[0, len) to out, applying the password rules above, and sets *outlen. A line ends at
+ * its first CR or LF, exactly as in execute_config() ("\r\r\n" is a line, then two
+ * empty ones); the ending bytes are copied unchanged. Only the LAST password line (passwd, or a
+ * well-formed passwdhash) is kept: it is the one that counts when the file runs, and the web UI's
+ * Save adds one every time the password changed (it does not know passwdhash). newhash gets the
+ * hash the live login becomes (else ""). false if a hash could not be made or the result needs
+ * more than `limit` bytes. */
+static bool rewrite(const char *in, size_t len, size_t limit, char *out, size_t *outlen, char newhash[AUTH_HASH_MAX])
+{
+	size_t o = 0, p = 0, last = (size_t)-1;
+	struct line ln;
 
 	newhash[0] = 0;
-	while (p < len) {
-		const char *line = in + p, *nl = memchr(line, '\n', len - p);
-		size_t end = nl ? (size_t)(nl - line) : len - p;		/* the line, without its '\n' */
-		size_t eol = end;				/* ... and without a '\r' before it */
-		size_t s = 0, vs;
+	for (p = 0; p < len; p += ln.len + (p + ln.len < len)) {
+		classify(in + p, len - p, &ln);
+		if (ln.kind >= STARS)
+			last = p;
+	}
+	for (p = 0; p < len; p += ln.len + (p + ln.len < len)) {
+		size_t ending;
 		char repl[AUTH_HASH_MAX + 12];
-		const char *keep = line;
-		size_t keeplen = end + !!nl, prefix = 0;
+		const char *w = in + p;
+		size_t wl, el;
 
-		if (eol && line[eol - 1] == '\r')
-			eol--;
-		while (s < eol && line[s] == ' ')
-			s++;
-		vs = s + 6;
-		if (eol - s >= 6 && !memcmp(line + s, "passwd", 6) && (vs == eol || line[vs] == ' ')) {
-			size_t vlen;
-			bool stars = true;
+		classify(in + p, len - p, &ln);
+		ending = p + ln.len < len;
+		wl = ln.len;
+		el = ending;
+		if (ln.kind == DROP || (ln.kind >= STARS && p != last)) {
+			wl = 0;
+			el = 0;		/* the line and its ending go */
+		} else if (p == last && ln.kind != HASH) {
+			char pw[PW_MAX + 1] = { 0 };
+			const char *h = auth_hash();
 
-			while (vs < eol && line[vs] == ' ')
-				vs++;
-			vlen = eol - vs;
-			for (size_t i = 0; i < vlen; i++)
-				stars &= line[vs + i] == '*';
-			if (vlen) {
-				const char *h = newhash[0] ? newhash : auth_hash();
-
-				if (stars && !h[0]) {
-					keeplen = 0;	/* nothing to keep it as: drop the line */
-				} else {
-					if (!stars) {
-						char pw[PW_MAX + 1] = { 0 };
-
-						memcpy(pw, line + vs, vlen < PW_MAX ? vlen : PW_MAX);
-						h = newhash;
-						if (!auth_hash_password(pw, newhash)) {
-							explicit_bzero(pw, sizeof pw);
-							return false;
-						}
-						explicit_bzero(pw, sizeof pw);
-					}
-					prefix = snprintf(repl, sizeof repl, "passwdhash %s", h);
-					keep = line + eol;	/* the line ending stays */
-					keeplen -= eol;
+			if (ln.kind == PLAIN) {
+				memcpy(pw, ln.val, ln.vlen < PW_MAX ? ln.vlen : PW_MAX);
+				h = newhash;
+				if (!auth_hash_password(pw, newhash)) {
+					explicit_bzero(pw, sizeof pw);
+					return false;
 				}
+				explicit_bzero(pw, sizeof pw);
 			}
+			wl = snprintf(repl, sizeof repl, "passwdhash %s", h);
+			w = repl;
+		} else if (p == last) {
+			memcpy(newhash, ln.val, ln.vlen);
+			newhash[ln.vlen] = 0;
 		}
-		if (o + prefix + keeplen > CONFIG_LEN - 1)
+		if (o + wl + el > limit)
 			return false;
-		memcpy(out + o, repl, prefix);
-		memcpy(out + o + prefix, keep, keeplen);
-		o += prefix + keeplen;
-		p += end + !!nl;
+		memcpy(out + o, w, wl);
+		memcpy(out + o + wl, in + p + ln.len, el);
+		o += wl + el;
 	}
 	*outlen = o;
 	return true;
@@ -137,6 +190,7 @@ void config_open(const char *d)
 {
 	char main_[FILE_MAX], bak[FILE_MAX], new_[FILE_MAX], raw[CONFIG_LEN], out[CONFIG_LEN], hash[AUTH_HASH_MAX];
 	size_t got = 0, n;
+	struct stat st;
 	ssize_t r = 0;
 	int fd;
 
@@ -148,16 +202,25 @@ void config_open(const char *d)
 		fprintf(stderr, "rtlplayground: cannot create %s: %s; no configuration store\n", d, strerror(errno));
 		return;
 	}
+	if (stat(d, &st) || !S_ISDIR(st.st_mode)) {
+		fprintf(stderr, "rtlplayground: %s is not a directory; no configuration store\n", d);
+		return;
+	}
+	if (st.st_uid != geteuid())
+		fprintf(stderr, "rtlplayground: %s is owned by uid %u, not by us: its mode %04o is not changed\n",
+			d, (unsigned)st.st_uid, (unsigned)(st.st_mode & 07777));
+	else if ((st.st_mode & 07777) != 0700 && chmod(d, 0700))
+		fprintf(stderr, "rtlplayground: cannot set the mode of %s to 0700: %s\n", d, strerror(errno));
 	strcpy(dir, d);
 	path(main_, "");
 	path(bak, ".bak");
 	path(new_, ".new");
-	/* Interrupted between the two renames of a save: the .new is complete (it was synced first). */
+	/* Interrupted between the two renames of a save: restore the old file; .new may be cut short. */
 	if (access(main_, F_OK) && errno == ENOENT && !access(bak, F_OK) && !access(new_, F_OK)) {
-		if (rename(new_, main_))
-			fprintf(stderr, "rtlplayground: cannot finish the interrupted save: %s\n", strerror(errno));
+		if (rename(bak, main_))
+			fprintf(stderr, "rtlplayground: cannot restore %s: %s\n", main_, strerror(errno));
 		else
-			fprintf(stderr, "rtlplayground: finished an interrupted configuration save\n");
+			fprintf(stderr, "rtlplayground: an interrupted configuration save was dropped, the old file is back\n");
 	}
 	if (unlink(new_) && errno != ENOENT)
 		fprintf(stderr, "rtlplayground: cannot remove %s: %s\n", new_, strerror(errno));
@@ -176,7 +239,7 @@ void config_open(const char *d)
 		return;
 	}
 	n = strnlen(raw, got);	/* the text ends at its first NUL, as on the 8051 */
-	if (!rewrite(raw, n, out, &n, hash)) {
+	if (!rewrite(raw, n, CONFIG_LEN, out, &n, hash)) {
 		fprintf(stderr, "rtlplayground: %s does not fit %d bytes: ignored\n", main_, CONFIG_LEN);
 		return;
 	}
@@ -189,8 +252,9 @@ void config_open(const char *d)
 }
 
 /* Applies the factory state with the same commands a user would type, so the same code paths run.
- * Still pending stubs (stubs_2b.c: they say "Not supported on this platform yet"): vlan
- * (vlan_create), pvid (port_pvid_set), `vlan 1 mgmt` (port_l2_static_mgmt), `ip dhcp` (dhcp_start). */
+ * Still pending stubs (they say "Not supported on this platform yet": nine lines at every boot
+ * without a configuration): `vlan 1 ...` (vlan_create, 1), one `pvid` per port (port_pvid_set, 6),
+ * `vlan 1 mgmt` (port_l2_static_mgmt, 1), `ip dhcp` (dhcp_start, 1). */
 static void apply_default(void)
 {
 	char cmds[256];
@@ -212,8 +276,8 @@ void config_startup(void)
 {
 	bool empty = true;
 
-	for (const char *p = view; *p; p++)
-		if (*p != ' ' && *p != '\t' && *p != '\r' && *p != '\n')
+	for (size_t i = 0; i < sizeof view && view[i]; i++)	/* view has no NUL when the file filled it */
+		if (view[i] != ' ' && view[i] != '\t' && view[i] != '\r' && view[i] != '\n')
 			empty = false;
 	execute_config();
 	/* execute_config seeds the 8051's default password "1234" before running the file; on Linux
@@ -273,7 +337,7 @@ bool config_save(const uint8_t *text, size_t len)
 		return false;
 	}
 	len = strnlen((const char *)text, len);
-	if (len >= CONFIG_LEN || !rewrite((const char *)text, len, disk, &dlen, hash)) {
+	if (len >= CONFIG_LEN || !rewrite((const char *)text, len, CONFIG_LEN - 1, disk, &dlen, hash)) {
 		fprintf(stderr, "rtlplayground: configuration upload rejected: too large or no hash\n");
 		return false;
 	}
@@ -292,7 +356,7 @@ bool config_save(const uint8_t *text, size_t len)
 		unlink(new_);
 		return false;
 	}
-	if (rename(new_, main_)) {
+	if (getenv("RTLP_TEST_FAIL_INSTALL") ? (errno = EIO, true) : rename(new_, main_)) {	/* the hook fails the rename */
 		fprintf(stderr, "rtlplayground: cannot install %s: %s\n", main_, strerror(errno));
 		rename(bak, main_);	/* back to the old file if there was one */
 		unlink(new_);

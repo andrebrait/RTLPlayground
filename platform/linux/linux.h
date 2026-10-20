@@ -51,6 +51,7 @@ bool auth_has_password(void);
 #define AUTH_HASH_MAX 160
 /* crypt(3) SHA-512 hash of pw with a fresh random salt into out; false (out untouched) on failure. */
 bool auth_hash_password(const char *pw, char out[AUTH_HASH_MAX]);
+bool auth_hash_valid(const char *h);	/* h is a well-formed $6$ hash that fits */
 const char *auth_hash(void);	/* the current hash, "" while no password is set */
 void auth_set_hash(const char *h);	/* h is below AUTH_HASH_MAX; the session survives */
 bool auth_check_password(const char *pw);

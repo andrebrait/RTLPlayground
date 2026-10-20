@@ -69,22 +69,25 @@ printf 'hostname ui\npasswd ********\npasswd newpw\nmtu show\n' > "$RUN/c.txt"
 assert_eq "UI-style POST" 200 "$(post_cfg "$RUN/c.txt")"
 assert_eq "UI read-back equals what it sent" "$(cat "$RUN/c.txt")" "$(get_cfg)"
 grep -qE 'newpw|\*' "$cfg" && { echo "plaintext or asterisks on disk: $(cat "$cfg")"; exit 1; }
-assert_eq "asterisks became the current hash" "passwdhash $oldhash" "$(sed -n 2p "$cfg")"
-[[ $(sed -n 3p "$cfg") =~ ^passwdhash\ \$6\$ && $(sed -n 3p "$cfg") != "passwdhash $oldhash" ]] || { echo "line 3 is not the new hash: $(cat "$cfg")"; exit 1; }
+# only the last password line is written: the asterisks line goes, newpw's hash stays
+assert_eq "one passwdhash line on disk" 1 "$(grep -c '^passwdhash ' "$cfg")"
+assert_eq "line 1 and 3 are the others" $'hostname ui\nmtu show' "$(sed -n '1p;3p' "$cfg")"
+newline=$(sed -n 2p "$cfg")
+[[ $newline =~ ^passwdhash\ \$6\$ && $newline != "passwdhash $oldhash" ]] || { echo "line 2 is not the new hash: $(cat "$cfg")"; exit 1; }
 assert_eq "the session survived the password change" 200 "$(swcurl -b "$jar" -o /dev/null -w '%{http_code}' "$SW_URL/information.json")"
 login bench-pw && { echo "the old password still logs in"; exit 1; }
 login newpw || { echo "the new password does not log in"; exit 1; }
 restart
 assert_eq "after a restart GET /config shows hashes" "hostname ui
-passwdhash $oldhash
-$(sed -n 3p "$cfg")
+$newline
 mtu show" "$(login newpw && get_cfg)"
 login bench-pw && { echo "the old password logs in after a restart"; exit 1; }
 login newpw || { echo "newpw does not log in after a restart"; exit 1; }
 
 # ---- an upload that is too large (also after hashing) or has no file is refused, nothing changes ----
 before=$(cat "$cfg")
-{ for i in $(seq 40); do echo "passwd $(printf 'x%.0s' $(seq 19))$i"; done; } > "$RUN/big.txt"	# ~1 KB in, ~4.7 KB out
+# 4094 bytes in, and the 20-byte passwd line becomes a 117-byte passwdhash line: 4191 bytes out
+{ for i in $(seq 291); do echo "hostname fill"; done; echo "passwd abcdefghijkl"; } > "$RUN/big.txt"
 assert_eq "an upload that grows past the area" 500 "$(post_cfg "$RUN/big.txt")"
 assert_eq "file unchanged after a refused upload" "$before" "$(cat "$cfg")"
 assert_eq "no .new left after a refused upload" "" "$(ls "$SW_CFG" | grep '\.new$')"
@@ -104,13 +107,13 @@ sw_stop; sw_start
 assert_eq "the old config applies" '"hostname":"ui"' "$(login newpw && sw_get information.json | grep -o '"hostname":"[^"]*"')"
 [[ ! -e $SW_CFG/startup-config.new ]] || { echo "the stale .new was not removed"; exit 1; }
 
-# ---- crash between the two renames: .new is complete and .bak holds the old file ----
+# ---- crash between the two renames: the old file (.bak) comes back; .new may be cut short, never used ----
 sw_stop
 mv "$cfg" "$cfg.bak"
-printf 'hostname window\n' > "$cfg.new"
+printf 'hostname win' > "$cfg.new"
 sw_start
-assert_eq "the finished save applies" window "$(sw_cmd hostname)"
-[[ -f $cfg && ! -e $cfg.new ]] || { echo "the interrupted save was not completed"; exit 1; }
+assert_eq "the old file applies, not the .new" ui "$(sw_cmd hostname)"
+cmp -s "$cfg" "$RUN/c.disk" && [[ ! -e $cfg.new ]] || { echo "the interrupted save was not rolled back to the old file"; exit 1; }
 # a lone .new (the first save died while writing) is dropped, not applied
 sw_stop
 rm -f "$cfg" "$cfg.bak"
@@ -144,3 +147,112 @@ get_cfg | cmp -s - "$RUN/crlf.txt" || { echo "CRLF read-back differs"; exit 1; }
 restart
 login crlf-pw || { echo "login with the password from a CRLF file failed"; exit 1; }
 assert_eq "CRLF file: hostname applied" crlf "$(sw_cmd hostname)"
+
+# ======== fix round 1 ========
+curpw=crlf-pw	# the password the daemon has now (post_cfg needs a session for it)
+newest() { login "$curpw" || { echo "login with $curpw failed (line ${BASH_LINENO[0]})"; exit 1; }; }
+
+# ---- CR is a line end, as in execute_config: no plaintext on disk, the password works, read-back equal ----
+cr_case() { # <name> <printf format of the upload> <password it sets>
+	newest
+	printf "$2" > "$RUN/cr.txt"
+	assert_eq "$1: POST" 200 "$(post_cfg "$RUN/cr.txt")"
+	grep -q "$3" "$cfg" && { echo "$1: plaintext password on disk"; exit 1; }
+	get_cfg | cmp -s - "$RUN/cr.txt" || { echo "$1: read-back differs"; exit 1; }
+	curpw=$3; restart
+	login "$3" || { echo "$1: login with the password failed after a restart"; exit 1; }
+	assert_contains "$1: the file ran" "cr" "$(sw_cmd hostname)"
+}
+cr_case "CR inside" 'hostname cra\rpasswd midsecret\n' midsecret
+cr_case "CR only" 'hostname crb\rpasswd cronly\r' cronly
+cr_case "CR CR LF" 'hostname crc\r\npasswd crcr\r\r\n' crcr
+assert_eq "CR CR LF endings are kept" ' \r \r \n' "$(tail -c 3 "$cfg" | od -An -c | tr -s ' ')"
+newest	# the password is crcr, not 'crcr\r'
+
+# ---- only the last password line goes to disk ----
+h1=$(openssl passwd -6 firstpw); h2=$(openssl passwd -6 secondpw)
+printf 'passwdhash %s\nhostname two\npasswdhash %s\n' "$h1" "$h2" > "$RUN/two.txt"
+assert_eq "two passwdhash lines: POST" 200 "$(post_cfg "$RUN/two.txt")"
+assert_eq "two passwdhash lines: one on disk, the last" $'hostname two\npasswdhash '"$h2" "$(cat "$cfg")"
+get_cfg | cmp -s - "$RUN/two.txt" || { echo "two passwdhash lines: read-back differs"; exit 1; }
+login firstpw && { echo "the first of two passwdhash lines is a login"; exit 1; }
+login secondpw || { echo "the last of two passwdhash lines is not the login"; exit 1; }
+printf 'passwdhash %s\nhostname bad\npasswdhash garbage\n' "$h1" > "$RUN/bad.txt"
+assert_eq "valid hash then an invalid one: POST" 200 "$(post_cfg "$RUN/bad.txt")"
+assert_eq "an invalid passwdhash does not displace the valid one" 'passwdhash '"$h1"$'\nhostname bad\npasswdhash garbage' "$(cat "$cfg")"
+curpw=firstpw; newest
+
+# ---- the UI's Save after each password change adds a passwdhash line: 20 cycles stay at one ----
+printf 'hostname cyc\n' > "$RUN/clean.txt"; newest; post_cfg "$RUN/clean.txt" >/dev/null	# drops the garbage line
+for i in $(seq 20); do
+	newest
+	sw_cmd "passwd cyc$i" >/dev/null
+	login "cyc$i" || { echo "cycle $i: login with the new password failed"; exit 1; }	# a password change ends the session
+	{ get_cfg; echo; echo 'passwd ****'; } | tr -s '\n' > "$RUN/cyc.txt"
+	assert_eq "cycle $i: POST" 200 "$(post_cfg "$RUN/cyc.txt")"
+	assert_eq "cycle $i: at most one passwdhash line on disk" 1 "$(grep -c '^passwdhash ' "$cfg")"
+	curpw=cyc$i; restart
+done
+newest
+(( $(stat -c %s "$cfg") < 400 )) || { echo "the file grew to $(stat -c %s "$cfg") bytes in 20 cycles"; exit 1; }
+
+# ---- the password is cut at 20 characters like the shared passwd command ----
+newest
+printf 'hostname cut\npasswd abcdefghijklmnopqrstuvwxy\n' > "$RUN/cut.txt"
+assert_eq "25-character password: POST" 200 "$(post_cfg "$RUN/cut.txt")"
+login abcdefghijklmnopqrstuvwxy && { echo "the full 25 characters log in: not cut"; exit 1; }
+login abcdefghijklmnopqrst || { echo "the first 20 characters do not log in"; exit 1; }
+curpw=abcdefghijklmnopqrst; restart
+login abcdefghijklmnopqrst || { echo "the first 20 characters do not log in after a restart"; exit 1; }
+
+# ---- failures leave the old file, no .new, the old read-back and the old password ----
+nofail() { # <what>: nothing changed since $RUN/before.disk / $beforeget
+	assert_eq "$1: the file is unchanged" 0 "$(cmp -s "$cfg" "$RUN/before.disk"; echo $?)"
+	assert_eq "$1: no .new is left" "" "$(ls "$SW_CFG" | grep '\.new$')"
+	assert_eq "$1: GET /config is still the old text" "$beforeget" "$(get_cfg)"
+	login failpw && { echo "$1: the password of the failed upload is a login"; exit 1; }
+	newest
+}
+cp "$cfg" "$RUN/before.disk"; beforeget=$(get_cfg)
+printf 'hostname failed\npasswd failpw\n' > "$RUN/fail.txt"
+# .bak is a directory: the old file cannot be kept
+rm -f "$cfg.bak"; mkdir -p "$cfg.bak/d"
+assert_eq "cannot keep .bak: POST" 500 "$(post_cfg "$RUN/fail.txt")"
+nofail "cannot keep .bak"
+rm -r "$cfg.bak"
+# .new is a directory: it cannot be written
+mkdir "$cfg.new"
+assert_eq "cannot write .new: POST" 500 "$(post_cfg "$RUN/fail.txt")"
+rmdir "$cfg.new"
+nofail "cannot write .new"
+# the install rename fails (test hook): the old file must be put back
+sw_stop; RTLP_TEST_FAIL_INSTALL=1 sw_start
+newest; beforeget=$(get_cfg)
+assert_eq "failed install: POST" 500 "$(post_cfg "$RUN/fail.txt")"
+nofail "failed install"
+[[ -f $cfg ]] || { echo "failed install: startup-config is gone"; exit 1; }
+sw_stop; sw_start
+
+# ---- an existing --cfg-dir with a lax mode is tightened; one owned by someone else is left alone and reported ----
+sw_stop
+chmod 755 "$SW_CFG"; sw_start
+assert_eq "lax directory mode" 700 "$(stat -c %a "$SW_CFG")"
+sw_stop
+chown 65534 "$SW_CFG"; chmod 755 "$SW_CFG"; : > "$RUN/daemon.log"; sw_start
+assert_eq "directory owned by another user: mode untouched" 755 "$(stat -c %a "$SW_CFG")"
+assert_contains "and said so" "not by us" "$(cat "$RUN/daemon.log")"
+sw_stop
+chown 0 "$SW_CFG"; chmod 700 "$SW_CFG"
+
+# ---- a file of exactly CONFIG_LEN bytes with no NUL runs as it is (like the 8051); more is cut ----
+{ for i in $(seq 291); do echo "hostname seen"; done; echo "hostname abcdefghijkl"; } > "$cfg"	# 4074 + 22 bytes
+assert_eq "test file size" 4096 "$(stat -c %s "$cfg")"
+sw_start
+assert_eq "a 4096-byte file without NUL ran" abcdefghijkl "$(sw_cmd hostname)"
+sw_cmd "passwd p4096" >/dev/null; curpw=p4096	# the file has no password
+newest
+assert_eq "GET /config returns all 4096 bytes" 4096 "$(get_cfg | wc -c)"
+sw_stop
+echo "hostname beyond" >> "$cfg"
+sw_start
+assert_eq "bytes past CONFIG_LEN are not part of the configuration" abcdefghijkl "$(sw_cmd hostname)"
