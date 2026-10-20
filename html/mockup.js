@@ -443,7 +443,7 @@ function jCmds(p,s){
   return c;
 }
 function jUpdate(){
-  var ports=0,cmds=[];
+  var ports=0,lines=[];
   J.rows.forEach(function(r,i){
     var a=J.orig[i],b=jRead(i),row=r.row,dirty=false;
     if(!a)return;
@@ -455,13 +455,28 @@ function jUpdate(){
     });
     row.style.background=dirty?"var(--sel)":"";
     if(r.apply)r.apply.disabled=!dirty;
-    if(dirty){ports++;cmds=cmds.concat(jCmds(S.ports[i],b))}
+    if(dirty){ports++;lines.push(t("c_port")+" "+S.ports[i].portNum+":  "+jCmds(S.ports[i],b).join("; "))}
   });
+  J.pending=ports;
   if(!$("jcount"))return;
-  $("jcount").textContent=ports?ports+" port"+(ports>1?"s":"")+" changed":"No changes";
-  $("jprev").textContent=cmds.join("  \u00b7  ");
+  // one line per changed port, in a read-only box that grows to 6 lines and then scrolls
+  var box=$("jprev");box.value=lines.join("\n");box.rows=Math.min(Math.max(lines.length,1),6);
+  box.style.display=ports?"":"none";
+  $("jcount").textContent=ports?"Pending changes":"No pending changes";
   $("japply").disabled=!ports;
 }
+// Leaving with pending changes: reload/close gets the browser's own prompt, switching tabs gets confirmModal
+window.addEventListener("beforeunload",function(e){if(J.pending){e.preventDefault();e.returnValue=""}});
+var _showTab=showTab;
+showTab=function(id){
+  if(curTab==="ports"&&id!=="ports"&&J.pending){
+    confirmModal("Leave the Ports page?",J.pending+" port"+(J.pending>1?"s have":" has")+" changes that were not applied. Leaving keeps the switch as it is and discards them.",function(){J.pending=0;_showTab(id)});
+    return;
+  }
+  _showTab(id);
+};
+VARIANTS.JDLEAVE=function(){VARIANTS.JD();setTimeout(function(){showTab("stats")},900)};
+VARIANTS.JMDLEAVE=function(){VARIANTS.JMD();setTimeout(function(){showTab("stats")},900)};
 // ROWAPPLY: an Apply button per row (enabled only while that port has changes) instead of the page-wide bar
 var ROWAPPLY=false;
 function rowApply(r){r.apply=h("button",{class:"ctl",text:t("c_apply")});return r.apply}
@@ -472,10 +487,12 @@ function evenSelects(){
   s.forEach(function(e){e.style.width=w+"px"});
 }
 function jBar(){
-  return h("div",{class:"mockx",style:"position:sticky;bottom:0;z-index:5;display:flex;gap:12px;align-items:center;background:var(--panel);border-top:1px solid var(--bd);padding:10px 2px 2px;margin-top:8px"},[
-    h("b",{id:"jcount",style:"white-space:nowrap",text:"No changes"}),
-    h("span",{id:"jprev",class:"mono mut",style:"flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"}),
-    h("button",{class:"ctl pri",id:"japply",text:t("c_apply")})]);
+  return h("div",{class:"mockx",style:"position:sticky;bottom:0;z-index:5;background:var(--panel);border-top:1px solid var(--bd);padding:10px 2px 2px;margin-top:8px"},[
+    h("div",{style:"display:flex;gap:12px;align-items:flex-end"},[
+      h("div",{style:"flex:1;min-width:0"},[
+        h("div",{id:"jcount",class:"small mut",style:"margin-bottom:4px",text:"No pending changes"}),
+        h("textarea",{id:"jprev",class:"in mono",readonly:"",wrap:"off",style:"width:100%;box-sizing:border-box;resize:none;display:none"})]),
+      h("button",{class:"ctl pri",id:"japply",text:t("c_apply")})])]);
 }
 // Edits shown in the screenshots: port 2 renamed, port 3 flow control off, port 5 MTU 9000
 function jDemo(){
