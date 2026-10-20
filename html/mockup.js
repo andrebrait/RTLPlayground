@@ -455,7 +455,7 @@ function jUpdate(){
     });
     row.style.background=dirty?"var(--sel)":"";
     if(r.apply)r.apply.disabled=!dirty;
-    if(dirty){ports++;lines.push(t("c_port")+" "+S.ports[i].portNum+":  "+jCmds(S.ports[i],b).join("; "))}
+    if(dirty){ports++;lines.push(jCmds(S.ports[i],b).join("; "))}
   });
   J.pending=ports;
   if(!$("jcount"))return;
