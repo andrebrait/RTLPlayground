@@ -271,20 +271,17 @@ VARIANTS.N=function(){
 };
 // Link speed details: separate from flow control/EEE, behind an info button next to the link badge
 var LINKINFO=false;
-// shortcut: status.json has no duplex, so a 10M/100M link is shown as full duplex; real code needs the duplex bit
-function linkRow(p){
-  return{1:p.adv&&(parseInt(p.adv,2)&2)?1:0,2:p.adv&&(parseInt(p.adv,2)&8)?3:2,3:4,6:5}[p.link];
-}
 function linkTable(p){
   var d=h("div"),up=p.enabled&&p.link>0,pc="var("+(LINKC[p.link]||"--s1000")+")";
   if(p.isSFP){
     d.appendChild(h("p",{class:"small mut",style:"max-width:16em",text:"SFP ports do not advertise speeds."}));
     return d;
   }
-  var b=parseInt(p.adv||"0",2),n=["10M "+t("c_half"),"10M "+t("c_full"),"100M "+t("c_half"),"100M "+t("c_full"),"1G","2.5G"];
+  // one row per speed, like the port strip: duplex is not shown; adv bits 0-1 = 10M, 2-3 = 100M, 4 = 1G, 5 = 2.5G
+  var a=parseInt(p.adv||"0",2),n=["10M","100M","1G","2.5G"],b=[a&3,a&12,a&16,a&32],link={1:0,2:1,3:2,6:3};
   var tb=h("table",{class:"t",style:"width:auto"}),r=tb.createTHead().insertRow();
   [t("pt_speed"),t("e_adv")].forEach(function(s){r.appendChild(h("th",{text:s}))});
-  var bd=tb.createTBody(),cur=up?linkRow(p):-1;
+  var bd=tb.createTBody(),cur=up?link[p.link]:-1;
   for(var i=n.length-1;i>=0;i--){
     var tr=bd.insertRow(),c0=tr.insertCell(),c1=tr.insertCell();
     c0.textContent=n[i];
@@ -292,7 +289,7 @@ function linkTable(p){
       // same look as the port strip tile for this link speed
       c0.style.cssText="font-weight:650;color:"+pc;
       c1.innerHTML='<span class="badge" title="Current link" style="color:'+pc+';border:1px solid '+pc+';background:color-mix(in srgb,'+pc+' 10%,var(--panel2))">\u2713 '+esc(t("c_link"))+'</span>';
-    }else c1.innerHTML=(b&(1<<i))?badge("\u2713","ok"):'<span class="mut">-</span>';
+    }else c1.innerHTML=b[i]?badge("\u2713","ok"):'<span class="mut">-</span>';
   }
   d.appendChild(tb);
   return d;
