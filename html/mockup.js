@@ -271,27 +271,62 @@ VARIANTS.N=function(){
 };
 // Link speed details: separate from flow control/EEE, behind an info button next to the link badge
 var LINKINFO=false;
+// shortcut: status.json has no duplex, so a 10M/100M link is shown as full duplex; real code needs the duplex bit
+function linkRow(p){
+  return{1:p.adv&&(parseInt(p.adv,2)&2)?1:0,2:p.adv&&(parseInt(p.adv,2)&8)?3:2,3:4,6:5}[p.link];
+}
 function linkTable(p){
-  var d=h("div");
+  var d=h("div"),up=p.enabled&&p.link>0,pc="var("+(LINKC[p.link]||"--s1000")+")";
+  if(p.isSFP){
+    d.appendChild(h("p",{class:"small mut",style:"max-width:16em",text:"SFP ports do not advertise speeds."}));
+    return d;
+  }
   var b=parseInt(p.adv||"0",2),n=["10M "+t("c_half"),"10M "+t("c_full"),"100M "+t("c_half"),"100M "+t("c_full"),"1G","2.5G"];
-  var top=h("div",{style:"display:grid;grid-template-columns:7.5em 1fr;gap:6px 10px;margin-bottom:10px"},[
-    h("span",{class:"mut small",text:t("c_link")}),h("span",{html:linkBadge(p)})]);
-  d.appendChild(top);
-  if(p.isSFP){d.appendChild(h("p",{class:"small mut",text:"SFP ports do not advertise speeds."}));return d}
   var tb=h("table",{class:"t",style:"width:auto"}),r=tb.createTHead().insertRow();
   [t("pt_speed"),t("e_adv")].forEach(function(s){r.appendChild(h("th",{text:s}))});
-  var bd=tb.createTBody();
-  for(var i=n.length-1;i>=0;i--){var tr=bd.insertRow();tr.insertCell().textContent=n[i];tr.insertCell().innerHTML=(b&(1<<i))?badge("\u2713","ok"):'<span class="mut">-</span>'}
+  var bd=tb.createTBody(),cur=up?linkRow(p):-1;
+  for(var i=n.length-1;i>=0;i--){
+    var tr=bd.insertRow(),c0=tr.insertCell(),c1=tr.insertCell();
+    c0.textContent=n[i];
+    if(i===cur){
+      // same look as the port strip tile for this link speed
+      c0.style.cssText="font-weight:650;color:"+pc;
+      c1.innerHTML='<span class="badge" title="Current link" style="color:'+pc+';border:1px solid '+pc+';background:color-mix(in srgb,'+pc+' 10%,var(--panel2))">\u2713 '+esc(t("c_link"))+'</span>';
+    }else c1.innerHTML=(b&(1<<i))?badge("\u2713","ok"):'<span class="mut">-</span>';
+  }
   d.appendChild(tb);
   return d;
 }
+var _modal=modal;
+modal=function(a,b,c){$("modal").style.width="";_modal(a,b,c)};
+function linkModal(p){modal(t("c_port")+" "+p.portNum+": "+t("c_link"),linkTable(p));$("modal").style.width="fit-content"}
 function infoBtn(p){
   return h("button",{title:"Link details",style:"background:none;border:0;padding:0 0 0 6px;cursor:pointer;color:var(--ac);font-size:15px;vertical-align:middle",text:"\u24d8",
-    onclick:function(){modal(t("c_port")+" "+p.portNum+": "+t("c_link"),linkTable(p))}});
+    onclick:function(){linkModal(p)}});
 }
-["F","G","M","N"].forEach(function(v){var f=VARIANTS[v];VARIANTS[v]=function(){LINKINFO=true;f()}});
-VARIANTS.FL=function(){VARIANTS.F();modal(t("c_port")+" 1: "+t("c_link"),linkTable(S.ports[0]))};
-VARIANTS.ML=function(){VARIANTS.M();modal(t("c_port")+" 1: "+t("c_link"),linkTable(S.ports[0]))};
+// H: Advanced button (as in G), but it expands the row instead of opening a modal
+VARIANTS.H=function(){
+  setHead(BASE.map(function(s){return[s]}).concat([[""],[""]]));
+  S.ports.forEach(function(p,idx){
+    var tb=$("ptable").tBodies[0],open=idx===0||idx===S.ports.length-1;
+    var tr=baseRow(tb,p,{before:function(tr){tr.insertCell().appendChild(toggleBtn(open,"Advanced"))}});
+    if(!open)return;
+    var dc=tb.insertRow().insertCell();dc.colSpan=tr.cells.length;dc.style.cssText="background:var(--panel2);padding:6px 8px 10px 52px";
+    dc.appendChild(detailsTable(p,true));
+  });
+};
+// HM: phone version of H: the Advanced button expands the card
+VARIANTS.HM=function(){
+  cardList(function(p,i){
+    var open=i===0,more=h("div",{style:"border-top:1px solid var(--bd);padding-top:8px;margin-top:8px"},[toggleBtn(open,"Advanced")]);
+    if(open)more.appendChild(h("div",{style:"background:var(--panel2);border-radius:6px;padding:0 10px;margin-top:6px"},[detailsList(p,true)]));
+    return[more];
+  });
+};
+["F","G","H","M","N","HM"].forEach(function(v){var f=VARIANTS[v];VARIANTS[v]=function(){LINKINFO=true;f()}});
+VARIANTS.FL=function(){VARIANTS.F();linkModal(S.ports[0])};
+VARIANTS.ML=function(){VARIANTS.M();linkModal(S.ports[0])};
+VARIANTS.FL3=function(){VARIANTS.F();linkModal(S.ports[2])};
 function fcFlags(b){return["Pause","Asym"].filter(function(s,i){return b&(1<<i)}).join(", ")||"-"}
 function mockStatus(){
   fakeData();updateStrip();
