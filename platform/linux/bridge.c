@@ -10,31 +10,46 @@
  *   ingress filter of a port                       see port_ingress_filter()
  *
  * The kernel is the table: every read is a RTM_GETLINK dump (AF_BRIDGE, RTEXT_FILTER_BRVLAN), cached
- * for 250 ms and dropped after each change, so one page that asks for 4094 VLANs costs one dump. Only
- * two things have no home in the bridge and are kept here: the PVID registers (below) and the
+ * for 250 ms and dropped after each command, so one page that asks for 4094 VLANs costs one dump.
+ * Only two things have no home in the bridge and are kept here: the PVID registers (below) and the
  * ingress modes. Every kernel call is checked: a failed change prints an error through cmd_error();
  * vlan_create() puts the entry back as it was.
  *
+ * Start (bridge_init, bridge_commit): a bridge that does not exist is created and given the state
+ * of a booting 8051 (vlan_setup, rtl837x_port.c:350): VLAN 1 with every port an untagged member,
+ * PVID register 1 on every port, ingress mode `any`. A bridge that exists (a daemon restart, or /reset)
+ * is ADOPTED without touching a VLAN or a PVID, so the traffic keeps flowing exactly as it did: the
+ * PVID registers are read back from the kernel, the startup configuration then applies as a diff
+ * (apply_vlan changes only what differs), and bridge_commit() removes the VLANs the configuration
+ * did not create. VLAN 1 is the exception the 8051 makes: it exists at boot unless the configuration
+ * deletes it, so a configuration that says nothing about it gets the boot state of VLAN 1.
+ *
  * States of the 8051 that a bridge cannot hold, and what is done instead:
- *  - A PVID on a VLAN the port is not a member of (port_pvid_set() does not check; the register just
- *    names a VLAN, rtl837x_port.c:107). The port then has no PVID in the bridge, so untagged ingress
- *    is dropped -- as on the chip, whose ingress filter drops the frame because the port is not a
- *    member of the VLAN the PVID names. The register is kept; the PVID flag appears when the port
- *    joins that VLAN (vlan_create) and goes with `vlan <n> d`, as the chip's register would.
- *  - Ingress mode `allow tagged` (VLAN_TAGGED): untagged frames are dropped. Exactly that is a port
- *    without a PVID, so the register is kept and the flag is withheld.
+ *  - A port with NO PVID. The 8051 has such states: a PVID register naming a VLAN the port is not a
+ *    member of (port_pvid_set() does not check, rtl837x_port.c:107; the chip's ingress filter then
+ *    drops untagged frames), the ingress mode `allow tagged` (they are dropped, too), and a port
+ *    whose PVID VLAN was deleted. A bridge port with no PVID drops untagged frames in the software
+ *    bridge, but the hardware offload of the Realtek DSA driver passes them as VID 0 (OpenWrt issue
+ *    25993, open). So no port is ever left without PVID: such a port is PARKED, i.e. it gets
+ *    its own parking VLAN as PVID (untagged member, no other member, not a member of the bridge
+ *    itself) and an untagged frame is dropped on any driver because nobody is there to receive it.
+ *    The parking VLAN of logical port N is 4094 - N (park_vid()); every port has its own, because
+ *    two parked ports in one VLAN would pass frames between them. The VIDs 4094 down to 4094 -
+ *    machine.max_port are reserved for this on Linux (the 8051 parser allows them): vlan_create(),
+ *    vlan_delete() and port_pvid_set() refuse them, vlan_entry_get() reports them as no VLAN, so
+ *    /vlan.json, /vlanlist and `vlan show` never show one. The register of the port is kept; the
+ *    port leaves the parking VLAN when it joins the VLAN the register names and goes back when
+ *    that VLAN is deleted, before the entry is, so there is no moment without a PVID.
+ *    A host can still send frames tagged with its own parking VID: they go nowhere either.
  *  - Ingress mode `allow untagged` (VLAN_UNTAGGED) would drop tagged frames; a bridge has no such
- *    per-port switch, so the request is refused (port_ingress_filter returns false).
+ *    per-port switch, so the request is refused (port_ingress_filter returns false). The 8051
+ *    accepts and sets two bits per port (port_ingress_filter, rtl837x_port.c:69-88).
  *  - Ingress filtering on/off per port (vlan_dump's "Filtering", RTL837X_VLAN_PORT_IGR_FLTR) is always
  *    on: vlan_filtering is a property of the bridge and vlan_setup() (rtl837x_port.c:386) enables it
  *    on every port too.
  *  - The untagged bit of a non-member: the chip stores ~tagged for every port (vlan_create:
  *    `a = ~tagged`), a bridge entry exists only for members. vlan_entry_get() reports untagged =
  *    members that are untagged; the web UI masks the word with the members the same way (app.js:1481).
- *
- * Untagged frames on a port without a PVID are dropped by the kernel's software bridge; the hardware
- * offload of some DSA drivers passes them as VID 0 (OpenWrt issue 25993). Hence bridge_init() gives
- * every port PVID 1 itself, as vlan_setup() does on the 8051, instead of relying on the default config.
  */
 #include <errno.h>
 #include <net/if.h>
@@ -49,8 +64,6 @@
 #include "platform.h"
 #include "linux.h"
 
-#define BR "swbr"
-#define NBOARD 9		/* entries of board_ifnames */
 #define VID_MAX 4094
 #define SNAP_MS 250
 
@@ -60,9 +73,12 @@ extern __xdata uint8_t vlan_names[VLAN_NAMES_SIZE];
 extern const uint8_t * const hex;
 
 /* the 8051 registers that have no bridge counterpart (see the top) */
-static uint16_t pvid_reg[NBOARD];
-static vlan_ingress_mode_t ingress_mode[NBOARD];
+static uint16_t pvid_reg[BOARD_PORTS];
+static vlan_ingress_mode_t ingress_mode[BOARD_PORTS];
 static bool mgmt_active = true;		/* false between the removal and the re-adding of the management entry */
+/* what the startup configuration did, for bridge_commit() */
+static bool created[VID_MAX + 1];
+static bool vlan1_decided;
 
 static struct {
 	uint16_t member[VID_MAX + 1];	/* bit per logical port, bit CPU_PORT = the bridge itself */
@@ -75,23 +91,25 @@ static int snap_if[CPU_PORT + 1];	/* ifindex per logical port while a dump runs;
 
 static bool on_board(uint8_t port)
 {
-	return port < NBOARD && board_ifnames[port];
+	return port < BOARD_PORTS && board_ifnames[port];
 }
 
-static void report(const char *what, int err)
+static uint16_t park_vid(uint8_t port)
 {
-	char msg[160];
+	return VID_MAX - port;
+}
 
-	snprintf(msg, sizeof msg, "%s: %s\n", what, strerror(-err));
-	cmd_error(msg);
+static bool reserved(uint16_t vid)
+{
+	return vid >= park_vid(machine.max_port);
 }
 
 static void report_port(const char *what, uint8_t port, int err)
 {
 	char w[100];
 
-	snprintf(w, sizeof w, "%s on %s", what, port == CPU_PORT ? BR : board_ifnames[port]);
-	report(w, err);
+	snprintf(w, sizeof w, "%s on %s", what, port == CPU_PORT ? SWBR : board_ifnames[port]);
+	nl_error(w, err);
 }
 
 static uint16_t mgmt_vid(void)
@@ -103,6 +121,25 @@ static uint16_t mgmt_vid(void)
 static uint16_t wanted_pvid(uint8_t port)
 {
 	return ingress_mode[port] == VLAN_TAGGED ? 0 : pvid_reg[port];
+}
+
+/* The PVID the port has to have in the bridge: its register's VLAN if it is a member there, else its
+ * parking VLAN. Needs a current snapshot. */
+static uint16_t target_pvid(uint8_t port)
+{
+	uint16_t w = wanted_pvid(port);
+
+	return w && snap.member[w] >> port & 1 ? w : park_vid(port);
+}
+
+static uint16_t board_mask(void)
+{
+	uint16_t m = 0;
+
+	for (uint8_t p = 0; p < BOARD_PORTS; p++)
+		if (on_board(p))
+			m |= 1 << p;
+	return m;
 }
 
 /* ---- the kernel's view ---- */
@@ -153,9 +190,9 @@ static int snap_refresh(void)
 	memset(snap.member, 0, sizeof snap.member);
 	memset(snap.untag, 0, sizeof snap.untag);
 	memset(snap.pvid, 0, sizeof snap.pvid);
-	for (int p = 0; p < NBOARD; p++)
+	for (int p = 0; p < BOARD_PORTS; p++)
 		snap_if[p] = board_ifnames[p] ? if_nametoindex(board_ifnames[p]) : 0;
-	snap_if[CPU_PORT] = if_nametoindex(BR);
+	snap_if[CPU_PORT] = if_nametoindex(SWBR);
 	if (!snap_if[CPU_PORT])
 		return -ENODEV;
 	nlh = nl_msg(buf, RTM_GETLINK, 0);
@@ -170,6 +207,29 @@ static int snap_refresh(void)
 	return 0;
 }
 
+/* The snapshot as the kernel now has it after a successful vlan_op. */
+static void snap_patch(uint16_t type, uint8_t port, uint16_t flags, uint16_t vid)
+{
+	uint16_t bit = 1 << port;
+
+	if (type == RTM_DELLINK) {
+		snap.member[vid] &= ~bit;
+		snap.untag[vid] &= ~bit;
+		if (snap.pvid[port] == vid)
+			snap.pvid[port] = 0;
+		return;
+	}
+	snap.member[vid] |= bit;
+	if (flags & BRIDGE_VLAN_INFO_UNTAGGED)
+		snap.untag[vid] |= bit;
+	else
+		snap.untag[vid] &= ~bit;
+	if (flags & BRIDGE_VLAN_INFO_PVID)
+		snap.pvid[port] = vid;
+	else if (snap.pvid[port] == vid)
+		snap.pvid[port] = 0;
+}
+
 /* Adds (RTM_SETLINK: also changes the flags of an existing entry) or deletes (RTM_DELLINK) one VLAN
  * entry of a port, or of the bridge itself. Deleting what is not there is no error. */
 static int vlan_op(uint16_t type, uint8_t port, uint16_t flags, uint16_t vid)
@@ -182,7 +242,7 @@ static int vlan_op(uint16_t type, uint8_t port, uint16_t flags, uint16_t vid)
 	int rc;
 
 	ifi->ifi_family = AF_BRIDGE;
-	ifi->ifi_index = if_nametoindex(port == CPU_PORT ? BR : board_ifnames[port]);
+	ifi->ifi_index = if_nametoindex(port == CPU_PORT ? SWBR : board_ifnames[port]);
 	if (!ifi->ifi_index)
 		return -ENODEV;
 	spec = mnl_attr_nest_start(nlh, IFLA_AF_SPEC);
@@ -191,8 +251,13 @@ static int vlan_op(uint16_t type, uint8_t port, uint16_t flags, uint16_t vid)
 	mnl_attr_put(nlh, IFLA_BRIDGE_VLAN_INFO, sizeof vi, &vi);
 	mnl_attr_nest_end(nlh, spec);
 	rc = nl_talk(nlh);
-	snap.ok = false;
-	return type == RTM_DELLINK && rc == -ENOENT ? 0 : rc;
+	if (type == RTM_DELLINK && rc == -ENOENT)
+		rc = 0;
+	if (rc)
+		snap.ok = false;
+	else if (snap.ok)
+		snap_patch(type, port, flags, vid);
+	return rc;
 }
 
 static uint16_t entry_flags(uint8_t port, uint16_t vid, uint16_t tagged)
@@ -204,7 +269,8 @@ static uint16_t entry_flags(uint8_t port, uint16_t vid, uint16_t tagged)
 
 /* Makes VLAN vid have exactly these members (bit per logical port, bit CPU_PORT the bridge itself),
  * `tagged` of them as tagged ones; no members deletes the VLAN. Reads the snapshot (call
- * snap_refresh first) and changes only what differs. Returns 0 or -errno, *bad = the port at fault. */
+ * snap_refresh first) and changes only what differs. A port loses its PVID VLAN only after it has
+ * been parked. Returns 0 or -errno, *bad = the port at fault. */
 static int apply_vlan(uint16_t vid, uint16_t members, uint16_t tagged, uint8_t *bad)
 {
 	for (uint8_t p = 0; p <= CPU_PORT; p++) {
@@ -214,11 +280,16 @@ static int apply_vlan(uint16_t vid, uint16_t members, uint16_t tagged, uint8_t *
 
 		if (p != CPU_PORT && !on_board(p))
 			continue;
-		if (want && (!have || (snap.untag[vid] >> p & 1) != !!(fl & BRIDGE_VLAN_INFO_UNTAGGED)
-			     || (snap.pvid[p] == vid) != !!(fl & BRIDGE_VLAN_INFO_PVID)))
-			rc = vlan_op(RTM_SETLINK, p, fl, vid);
-		else if (!want && have)
-			rc = vlan_op(RTM_DELLINK, p, 0, vid);
+		if (want) {
+			if (!have || (snap.untag[vid] >> p & 1) != !!(fl & BRIDGE_VLAN_INFO_UNTAGGED)
+			    || ((fl & BRIDGE_VLAN_INFO_PVID) && snap.pvid[p] != vid))
+				rc = vlan_op(RTM_SETLINK, p, fl, vid);
+		} else if (have) {
+			if (p != CPU_PORT && snap.pvid[p] == vid)
+				rc = vlan_op(RTM_SETLINK, p, BRIDGE_VLAN_INFO_PVID | BRIDGE_VLAN_INFO_UNTAGGED, park_vid(p));
+			if (!rc)
+				rc = vlan_op(RTM_DELLINK, p, 0, vid);
+		}
 		if (rc) {
 			*bad = p;
 			return rc;
@@ -227,19 +298,32 @@ static int apply_vlan(uint16_t vid, uint16_t members, uint16_t tagged, uint8_t *
 	return 0;
 }
 
-/* Brings the PVID flag of a port to wanted_pvid(), if the port is a member of that VLAN. */
-static int pvid_sync(uint8_t port)
+/* Brings a port to its target PVID (parking it or taking it out of its parking VLAN). */
+static int sync_port(uint8_t port)
 {
-	uint16_t have = snap.pvid[port], want = wanted_pvid(port);
+	uint16_t t = target_pvid(port);
+	int rc = 0;
 
-	if (want && !(snap.member[want] >> port & 1))
-		want = 0;
-	if (have == want)
-		return 0;
-	if (want)
-		return vlan_op(RTM_SETLINK, port, BRIDGE_VLAN_INFO_PVID | (snap.untag[want] >> port & 1 ? BRIDGE_VLAN_INFO_UNTAGGED : 0), want);
-	/* the entry is set again without the flag, which takes the PVID off it */
-	return vlan_op(RTM_SETLINK, port, snap.untag[have] >> port & 1 ? BRIDGE_VLAN_INFO_UNTAGGED : 0, have);
+	if (snap.pvid[port] != t)
+		rc = vlan_op(RTM_SETLINK, port, BRIDGE_VLAN_INFO_PVID
+			     | (t == park_vid(port) || snap.untag[t] >> port & 1 ? BRIDGE_VLAN_INFO_UNTAGGED : 0), t);
+	if (!rc && t != park_vid(port) && snap.member[park_vid(port)] >> port & 1)
+		rc = vlan_op(RTM_DELLINK, port, 0, park_vid(port));
+	return rc;
+}
+
+/* Every port; goes on after a failure and returns the first. */
+static int sync_all(void)
+{
+	int rc = 0;
+
+	for (uint8_t p = 0; p < BOARD_PORTS; p++) {
+		int r = on_board(p) ? sync_port(p) : 0;
+
+		if (r && !rc)
+			rc = r;
+	}
+	return rc;
 }
 
 /* ---- bridge lifecycle ---- */
@@ -278,45 +362,61 @@ static void log_fail(const char *what, const char *who, int err)
 }
 
 /*
- * Creates swbr or takes over the one that is there (it keeps switching while the daemon is down),
- * puts every board port in it, and sets the VLAN state a freshly booted 8051 has (vlan_setup,
- * rtl837x_port.c:350): VLAN 1 with every port an untagged member, PVID 1 everywhere, ingress mode
- * `all`. VLANs a previous run left in the bridge are removed, so the startup configuration, not
- * history, decides what exists. A failure is logged and the daemon goes on: the VLAN commands then
- * report the error.
+ * Creates swbr or adopts the one that is there (it keeps switching while the daemon is down) and
+ * puts every board port in it; see the top for what a new and an adopted bridge are given. A failure
+ * is logged and the daemon goes on: the VLAN commands then report the error.
  */
 void bridge_init(void)
 {
-	uint16_t all = 0;
 	uint8_t bad = 0;
-	int rc, br = if_nametoindex(BR);
+	int rc, br = if_nametoindex(SWBR);
+	bool adopted = br != 0;
 
-	rc = link_set(br, BR, true, 0);
+	rc = link_set(br, SWBR, true, 0);
 	if (rc)
-		log_fail(br ? "configure" : "create", BR, rc);
-	br = if_nametoindex(BR);
-	for (uint8_t p = 0; br && p < NBOARD; p++) {
+		log_fail(br ? "configure" : "create", SWBR, rc);
+	br = if_nametoindex(SWBR);
+	for (uint8_t p = 0; br && p < BOARD_PORTS; p++) {
 		if (!board_ifnames[p])
 			continue;
-		all |= 1 << p;
-		pvid_reg[p] = 1;
-		ingress_mode[p] = VLAN_ALL;
 		rc = if_nametoindex(board_ifnames[p]) ? link_set(if_nametoindex(board_ifnames[p]), NULL, false, br) : -ENODEV;
 		if (rc)
 			log_fail("add", board_ifnames[p], rc);
 	}
 	rc = snap_refresh();
-	for (uint16_t vid = 2; !rc && vid <= VID_MAX; vid++)
-		if (snap.member[vid])
-			rc = apply_vlan(vid, 0, 0, &bad);
-	if (!rc) {
-		snap.ok = false;
-		rc = snap_refresh();
+	if (rc) {
+		log_fail("read the VLANs of", SWBR, rc);
+		return;
 	}
+	for (uint8_t p = 0; p < BOARD_PORTS; p++) {
+		/* adopted: the PVID the port has, if it is one a user set (not a parking VLAN, not none) */
+		pvid_reg[p] = adopted && snap.pvid[p] && !reserved(snap.pvid[p]) ? snap.pvid[p] : 1;
+		ingress_mode[p] = VLAN_ALL;
+	}
+	if (!adopted)
+		rc = apply_vlan(1, board_mask() | PMASK_CPU, 0, &bad);
 	if (!rc)
-		rc = apply_vlan(1, all | PMASK_CPU, 0, &bad);
+		rc = sync_all();
 	if (rc)
-		log_fail("set up the VLANs of", BR, rc);
+		log_fail("set up the VLANs of", SWBR, rc);
+	snap.ok = false;
+}
+
+void bridge_commit(void)
+{
+	uint8_t bad = 0;
+	int rc = snap_refresh();
+
+	for (uint16_t vid = 1; !rc && vid <= VID_MAX; vid++)
+		if (!reserved(vid) && snap.member[vid] && !created[vid] && (vid != 1 || vlan1_decided))
+			rc = apply_vlan(vid, 0, 0, &bad);
+	if (!rc && !vlan1_decided)
+		rc = apply_vlan(1, board_mask() | PMASK_CPU, 0, &bad);
+	if (!rc)
+		rc = sync_all();
+	if (rc)
+		log_fail("finish the VLANs of", SWBR, rc);
+	snap.ok = false;
 }
 
 /* ---- management hooks (mgmt.c) ---- */
@@ -331,6 +431,7 @@ int bridge_mgmt_vlan(uint16_t vid, bool active)
 	rc = snap_refresh();
 	if (!rc && (snap.member[vid] >> CPU_PORT & 1))
 		rc = vlan_op(RTM_SETLINK, CPU_PORT, entry_flags(CPU_PORT, vid, 0), vid);
+	snap.ok = false;
 	return rc;
 }
 
@@ -341,7 +442,7 @@ int bridge_mac_get(uint8_t mac[6])
 
 	if (s < 0)
 		return -errno;
-	snprintf(ifr.ifr_name, sizeof ifr.ifr_name, "%s", BR);
+	snprintf(ifr.ifr_name, sizeof ifr.ifr_name, "%s", SWBR);
 	if (ioctl(s, SIOCGIFHWADDR, &ifr) < 0)
 		rc = -errno;
 	else
@@ -357,7 +458,7 @@ int bridge_mac_set(const uint8_t mac[6])
 	struct nlmsghdr *nlh = nl_msg(buf, RTM_NEWLINK, 0);
 	struct ifinfomsg *ifi = mnl_nlmsg_put_extra_header(nlh, sizeof *ifi);
 
-	ifi->ifi_index = if_nametoindex(BR);
+	ifi->ifi_index = if_nametoindex(SWBR);
 	if (!ifi->ifi_index)
 		return -ENODEV;
 	mnl_attr_put(nlh, IFLA_ADDRESS, 6, mac);
@@ -372,6 +473,10 @@ void vlan_create(void) __banked
 	uint8_t bad;
 	int rc;
 
+	if (vid && reserved(vid)) {
+		cmd_error("VLANs from 4094 - the highest logical port number up are reserved here (parking VLANs of ports without PVID)\n");
+		return;
+	}
 	if (!vid || vid >= 0xfff) {
 		print_string("\nInvalid VLAN: "); print_short(vid); write_char('\n');
 		return;
@@ -386,7 +491,7 @@ void vlan_create(void) __banked
 
 	rc = snap_refresh();
 	if (rc) {
-		report("cannot read the bridge VLANs", rc);
+		nl_error("cannot read the bridge VLANs", rc);
 		return;
 	}
 	old_members = snap.member[vid];
@@ -397,7 +502,12 @@ void vlan_create(void) __banked
 		/* back to what it was, as far as that works */
 		if (!snap_refresh())
 			apply_vlan(vid, old_members, old_tagged, &bad);
+	} else {
+		created[vid] = true;
+		vlan1_decided |= vid == 1;
 	}
+	if (!snap_refresh())
+		sync_all();
 	snap.ok = false;
 }
 
@@ -408,12 +518,22 @@ void vlan_delete(uint16_t vlan) __banked
 
 	if (!vlan || vlan >= 0xfff)
 		return;
+	if (reserved(vlan)) {
+		cmd_error("this VLAN is reserved here\n");
+		return;
+	}
 	vlan_name_remove(vlan);
 	rc = snap_refresh();
 	if (!rc)
 		rc = apply_vlan(vlan, 0, 0, &bad);
 	if (rc)
-		report("cannot delete the VLAN", rc);
+		nl_error("cannot delete the VLAN", rc);
+	else {
+		created[vlan] = false;
+		vlan1_decided |= vlan == 1;
+	}
+	if (!snap_refresh())
+		sync_all();
 	snap.ok = false;
 }
 
@@ -426,11 +546,15 @@ void port_pvid_set(uint8_t port, __xdata uint16_t pvid) __banked
 		cmd_error("no such port on this board\n");
 		return;
 	}
+	if (reserved(pvid)) {
+		cmd_error("this VLAN is reserved here\n");
+		return;
+	}
 	old = pvid_reg[port];
 	pvid_reg[port] = pvid;
 	rc = snap_refresh();
 	if (!rc)
-		rc = pvid_sync(port);
+		rc = sync_port(port);
 	if (rc) {
 		pvid_reg[port] = old;
 		report_port("cannot set the PVID", port, rc);
@@ -438,15 +562,13 @@ void port_pvid_set(uint8_t port, __xdata uint16_t pvid) __banked
 	snap.ok = false;
 }
 
+/* The register, as on the 8051 (rtl837x_port.c:135): what the port's untagged frames will join, even
+ * where it is a VLAN the port is not in yet. */
 uint16_t port_pvid_get(uint8_t port) __banked
 {
 	if (port == CPU_PORT)
 		return mgmt_vid();
-	if (!on_board(port))
-		return 1;
-	if (!snap_refresh() && snap.pvid[port])
-		return snap.pvid[port];
-	return pvid_reg[port];
+	return on_board(port) ? pvid_reg[port] : 1;
 }
 
 /* Only the two modes a bridge can hold, see the top. */
@@ -467,7 +589,7 @@ bool port_ingress_filter(__xdata uint8_t port, __xdata vlan_ingress_mode_t type)
 	ingress_mode[port] = type;
 	rc = snap_refresh();
 	if (!rc)
-		rc = pvid_sync(port);
+		rc = sync_port(port);
 	snap.ok = false;
 	if (rc) {
 		ingress_mode[port] = old;
@@ -516,12 +638,13 @@ void vlan_dump(void) __banked
 	print_string("PVID - Assumed VLAN for untagged packets\n");
 }
 
-/* The word layout of platform.h: bit 25 valid, bits 19..10 untagged ports, bits 9..0 members. */
+/* The word layout of platform.h: bit 25 valid, bits 19..10 untagged ports, bits 9..0 members. The
+ * parking VLANs are not VLANs. */
 bool vlan_entry_get(uint16_t vlan) __banked
 {
 	uint32_t word = 0;
 
-	if (vlan && vlan < 0xfff && !snap_refresh() && snap.member[vlan])
+	if (vlan && vlan < 0xfff && !reserved(vlan) && !snap_refresh() && snap.member[vlan])
 		word = 1UL << 25 | (uint32_t)(snap.untag[vlan] & snap.member[vlan] & 0x3ff) << 10 | (snap.member[vlan] & 0x3ff);
 	for (uint8_t i = 0; i < 4; i++)
 		port_buf[i] = word >> (24 - 8 * i);

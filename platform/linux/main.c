@@ -81,6 +81,7 @@ int main(int argc, char **argv)
 	 * history only from here on. */
 	config_open(cfg);
 	config_startup();
+	bridge_commit();
 	if (console) {
 		print_cmd_prompt();
 		console_flush();

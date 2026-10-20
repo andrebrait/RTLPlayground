@@ -3,7 +3,8 @@
 # implementation of platform.h.
 #
 #   make PLATFORM=linux [BOARD=BENCH6]    from the top level, or make here
-#   make test                             the console test
+#   make test                             the unit tests, the console test, the install test
+#   make install DESTDIR=<root>           the daemon, swcli, the web UI, the DHCP script
 #
 # Builds output/rtlplayground (the daemon), output/swcli (its command-line client) and, through the
 # top-level html_min target, the minified web UI in $(ROOT)/output/html_min with a gzip copy
@@ -107,12 +108,26 @@ $(OUT)/test_portlogic: test/test_portlogic.c portlogic.h | $(OUT) $(OUT)/version
 test: all $(addprefix $(OUT)/,$(UNIT))
 	@for t in $(UNIT); do $(OUT)/$$t || exit 1; done
 	sh test/console_test.sh
+	sh test/install_test.sh
+
+# make install DESTDIR=<root>: the daemon, swcli, the web UI and the DHCP script at the paths the
+# daemon's defaults name (--www, --dhcp-script); another PREFIX needs those two options. Root
+# images (the Buildroot package) call this.
+PREFIX  ?= /usr
+SBINDIR  = $(DESTDIR)$(PREFIX)/sbin
+BINDIR   = $(DESTDIR)$(PREFIX)/bin
+DATADIR  = $(DESTDIR)$(PREFIX)/share/rtlplayground
+install: all
+	install -D -m 0755 $(OUT)/rtlplayground $(SBINDIR)/rtlplayground
+	install -D -m 0755 $(OUT)/swcli $(BINDIR)/swcli
+	install -D -m 0755 udhcpc.script $(DATADIR)/udhcpc.script
+	for f in $(WWW)/*; do install -D -m 0644 $$f $(DATADIR)/www/$${f##*/} || exit 1; done
 
 clean:
 	rm -rf $(OUT)
 
 .SECONDARY:
-.PHONY: all test clean FORCE html_min
+.PHONY: all test clean install FORCE html_min
 FORCE:
 
 -include $(OBJS:.o=.d)

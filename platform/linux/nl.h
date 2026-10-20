@@ -22,6 +22,10 @@
 struct nlmsghdr *nl_msg(char *buf, uint16_t type, uint16_t flags);
 /* Sends nlh (NLM_F_REQUEST|NLM_F_ACK added) and waits for the acknowledgement. */
 int nl_talk(struct nlmsghdr *nlh);
+/* Sends nlh (a GET of one object) and runs cb on its single answer message; 0 or -errno. */
+int nl_get(struct nlmsghdr *nlh, mnl_cb_t cb, void *data);
+/* cmd_error("<what>: <strerror(-err)>\n") */
+void nl_error(const char *what, int err);
 /* Sends nlh (NLM_F_REQUEST|NLM_F_DUMP added); cb runs for every message of the answer and
  * returns MNL_CB_OK. */
 int nl_dump(struct nlmsghdr *nlh, mnl_cb_t cb, void *data);

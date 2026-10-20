@@ -14,13 +14,11 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include "nl.h"
 /* the 8051 storage-class shim defines __data, which linux/socket.h uses as a member name */
 #pragma push_macro("__data")
 #undef __data
-#include <libmnl/libmnl.h>
 #include <linux/ethtool.h>
-#include <linux/if_link.h>
-#include <linux/rtnetlink.h>
 #include <linux/sockios.h>
 #pragma pop_macro("__data")
 
@@ -31,11 +29,9 @@
 #include "mibmap.h"
 #include "portlogic.h"
 
-#define NPORTS 9
-
 static const char *ifname_of(uint8_t port)
 {
-	return port < NPORTS ? board_ifnames[port] : NULL;
+	return port < BOARD_PORTS ? board_ifnames[port] : NULL;
 }
 
 /* One integer from /sys/class/net/<ifname of port>/<attr>; 0 for a port the board lacks or an
@@ -396,8 +392,6 @@ void port_media_show(uint8_t port) __banked
  */
 #define MAX_STATS 256	/* driver statistics read per port; a driver with more reads none */
 
-static struct mnl_socket *nl;
-
 static int stats_attr(const struct nlattr *attr, void *data)
 {
 	if (mnl_attr_get_type(attr) == IFLA_STATS64 && mnl_attr_get_payload_len(attr) >= sizeof(struct rtnl_link_stats64))
@@ -414,34 +408,14 @@ static int stats_msg(const struct nlmsghdr *nlh, void *data)
 /* The netdev statistics of the port through one RTM_GETLINK; false (st zeroed) if it fails. */
 static bool link_stats(uint8_t port, struct rtnl_link_stats64 *st)
 {
-	static char buf[32768];
-	static unsigned seq;
-	struct nlmsghdr *nlh = mnl_nlmsg_put_header(buf);
-	struct ifinfomsg *ifi;
-	ssize_t n;
+	char buf[NL_MSG_MAX];
+	struct nlmsghdr *nlh = nl_msg(buf, RTM_GETLINK, 0);
+	struct ifinfomsg *ifi = mnl_nlmsg_put_extra_header(nlh, sizeof *ifi);
 
 	memset(st, 0, sizeof *st);
-	if (!nl) {
-		nl = mnl_socket_open(NETLINK_ROUTE);
-		if (nl && mnl_socket_bind(nl, 0, MNL_SOCKET_AUTOPID) < 0) {
-			mnl_socket_close(nl);
-			nl = NULL;
-		}
-		if (!nl)
-			return false;
-	}
-	nlh->nlmsg_type = RTM_GETLINK;
-	nlh->nlmsg_flags = NLM_F_REQUEST;
-	nlh->nlmsg_seq = ++seq;
-	ifi = mnl_nlmsg_put_extra_header(nlh, sizeof *ifi);
 	ifi->ifi_family = AF_UNSPEC;
 	ifi->ifi_index = if_nametoindex(ifname_of(port));
-	if (!ifi->ifi_index || mnl_socket_sendto(nl, nlh, nlh->nlmsg_len) < 0)
-		return false;
-	n = mnl_socket_recvfrom(nl, buf, sizeof buf);
-	if (n < 0)
-		return false;
-	return mnl_cb_run(buf, n, seq, mnl_socket_get_portid(nl), stats_msg, st) >= 0;
+	return ifi->ifi_index && nl_get(nlh, stats_msg, st) == 0;
 }
 
 static struct {

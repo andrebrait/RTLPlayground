@@ -8,63 +8,11 @@ SW_PASS=benchpass
 jar=$RUN/cookies
 dpid=
 trap '[[ -z $dpid ]] || kill "$dpid" 2>/dev/null' EXIT
+. "$(dirname "$0")/vlan_lib.sh"
+DHCP_SCRIPT=$RUN/udhcpc.script	# a copy the test can change
+mkdir -p "$RUN" && cp "$BENCH_DIR/../udhcpc.script" "$DHCP_SCRIPT" && chmod +x "$DHCP_SCRIPT" || exit 1
 sw_start
 sw_cmd "passwd $SW_PASS" >/dev/null
-rtlp_sw() { ip netns exec rtlp-sw "$@"; }
-ping_ok() { in_host "$1" busybox ping -c 2 -W 2 "$2" >/dev/null 2>&1; }	# host N reaches IP
-swcurl() { rtlp_sw curl -s -m "$SW_TIMEOUT" --max-redirs 0 "$@"; }
-
-# bv: the bridge's VLAN table, one line per port: "<dev> <vid>[:P][:U] ..." (P = PVID, U = egress untagged)
-bv() {
-	rtlp_sw bridge -j vlan show | python3 -c '
-import json, sys
-short = {"PVID": "P", "Egress Untagged": "U"}
-for d in json.load(sys.stdin):
-    print(d["ifname"], " ".join("%d%s" % (v["vlan"], "".join(":" + short[f] for f in v.get("flags", []))) for v in d["vlans"]))
-' || exit 1
-}
-# table <line>...: the expected bv output; ports <first> <last> <entries>: one line for each lanN
-table() { printf '%s\n' "$@"; }
-ports() { local n; for n in $(seq "$1" "$2"); do printf 'lan%s %s\n' "$n" "$3"; done; }
-addrs() { rtlp_sw ip -4 -o addr show dev swbr | awk '{printf "%s%s", s, $4; s=" "}'; }
-defroute() { rtlp_sw ip -4 route show default | awk '{print $1, $2, $3, $4, $5}'; }
-
-cat > "$RUN/seen.py" <<'PY'
-import socket, sys, time
-mac = bytes.fromhex(sys.argv[2].replace(":", ""))
-s = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(3)); s.settimeout(0.1)
-if len(sys.argv) > 3: s.bind((sys.argv[3], 0))
-end = time.time() + float(sys.argv[1]); n = 0
-while time.time() < end:
-    try: f = s.recv(2048)
-    except socket.timeout: continue
-    if f[6:12] == mac and f.endswith(b"x"): n += 1
-print(n)
-PY
-cat > "$RUN/send.py" <<'PY'
-import socket, sys
-s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-if sys.argv[1]: s.setsockopt(socket.SOL_SOCKET, socket.SO_BINDTODEVICE, sys.argv[1].encode())
-for _ in range(5): s.sendto(b"x", ("192.0.2.255", 9))
-PY
-# frames_seen <from> <to|sw> [dev]: host <from> sends 5 broadcast frames (out of its device <dev>, default
-# its own); prints how many of them host <to> (or the bridge itself) received, tagged or not (the
-# frames are told apart by their source MAC)
-frames_seen() {
-	local mac p; mac=$(in_host "$1" cat "/sys/class/net/h$1/address")
-	if [[ $2 == sw ]]; then
-		rtlp_sw python3 "$RUN/seen.py" 1.2 "$mac" swbr > "$RUN/seen" &
-	else
-		in_host "$2" python3 "$RUN/seen.py" 1.2 "$mac" > "$RUN/seen" &
-	fi
-	p=$!
-	sleep 0.4
-	in_host "$1" python3 "$RUN/send.py" "${3:-}" || exit 1
-	wait $p
-	cat "$RUN/seen"
-}
-vlan_json() { sw_get "vlan.json?vid=$1"; }
-
 # ---- the default configuration: VLAN 1, every port an untagged member with PVID 1, the bridge too ----
 assert_eq "swbr: vlan_filtering, default pvid, STP state" "1 0 0" \
 	"$(rtlp_sw cat /sys/class/net/swbr/bridge/vlan_filtering /sys/class/net/swbr/bridge/default_pvid /sys/class/net/swbr/bridge/stp_state | tr '\n' ' ' | sed 's/ $//')"
@@ -93,7 +41,7 @@ out=$(sw_cmd "vlan 1 2 3 4 5 6")
 assert_contains "vlan 1 without port 1" "vlan: 0x0001, members: 0x023e, tagged: 0x0200" "$out"
 out=$(sw_cmd "vlan 10 lab 1 2t")
 assert_contains "vlan 10 prints as the 8051 does" "vlan: 0x000a, members: 0x0203, tagged: 0x0202" "$out"
-assert_eq "port 1 joined VLAN 10, but its PVID register still says 1" "$(table "lan1 10:U" "lan2 1:P:U 10" "$(ports 3 6 1:P:U)" "swbr 1:P:U 10")" "$(bv)"
+assert_eq "port 1 left VLAN 1 and joined VLAN 10, its PVID register still says 1: it is parked" "$(table "lan1 10:U $(pk 1):P:U" "lan2 1:P:U 10" "$(ports 3 6 1:P:U)" "swbr 1:P:U 10")" "$(bv)"
 sw_cmd "pvid 1 10" >/dev/null
 assert_eq "bridge vlan show" "$(table "lan1 10:P:U" "lan2 1:P:U 10" "$(ports 3 6 1:P:U)" "swbr 1:P:U 10")" "$(bv)"
 assert_eq "vlan 10: ports 1 and 2 and the CPU, only port 1 untagged, PVID of port 1" '{"members":"0x2000603","name":"lab","pvid":"0x0001"}' "$(vlan_json 10)"
@@ -107,7 +55,7 @@ ping_ok 2 192.0.2.13 || { echo "vlan 1: host2 does not reach host3"; exit 1; }
 
 # ---- a PVID is a register: it names a VLAN the port may not be in yet ----
 sw_cmd "pvid 3 10" >/dev/null
-assert_eq "pvid 3 10, port 3 not in VLAN 10: no PVID, untagged ingress dropped" "lan3 1:U" "$(bv | grep '^lan3 ')"
+assert_eq "pvid 3 10, port 3 not in VLAN 10: parked in its own VLAN, untagged ingress dropped" "lan3 1:U $(pk 3):P:U" "$(bv | grep '^lan3 ')"
 assert_eq "...host 3's untagged frames reach nobody" 0 "$(frames_seen 3 2)"
 assert_contains "...vlan show still says 10" $'3\t0x000a\tAny' "$(sw_cmd 'vlan show')"
 sw_cmd "vlan 10 lab 1 2t 3" >/dev/null
@@ -121,17 +69,33 @@ ping_ok 3 198.51.100.1 && { echo "pvid 3 1: host3 still reaches host1"; exit 1; 
 # ---- Linux bridge pitfall (OpenWrt #25993): a port without a PVID must drop untagged frames, not put them in VID 0 ----
 assert_eq "control: host 4's frames reach host 5, host 6 and the bridge" "5 5 5" "$(frames_seen 4 5) $(frames_seen 4 6) $(frames_seen 4 sw)"
 sw_cmd "pvid 4 99" >/dev/null
-assert_eq "pvid 4 99: port 4 has no PVID" "lan4 1:U" "$(bv | grep '^lan4 ')"
-assert_eq "no PVID: host 4's untagged frames reach nobody (host 5)" 0 "$(frames_seen 4 5)"
-assert_eq "no PVID: ...nor host 6 (no VID 0 leak)" 0 "$(frames_seen 4 6)"
-assert_eq "no PVID: ...nor the bridge itself" 0 "$(frames_seen 4 sw)"
+assert_eq "pvid 4 99: port 4 is parked" "lan4 1:U $(pk 4):P:U" "$(bv | grep '^lan4 ')"
+assert_eq "parked: host 4's untagged frames reach nobody (host 5)" 0 "$(frames_seen 4 5)"
+assert_eq "parked: ...nor host 6 (no VID 0 leak)" 0 "$(frames_seen 4 6)"
+assert_eq "parked: ...nor the bridge itself" 0 "$(frames_seen 4 sw)"
+# the parking VLANs (4089..4094 on this board) are not VLANs: not on any page, not usable
+assert_eq "vlan.json of port 4's parking VLAN: no VLAN" '{"members":"0x0","name":"","pvid":"0x0000"}' "$(vlan_json "$(pk 4)")"
+list=$(sw_get vlanlist)
+for n in 1 2 3 4 5 6; do [[ $list != *"\"id\":$(pk $n),"* && $list != *"\"id\":$(pk $n)}"* ]] || { echo "parking VLAN $(pk $n) is in /vlanlist: $list"; exit 1; }; done
+assert_eq "/vlanlist while a port is parked" '{"mgmt":1,"vlan":[{"id":1,"name":""},{"id":10,"name":"lab"}]}' "$list"
+out=$(sw_cmd "vlan show")
+[[ $out != *0x0ff* ]] || { echo "a parking VLAN is in vlan show: $out"; exit 1; }
+assert_contains "vlan show still shows the register of port 4" $'4\t0x0063\tAny' "$out"
+assert_contains "vlan 4094 is refused" "Error: VLANs from 4094 - the highest logical port number up are reserved" "$(sw_cmd 'vlan 4094 1')"
+assert_contains "vlan 4089 is refused" "are reserved" "$(sw_cmd 'vlan 4089 1')"
+assert_contains "vlan 4094 d is refused" "Error: this VLAN is reserved here" "$(sw_cmd 'vlan 4094 d')"
+assert_contains "pvid 1 4094 is refused" "Error: this VLAN is reserved here" "$(sw_cmd 'pvid 1 4094')"
+assert_eq "...port 1 is as it was" "lan1 10:P:U" "$(bv | grep '^lan1 ')"
+assert_contains "vlan 4088 is the highest user VLAN" "vlan: 0x0ff8, members: 0x0202, tagged: 0x0200" "$(sw_cmd 'vlan 4088 2')"
+assert_contains "...it shows" '{"id":4088,"name":""}' "$(sw_get vlanlist)"
+sw_cmd "vlan 4088 d" >/dev/null
 sw_cmd "pvid 4 1" >/dev/null
-assert_eq "pvid 4 1: PVID back" "lan4 1:P:U" "$(bv | grep '^lan4 ')"
+assert_eq "pvid 4 1: PVID back, the parking entry is gone" "lan4 1:P:U" "$(bv | grep '^lan4 ')"
 assert_eq "...and the frames flow again" 5 "$(frames_seen 4 5)"
 
 # ---- ingress modes ----
 assert_eq "ingress 5t" "Port 5 ingress filter set to: Tagged" "$(sw_cmd "ingress 5t")"
-assert_eq "tagged only: port 5 keeps its VLAN but not its PVID" "lan5 1:U" "$(bv | grep '^lan5 ')"
+assert_eq "tagged only: port 5 keeps its VLAN and is parked" "lan5 1:U $(pk 5):P:U" "$(bv | grep '^lan5 ')"
 assert_contains "vlan show: Tagged" $'5\t0x0001\tTagged\tEnabled' "$(sw_cmd 'vlan show')"
 assert_eq "tagged only: untagged frames of host 5 are dropped" 0 "$(frames_seen 5 6)"
 in_host 5 ip link add link h5 name h5.1 type vlan id 1 && in_host 5 ip link set h5.1 up || exit 1
@@ -145,7 +109,10 @@ assert_contains "...and the shared command says so" "Error: cannot set the ingre
 assert_contains "...the mode did not change" $'5\t0x0001\tAny\tEnabled' "$(sw_cmd 'vlan show')"
 assert_eq "...nor the bridge" "lan5 1:P:U" "$(bv | grep '^lan5 ')"
 assert_contains "ingress t: all ports" "All ports ingress filter set to: Tagged" "$(sw_cmd 'ingress t')"
-assert_eq "all ports tagged only: no PVID on a port (only the bridge's own)" 1 "$(bv | grep -c ':P')"
+assert_eq "all ports tagged only: every port is parked in its own VLAN" "$(table "lan1 10:U $(pk 1):P:U" "lan2 1:U 10 $(pk 2):P:U" "lan3 1:U 10:U $(pk 3):P:U" "lan4 1:U $(pk 4):P:U" "lan5 1:U $(pk 5):P:U" "lan6 1:U $(pk 6):P:U" "swbr 1:P:U 10")" "$(bv)"
+assert_eq "...untagged frames of host 4 reach neither parked host 5 nor parked host 6" "0 0" "$(frames_seen 4 5) $(frames_seen 4 6)"
+assert_eq "...nor the bridge" 0 "$(frames_seen 4 sw)"
+ping_ok 5 192.0.2.16 && { echo "two parked ports reach each other"; exit 1; }
 sw_cmd "ingress a" >/dev/null
 assert_eq "ingress a: back" "$(table "lan1 10:P:U" "lan2 1:P:U 10" "lan3 1:P:U 10:U" "$(ports 4 6 1:P:U)" "swbr 1:P:U 10")" "$(bv)"
 
@@ -171,14 +138,32 @@ assert_eq "/vlanlist after it: the name is gone too" '{"mgmt":1,"vlan":[{"id":1,
 
 # ---- vlan_mgmt_removed_console_alive (Review Focus 1): no VLAN 1 anywhere, the management VLAN is VLAN 1 ----
 sw_cmd "pvid 1 1" >/dev/null
+# watch the kernel's VLAN events (a probe entry tells when the monitor is listening)
+rtlp_sw timeout 10 stdbuf -oL bridge monitor all > "$RUN/mon.log" 2>&1 &
+mon=$!
+for _ in $(seq 100); do
+	rtlp_sw bridge vlan add vid 99 dev lan6 && rtlp_sw bridge vlan del vid 99 dev lan6 || exit 1
+	grep -q '^\[VLAN\]lan6 *99' "$RUN/mon.log" && break
+	sleep 0.05
+done
+grep -q '^\[VLAN\]lan6 *99' "$RUN/mon.log" || { echo "the bridge monitor does not report"; exit 1; }
 assert_eq "vlan 1 d" "" "$(sw_cmd 'vlan 1 d')"
-assert_eq "no VLAN at all: not on a port, not on the bridge" "" "$(bv)"
+sleep 0.3
+kill "$mon" 2>/dev/null; wait "$mon" 2>/dev/null
+for n in 2 3 4 5 6; do	# (port 1 is not in VLAN 1 any more)
+	parked=$(grep -n "^\[VLAN\]lan$n *$(pk $n) PVID" "$RUN/mon.log" | head -1 | cut -d: -f1)
+	gone=$(grep -n "^\[VLAN\]Deleted lan$n *1\$" "$RUN/mon.log" | head -1 | cut -d: -f1)
+	[[ -n $parked && -n $gone ]] || { echo "lan$n: no park ($parked) or delete ($gone) event"; cat "$RUN/mon.log"; exit 1; }
+	(( parked < gone )) || { echo "lan$n lost VLAN 1 (event $gone) before it was parked (event $parked): a moment without PVID"; exit 1; }
+done
+assert_eq "no VLAN at all: every port parked in its own VLAN, nothing on the bridge" "$(for n in 1 2 3 4 5 6; do echo "lan$n $(pk $n):P:U"; done)" "$(bv)"
 assert_contains "swcli still answers" "Unknown command" "$(sw_cmd foo)"
 assert_contains "the console still answers" "Unknown command" "$(sw_console foo)"
 kill -0 "$(cat "$RUN/pid")" || { echo "the daemon died"; exit 1; }
 assert_eq "/vlanlist: management VLAN 1, no VLAN" '{"mgmt":1,"vlan":[]}' "$(sw_get vlanlist)"
 assert_contains "vlan show works" "Ingress VLAN configuration:" "$(sw_cmd 'vlan show')"
 ping_ok 1 192.0.2.12 && { echo "hosts reach each other with no VLAN"; exit 1; }
+assert_eq "no VLAN: host 1's untagged frames reach nobody" "0 0" "$(frames_seen 1 2) $(frames_seen 1 sw)"
 sw_cmd "vlan 1 1 2 3 4 5 6" >/dev/null
 assert_eq "recreated VLAN 1: the PVID registers are in force again, swbr is the management entry again" "$(table "$(ports 1 6 1:P:U)" "swbr 1:P:U")" "$(bv)"
 ping_ok 1 192.0.2.12 || { echo "recreated VLAN 1: host1 does not reach host2"; exit 1; }
@@ -213,6 +198,18 @@ lease_file $RUN/udhcpd.leases
 pidfile $RUN/udhcpd.pid
 EOF
 : > "$RUN/udhcpd.leases"
+# another interface's default route (dummy0, first in the table): nothing swbr does may touch it
+rtlp_sw ip link add dummy0 type dummy && rtlp_sw ip addr add 203.0.113.2/24 dev dummy0 && rtlp_sw ip link set dummy0 up || { echo "no dummy interface"; exit 1; }
+rtlp_sw ip route prepend default via 203.0.113.1 dev dummy0 metric 0 || exit 1
+# `ip dhcp` takes a static address away at once (no server answers yet): the client starts from nothing.
+# The script does nothing for this (its `deconfig` would flush the address, too, a moment later).
+printf '#!/bin/sh\nexit 0\n' > "$DHCP_SCRIPT"
+sw_cmd "ip 192.0.2.50" >/dev/null
+assert_eq "a static address, no DHCP" "192.0.2.50/32" "$(addrs)"
+sw_cmd "ip dhcp" >/dev/null
+assert_eq "ip dhcp flushes the static address from swbr" "" "$(addrs)"
+assert_eq "...and ip shows none" "Current IP: 0.0.0.0 (static)" "$(sw_cmd ip)"
+cp "$BENCH_DIR/../udhcpc.script" "$DHCP_SCRIPT"
 ip netns exec rtlp-h1 busybox udhcpd -f "$RUN/udhcpd.conf" 2>>"$RUN/udhcpd.log" &	# not in_host: $! must be the server itself
 dpid=$!
 sleep 0.5
@@ -233,6 +230,7 @@ assert_contains "information.json: gateway" '"ip_gateway":"192.0.2.11"' "$info"
 assert_contains "information.json: netmask" '"ip_netmask":"255.255.255.0"' "$info"
 assert_contains "information.json: MAC" '"mac_address":"00:11:22:33:44:55"' "$info"
 assert_eq "gw shows the router" "Current gw: 192.0.2.11" "$(sw_cmd gw)"
+assert_eq "the lease's route is swbr's own: dummy0's default route is still there" "default via 203.0.113.1 dev dummy0" "$(dummy_route)"
 ping_ok 2 "$lease" || { echo "host2 does not reach the management address $lease"; exit 1; }
 ping_ok 1 "$lease" || { echo "host1 does not reach the management address $lease"; exit 1; }
 assert_contains "static values are refused while DHCP is on" "Error: ip, netmask and gw come from DHCP" "$(sw_cmd 'gw 192.0.2.99')"
@@ -271,11 +269,39 @@ assert_eq "...and the address" "192.0.2.50/24" "$(addrs)"
 assert_contains "a netmask with a hole is an error" "Error: the netmask must be a run of one bits" "$(sw_cmd 'netmask 255.0.255.0')"
 assert_eq "...netmask is still /24" "Current netmask: 255.255.255.0" "$(sw_cmd netmask)"
 assert_eq "...on swbr too" "192.0.2.50/24" "$(addrs)"
+# a gateway the address or netmask moves away from is kept, with a warning, and comes back with the route
+out=$(sw_cmd "netmask 255.255.255.240")
+assert_contains "netmask /28: the gateway is out of reach" "Warning: the gateway is not reachable through this address and netmask" "$out"
+assert_eq "...the address is /28" "192.0.2.50/28" "$(addrs)"
+assert_eq "...gw is still reported" "Current gw: 192.0.2.11" "$(sw_cmd gw)"
+assert_eq "...information.json too" '"ip_gateway":"192.0.2.11"' "$(sw_get information.json | grep -o '"ip_gateway":"[^"]*"')"
+assert_eq "...no route" "" "$(defroute)"
+assert_eq "...ip shows the address" "Current IP: 192.0.2.50 (static)" "$(sw_cmd ip)"
+sw_cmd "netmask 255.255.255.0" >/dev/null
+assert_eq "netmask /24 again: the route is back" "default via 192.0.2.11 dev swbr" "$(defroute)"
+assert_eq "...gw unchanged" "Current gw: 192.0.2.11" "$(sw_cmd gw)"
+sw_cmd "ip 192.0.2.200" >/dev/null	# same subnet: stays
+assert_eq "a new address in the subnet keeps the route" "192.0.2.200/24 default via 192.0.2.11 dev swbr" "$(addrs) $(defroute)"
+out=$(sw_cmd "ip 198.51.100.7")
+assert_contains "an address outside the gateway's subnet warns" "Warning: the gateway is not reachable" "$out"
+assert_eq "...gw kept, no route" "Current gw: 192.0.2.11|" "$(sw_cmd gw)|$(defroute)"
+sw_cmd "ip 192.0.2.50" >/dev/null
+assert_eq "back in the subnet: the route is back" "192.0.2.50/24 default via 192.0.2.11 dev swbr" "$(addrs) $(defroute)"
+# swbr's default route is its own: one through another interface is left alone
+sw_cmd "gw 192.0.2.12" >/dev/null
+assert_eq "gw: swbr's route changes" "default via 192.0.2.12 dev swbr" "$(defroute)"
+assert_eq "...dummy0's route is still there" "default via 203.0.113.1 dev dummy0" "$(dummy_route)"
+sw_cmd "netmask 255.255.255.128" >/dev/null
+assert_eq "netmask: swbr's route is re-made, dummy0's is still there" "default via 203.0.113.1 dev dummy0" "$(dummy_route)"
+assert_eq "...swbr's gw route is there" "default via 192.0.2.12 dev swbr" "$(defroute)"
+sw_cmd "gw 192.0.2.11" >/dev/null
+sw_cmd "netmask 255.255.255.0" >/dev/null
 # the web UI sends ip, netmask and gw in one go
 swcurl -c "$jar" -d "pwd=$SW_PASS" -o /dev/null "$SW_URL/login"
 out=$(swcurl -b "$jar" --data-binary $'ip 192.0.2.60\nnetmask 255.255.255.128\ngw 192.0.2.11' "$SW_URL/cmd")
 assert_eq "one /cmd with all three: address, mask and route ($out)" "192.0.2.60/25 default via 192.0.2.11 dev swbr" "$(addrs) $(defroute)"
 assert_eq "ip 0.0.0.0 removes the address" "" "$(sw_cmd 'ip 0.0.0.0' >/dev/null; addrs)"
+assert_eq "...and dummy0's default route survived every change" "default via 203.0.113.1 dev dummy0" "$(dummy_route)"
 
 # DHCP again, then the daemon ends: SIGTERM stops the client
 sw_cmd "ip dhcp" >/dev/null

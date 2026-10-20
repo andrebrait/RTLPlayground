@@ -7,8 +7,11 @@
 RUN=${RTLP_BENCH_RUN:-/run/rtlp-bench}
 if [ -r "$RUN/pid" ]; then
 	pid=$(cat "$RUN/pid")
-	# Only kill what the pidfile still names as our daemon (the pid may be reused).
-	[ "$(cat /proc/$pid/comm 2>/dev/null)" = rtlplayground ] && kill -KILL "$pid" 2>/dev/null
+	# Only kill what the pidfile still names as our daemon (the pid may be reused). The executable,
+	# not the process name: after /reset the daemon has exec'd /proc/self/exe and its name is "exe".
+	case $(readlink /proc/$pid/exe 2>/dev/null) in
+	*/rtlplayground) kill -KILL "$pid" 2>/dev/null ;;
+	esac
 fi
 owned=$(cat "$RUN/owner" 2>/dev/null)
 [ "$1" = --force ] && owned="$owned rtlp-sw rtlp-h1 rtlp-h2 rtlp-h3 rtlp-h4 rtlp-h5 rtlp-h6"

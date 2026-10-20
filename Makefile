@@ -1,7 +1,7 @@
 ifeq ($(PLATFORM),linux)
 # The Linux daemon is built by its own makefile; BOARD and the goal pass through.
-.PHONY: all test clean
-all test clean:
+.PHONY: all test clean install
+all test clean install:
 	$(MAKE) -C platform/linux $@
 else
 

@@ -10,8 +10,11 @@
  * back). The result is read back from the kernel into the three variables, so what `ip` prints and
  * information.json reports is what is configured. A failure prints an error through cmd_error().
  *   - Netmask 0.0.0.0 (nothing set yet) gives a /32. A netmask or gateway typed while there is no
- *     address stays stored and applies with the address. A gateway that is not reachable through
- *     the address and netmask in force is an error (the kernel refuses the route).
+ *     address stays stored and applies with the address. A gateway that is typed and not reachable
+ *     through the address and netmask in force is an error (the kernel refuses the route) and the
+ *     old one stays. A gateway that BECOMES unreachable because the address or netmask moved away
+ *     from it is kept (stored, reported by `gw`, no route) with a warning, and the route comes back
+ *     when a later change makes it reachable. The default route is only ever swbr's own.
  *
  * DHCP is BusyBox `udhcpc -i swbr -f -S -s <script>`, a child of the daemon. The script
  * (udhcpc.script next to this file; --dhcp-script) puts the lease on swbr, valid for the lease
@@ -42,7 +45,6 @@
 #include "uip/uip.h"
 #include "dhcp.h"
 
-#define BR "swbr"
 #define RESPAWN_MS 5000
 #define LEASE_POLL_MS 1000
 #define MAX_ADDRS 16
@@ -74,14 +76,6 @@ static uint32_t rd(const uip_ipaddr_t a)
 static void wr(uip_ipaddr_t a, uint32_t v)
 {
 	memcpy(a, &v, 4);
-}
-
-static void report(const char *what, int err)
-{
-	char msg[160];
-
-	snprintf(msg, sizeof msg, "%s: %s\n", what, strerror(-err));
-	cmd_error(msg);
 }
 
 static uint32_t mask_of(unsigned plen)
@@ -151,7 +145,7 @@ static int kernel_view(struct kview *v, bool routes)
 	int rc;
 
 	memset(v, 0, sizeof *v);
-	v->ifx = if_nametoindex(BR);
+	v->ifx = if_nametoindex(SWBR);
 	if (!v->ifx)
 		return -ENODEV;
 	ifa->ifa_family = AF_INET;
@@ -211,7 +205,7 @@ static int add_addr(uint32_t host, uint8_t plen)
 
 	ifa->ifa_family = AF_INET;
 	ifa->ifa_prefixlen = plen;
-	ifa->ifa_index = if_nametoindex(BR);
+	ifa->ifa_index = if_nametoindex(SWBR);
 	if (!ifa->ifa_index)
 		return -ENODEV;
 	mnl_attr_put_u32(nlh, IFA_LOCAL, host);
@@ -221,10 +215,12 @@ static int add_addr(uint32_t host, uint8_t plen)
 	return nl_talk(nlh);
 }
 
+/* The default route of swbr. APPEND, not REPLACE: the kernel's REPLACE swaps whatever default route
+ * has the same metric, also one through another interface, which is not ours to touch. */
 static int add_route(uint32_t gw)
 {
 	char buf[NL_MSG_MAX];
-	struct nlmsghdr *nlh = nl_msg(buf, RTM_NEWROUTE, NLM_F_CREATE | NLM_F_REPLACE);
+	struct nlmsghdr *nlh = nl_msg(buf, RTM_NEWROUTE, NLM_F_CREATE | NLM_F_APPEND);
 	struct rtmsg *rtm = mnl_nlmsg_put_extra_header(nlh, sizeof *rtm);
 
 	rtm->rtm_family = AF_INET;
@@ -233,7 +229,7 @@ static int add_route(uint32_t gw)
 	rtm->rtm_scope = RT_SCOPE_UNIVERSE;
 	rtm->rtm_type = RTN_UNICAST;
 	mnl_attr_put_u32(nlh, RTA_GATEWAY, gw);
-	mnl_attr_put_u32(nlh, RTA_OIF, if_nametoindex(BR));
+	mnl_attr_put_u32(nlh, RTA_OIF, if_nametoindex(SWBR));
 	return nl_talk(nlh);
 }
 
@@ -252,7 +248,8 @@ void mgmt_apply(void)
 {
 	struct kip want = { rd(uip_hostaddr), rd(uip_netmask), rd(uip_draddr), UINT32_MAX }, got;
 	struct kview old;
-	uint32_t m;
+	uint32_t m, prev_gw = acc.gw;
+	bool restore = false;
 	int rc;
 
 	if (want.host == acc.host && want.mask == acc.mask && want.gw == acc.gw)
@@ -272,7 +269,7 @@ void mgmt_apply(void)
 	if (!rc)
 		rc = flush_addrs();
 	if (rc) {
-		report("cannot change the address of " BR, rc);
+		nl_error("cannot change the address of " SWBR, rc);
 		adopt(&acc);
 		return;
 	}
@@ -282,23 +279,33 @@ void mgmt_apply(void)
 	}
 	rc = add_addr(want.host, want.mask ? __builtin_popcount(m) : 32);
 	if (rc) {
-		report("cannot set the address of " BR, rc);
+		nl_error("cannot set the address of " SWBR, rc);
 		/* the kernel refused the new address: put the old one back */
 		for (int i = 0; i < old.n; i++)
 			add_addr(old.local[i], old.plen[i]);
-		if (old.n && old.gw)
-			add_route(old.gw);
+		restore = true;
 	} else if (want.gw && (rc = add_route(want.gw))) {
-		report("cannot set the gateway", rc);
-		if (old.gw)
-			add_route(old.gw);
+		if (want.gw != prev_gw) {	/* a gateway that was just typed: refused, the old one stays */
+			nl_error("cannot set the gateway", rc);
+			restore = true;
+		} else {	/* the address or netmask moved away from it: it stays, until it is reachable again */
+			print_string("Warning: the gateway is not reachable through this address and netmask; it is kept"
+				     " and applied as soon as it is\n");
+		}
 	}
+	if (restore && old.n && prev_gw && old.gw == prev_gw)
+		add_route(prev_gw);
 	rc = kernel_ip(&got);
 	if (rc) {
-		report("cannot read the address of " BR, rc);
+		nl_error("cannot read the address of " SWBR, rc);
 		return;
 	}
 	adopt(&got);
+	/* the gateway the user has is the one in force, or the one waiting for the address to fit */
+	if (restore ? prev_gw : want.gw) {
+		got.gw = restore ? prev_gw : want.gw;
+		adopt(&got);
+	}
 }
 
 /* ---- DHCP ---- */
@@ -319,7 +326,7 @@ static int spawn_udhcpc(void)
 		return err;
 	}
 	if (!pid) {
-		int null = open("/dev/null", O_RDWR);
+		int null = open("/dev/null", O_RDWR | O_CLOEXEC);
 
 		prctl(PR_SET_PDEATHSIG, SIGKILL);
 		signal(SIGPIPE, SIG_DFL);
@@ -327,7 +334,7 @@ static int spawn_udhcpc(void)
 			dup2(null, 0);
 			dup2(null, 1);
 		}
-		execlp("busybox", "busybox", "udhcpc", "-i", BR, "-f", "-S", "-s", script, (char *)NULL);
+		execlp("busybox", "busybox", "udhcpc", "-i", SWBR, "-f", "-S", "-s", script, (char *)NULL);
 		err = errno;
 		n = write(ep[1], &err, sizeof err);
 		(void)n;
@@ -372,7 +379,7 @@ void dhcp_start(void) __banked
 	if (!rc)
 		rc = spawn_udhcpc();
 	if (rc) {
-		report("cannot start the DHCP client", rc);
+		nl_error("cannot start the DHCP client", rc);
 		dhcp_state.state = DHCP_OFF;
 		return;
 	}
@@ -472,7 +479,7 @@ void mgmt_init(const char *dhcp_script)
 		rc = bridge_mac_set(mac);	/* pins it */
 	}
 	if (rc)
-		fprintf(stderr, "rtlplayground: management interface " BR ": %s\n", strerror(-rc));
+		fprintf(stderr, "rtlplayground: management interface " SWBR ": %s\n", strerror(-rc));
 }
 
 /* ---- the management VLAN and MAC ---- */
@@ -491,16 +498,19 @@ void port_l2_static_mgmt(__xdata uint8_t *mac, __xdata uint16_t vlan, __xdata bo
 		rc = bridge_mgmt_vlan(vlan, false);
 	} else {
 		uint8_t cur[6];
+		int mac_rc = bridge_mac_get(cur);
 
-		rc = bridge_mac_get(cur);
-		if (!rc && memcmp(cur, mac, 6) && (mac[0] | mac[1] | mac[2] | mac[3] | mac[4] | mac[5])) {
-			rc = bridge_mac_set(mac);
-			if (rc)
+		if (!mac_rc && memcmp(cur, mac, 6) && (mac[0] | mac[1] | mac[2] | mac[3] | mac[4] | mac[5])) {
+			mac_rc = bridge_mac_set(mac);
+			if (mac_rc)
 				memcpy(mac, cur, 6);	/* the shared variable keeps what the bridge has */
 		}
+		/* the management entry is moved whatever became of the MAC: the console must not be left
+		 * without its VLAN because the address was refused */
+		rc = bridge_mgmt_vlan(vlan, true);
 		if (!rc)
-			rc = bridge_mgmt_vlan(vlan, true);
+			rc = mac_rc;
 	}
 	if (rc)
-		report("cannot set the management entry of " BR, rc);
+		nl_error("cannot set the management entry of " SWBR, rc);
 }

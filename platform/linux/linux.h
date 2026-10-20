@@ -9,6 +9,8 @@
 /* Netdev name per logical port, NULL for a logical port the board does not have. Defined
  * by boards/<BOARD>.c together with `machine`. */
 extern const char *const board_ifnames[];
+#define BOARD_PORTS 9		/* the entries of board_ifnames and of the struct machine arrays */
+#define SWBR "swbr"		/* the bridge, which is also the management interface */
 
 /* Console output: where print_string()/write_char() write. Output is buffered; the poll loop
  * flushes before it sleeps, console_set_fd() flushes what is pending to the old fd. */
@@ -81,6 +83,9 @@ void ports_init(void);
  * bridge's own entry for VLAN vid (if that VLAN exists) the management one (active) or an
  * ordinary tagged one: 0 or -errno. */
 void bridge_init(void);
+/* After the startup configuration: with an adopted bridge, removes the VLANs the configuration did
+ * not create and gives VLAN 1 the state of a booting 8051 unless the configuration decided it. */
+void bridge_commit(void);
 int bridge_mgmt_vlan(uint16_t vid, bool active);
 int bridge_mac_get(uint8_t mac[6]);
 int bridge_mac_set(const uint8_t mac[6]);
