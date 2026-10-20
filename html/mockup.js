@@ -18,10 +18,12 @@ function sw(on,dis){
 }
 // Off = port or feature switched off; Inactive = switched on but not in use on this link. Labels are capitalised alike.
 LANG.en.e_inactive="Inactive";LANG.de.e_inactive="Inaktiv";LANG.en.st_off="Off";LANG.de.st_off="Aus";LANG.en.st_down="Down";LANG.de.st_down="Getrennt";
-function dash(){return badge(t("st_off"))}
+// Off looks like a disabled port tile in the strip (faded, dashed); Inactive and Down like a port without link (solid outline)
+function dash(){return badge(t("st_off"),"st-off")}
+function inact(s){return badge(s,"st-in")}
 // flow control shows the negotiated direction or Inactive
-function fcNeg(p){var f=FC[p.portNum],n=f>>4&3;return!p.enabled||(!p.isSFP&&!(f&1))?dash():n?badge(["","TX","RX","TX/RX"][n],"ok"):badge(t("e_inactive"))}
-function eeeSt(p){var e=EEE[p.portNum];return p.isSFP?badge(t("e_na")):!p.enabled||!parseInt(e.adv,2)?dash():e.active?badge(t("e_active"),"ok"):badge(t("e_inactive"))}
+function fcNeg(p){var f=FC[p.portNum],n=f>>4&3;return!p.enabled||(!p.isSFP&&!(f&1))?dash():n?badge(["","TX","RX","TX/RX"][n],"ok"):inact(t("e_inactive"))}
+function eeeSt(p){var e=EEE[p.portNum];return p.isSFP?badge(t("e_na")):!p.enabled||!parseInt(e.adv,2)?dash():e.active?badge(t("e_active"),"ok"):inact(t("e_inactive"))}
 function cellWith(tr,kids){var c=tr.insertCell();c.style.whiteSpace="nowrap";kids.forEach(function(k){typeof k==="string"?c.insertAdjacentHTML("beforeend",k):c.appendChild(k)});return c}
 
 function baseRow(tb,p,opt){
@@ -413,8 +415,16 @@ function fitBadges(){
     css+="."+k+" .badge{display:inline-block;box-sizing:border-box;text-align:center;min-width:"+Math.ceil(w)+"px}";
   }
   probe.remove();
+  // ORANGE: Off stays the plain grey badge, Inactive/Down turn orange; otherwise both follow the port strip tiles
+  css+=ORANGE
+    ?".badge.st-in{color:var(--warn);background:color-mix(in srgb,var(--warn) 12%,var(--panel2))}"
+    :".badge.st-off{opacity:.45;outline:1px dashed var(--fg2);outline-offset:-1px}.badge.st-in{outline:1px solid var(--bd);outline-offset:-1px}";
   var st=$("fitcss")||document.head.appendChild(h("style",{id:"fitcss"}));st.textContent=css;
 }
+// ORANGE: Inactive (and Down) in the warning colour instead of the outlined grey
+var ORANGE=false;
+VARIANTS.JDO=function(){ORANGE=true;VARIANTS.JD()};
+VARIANTS.JMDO=function(){ORANGE=true;VARIANTS.JMD()};
 function jFeat(ctl,st,info,p){
   // the n/a badge takes the switch's place, so it gets the switch's width
   return h("span",{style:"white-space:nowrap;display:inline-flex;gap:6px;align-items:center"},
@@ -527,7 +537,7 @@ function mockStatus(){
   S.ports.forEach(function(p){
     var i=p.portNum-1,el=$("plink"+i),mc=$("pmac"+i);
     if(mc)mc.textContent=parseInt(p.macs,16)&0x1fff;
-    if(el){el.innerHTML=!LINKINFO?linkBadge(p):!p.enabled?dash():p.link>0?linkBadge(p):badge(t("st_down"));if(LINKINFO){var w=h("span",{style:"display:inline-flex;align-items:center;white-space:nowrap"},[h("span",{class:"fitlink",html:el.innerHTML}),infoBtn(p)]);el.innerHTML="";el.appendChild(w)}}
+    if(el){el.innerHTML=!LINKINFO?linkBadge(p):!p.enabled?dash():p.link>0?linkBadge(p):inact(t("st_down"));if(LINKINFO){var w=h("span",{style:"display:inline-flex;align-items:center;white-space:nowrap"},[h("span",{class:"fitlink",html:el.innerHTML}),infoBtn(p)]);el.innerHTML="";el.appendChild(w)}}
   });
 }
 function mock(v){
