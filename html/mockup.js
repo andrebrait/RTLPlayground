@@ -3,7 +3,7 @@
 LANG.en.nav_fc="Flow control";LANG.en.fc_title="Flow control (802.3x pause)";LANG.en.fc_neg="Negotiated";
 var FC={}, EEE={};
 function fakeData(){
-  S.ports.forEach(function(p){if(p.link>0)p.link=p.isSFP?5:[6,6,3,2][p.portNum%4]});
+  S.ports.forEach(function(p){if(p.link>0)p.link=p.isSFP?5:[6,6,3,2][p.portNum%4];if(!p.isSFP)p.adv=p.portNum===7?"011111":"111111"});
   // fc bits as in PR #652: 0 adv pause, 1 adv asym, 2-3 partner, 4 TX, 5 RX negotiated
   S.ports.forEach(function(p){
     var i=p.portNum, up=p.enabled&&p.link>0;
@@ -168,6 +168,107 @@ var VARIANTS={
       ]));
     });
   },
+};
+
+// Final round (PR #652 feedback): overview switch + state, details behind an Advanced control
+function advSpeeds(p){
+  var b=parseInt(p.adv||"0",2),n=["10M "+t("c_half"),"10M "+t("c_full"),"100M "+t("c_half"),"100M "+t("c_full"),"1G","2.5G"];
+  return n.filter(function(_,i){return b&(1<<i)}).reverse().join(", ")||"-";
+}
+function fcSw(p){return p.isSFP?h("span",{html:badge(t("e_na"))}):sw(FC[p.portNum]&1)}
+function eeeSw(p){return p.isSFP?h("span",{html:badge(t("e_na"))}):sw(parseInt(EEE[p.portNum].adv,2))}
+function feat(p){
+  var f=FC[p.portNum],e=EEE[p.portNum];
+  return[
+    {name:t("nav_fc"),sw:fcSw(p),st:fcNeg(p),adv:p.isSFP?"-":fcFlags(f&3),lp:p.isSFP?"-":fcFlags(f>>2&3)},
+    {name:t("nav_eee"),sw:eeeSw(p),st:eeeSt(p),adv:p.isSFP?"-":eeeFlags(e.adv),lp:p.isSFP?"-":eeeFlags(e.lp)},
+    {name:t("pt_speed"),sw:null,st:linkBadge(p),adv:p.isSFP?"-":advSpeeds(p),lp:""},
+  ];
+}
+// Desktop details: one row per feature, labels in the header
+function detailsTable(p,withSw){
+  var tb=h("table",{class:"t",style:"width:auto"}),r=tb.createTHead().insertRow();
+  [""].concat(withSw?[t("c_enabled")]:[]).concat(["Status",t("e_adv"),t("e_lp")]).forEach(function(s){r.appendChild(h("th",{text:s}))});
+  var b=tb.createTBody();
+  feat(p).forEach(function(x){
+    var tr=b.insertRow();
+    var c=tr.insertCell();c.style.fontWeight="600";c.textContent=x.name;
+    if(withSw){c=tr.insertCell();if(x.sw)c.appendChild(x.sw)}
+    cellWith(tr,[x.st]);
+    tr.insertCell().textContent=x.adv;tr.insertCell().textContent=x.lp;
+  });
+  return tb;
+}
+// Phone details: each feature is a row (switch, name, state), with label/value pairs side by side underneath
+function detailsList(p,withSw){
+  var d=h("div");
+  feat(p).forEach(function(x,i){
+    var g=h("div",{style:"display:grid;grid-template-columns:7.5em 1fr;gap:4px 10px;margin:6px 0 0"});
+    [[t("e_adv"),x.adv]].concat(x.lp!==""?[[t("e_lp"),x.lp]]:[]).forEach(function(kv){
+      g.appendChild(h("span",{class:"mut small",text:kv[0]}));g.appendChild(h("span",{text:kv[1]}));
+    });
+    d.appendChild(h("div",{style:"padding:8px 0;"+(i?"border-top:1px solid var(--bd)":"")},[
+      h("div",{style:"display:flex;gap:8px;align-items:center"},[h("b",{text:x.name}),h("span",{html:x.st}),h("span",{style:"flex:1"})].concat(withSw&&x.sw?[x.sw]:[])),g]));
+  });
+  return d;
+}
+function toggleBtn(open,label){return h("button",{class:"ctl",style:"white-space:nowrap",text:(label?label+" ":"")+(open?"\u25b4":"\u25be")})}
+function advBtn(p){return h("button",{class:"ctl",text:"Advanced\u2026",onclick:function(){modal(t("c_port")+" "+p.portNum+": Advanced",detailsList(p,true),[h("button",{class:"pri",text:t("c_apply")})])}})}
+// Phone card: one row per setting, label left of value
+function card(p,extra){
+  var spd=h("select",{class:"in",style:"width:100%"});
+  (p.isSFP?SFPRATES:SPEEDS).forEach(function(o){spd.appendChild(h("option",{value:o[0],text:speedLabel(o[1])}))});
+  var g=h("div",{style:"display:grid;grid-template-columns:7.5em 1fr;gap:6px 10px;align-items:center"});
+  [[t("c_name"),h("input",{class:"in",style:"width:100%;box-sizing:border-box",placeholder:"-"})],[t("pt_speed"),spd],
+   [t("pt_mtu"),h("input",{class:"in",type:"number",style:"width:100%;box-sizing:border-box",value:p.portNum%2?"16383":"1522"})],
+   [t("pt_conn"),h("span",{text:String(parseInt(p.macs,16)&0x1fff)})]].forEach(function(kv){
+    g.appendChild(h("span",{class:"mut small",text:kv[0]}));g.appendChild(kv[1]);
+  });
+  return h("div",{style:"border:1px solid var(--bd);border-radius:8px;padding:10px 12px"},[
+    h("div",{style:"display:flex;gap:8px;align-items:center;margin-bottom:8px"},[
+      h("b",{style:"white-space:nowrap",text:t("c_port")+" "+p.portNum+(p.isSFP?" (SFP)":"")}),h("span",{html:linkBadge(p)}),
+      h("span",{style:"flex:1"}),sw(p.enabled),h("button",{class:"ctl",text:t("c_apply")})]),g].concat(extra));
+}
+function cardList(fn){
+  var wrap=$("ptable").closest(".scrollx");wrap.style.display="none";
+  var list=h("div",{class:"mockx",style:"display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px"});
+  S.ports.forEach(function(p,i){list.appendChild(card(p,fn(p,i)))});
+  wrap.after(list);
+}
+// F: overview columns (switch + state); a per-port toggle expands a details row
+VARIANTS.F=function(){
+  setHead([[""]].concat(BASE.map(function(s){return[s]})).concat([[t("nav_fc")],[t("nav_eee")],[""]]));
+  S.ports.forEach(function(p,idx){
+    var tb=$("ptable").tBodies[0],open=idx===0||idx===S.ports.length-1;
+    var tr=baseRow(tb,p,{before:function(tr){cellWith(tr,[fcSw(p)," ",fcNeg(p)]);cellWith(tr,[eeeSw(p)," ",eeeSt(p)])}});
+    tr.insertCell(0).appendChild(toggleBtn(open));
+    if(!open)return;
+    var dc=tb.insertRow().insertCell();dc.colSpan=tr.cells.length;dc.style.cssText="background:var(--panel2);padding:6px 8px 10px 52px";
+    dc.appendChild(detailsTable(p,false));
+  });
+};
+// G: no extra columns; an Advanced button per port opens a modal with switches and details
+VARIANTS.G=function(){
+  setHead(BASE.map(function(s){return[s]}).concat([[""],[""]]));
+  S.ports.forEach(function(p){baseRow($("ptable").tBodies[0],p,{before:function(tr){tr.insertCell().appendChild(advBtn(p))}})});
+  modal(t("c_port")+" 1: Advanced",(function(){var d=h("div");d.appendChild(detailsTable(S.ports[0],true));return d})(),[h("button",{class:"pri",text:t("c_apply")})]);
+};
+// M: phone version of F: flow control and EEE as rows, details expand in the card
+VARIANTS.M=function(){
+  cardList(function(p,i){
+    var rows=[[t("nav_fc"),fcSw(p),fcNeg(p)],[t("nav_eee"),eeeSw(p),eeeSt(p)]].map(function(r){
+      return h("div",{style:"display:flex;gap:8px;align-items:center;padding:6px 0;border-top:1px solid var(--bd)"},[h("span",{text:r[0]}),h("span",{html:r[2]}),h("span",{style:"flex:1"}),r[1]]);
+    });
+    rows[0].style.marginTop="8px";
+    var open=i===0,more=h("div",{style:"border-top:1px solid var(--bd);padding-top:6px"},[toggleBtn(open,"Advanced")]);
+    if(open)more.appendChild(h("div",{style:"background:var(--panel2);border-radius:6px;padding:0 10px;margin-top:6px"},[detailsList(p,false)]));
+    return rows.concat([more]);
+  });
+};
+// N: phone version of G: Advanced button opens the modal
+VARIANTS.N=function(){
+  cardList(function(p){return[h("div",{style:"border-top:1px solid var(--bd);padding-top:8px;margin-top:8px"},[advBtn(p)])]});
+  modal(t("c_port")+" 1: Advanced",detailsList(S.ports[0],true),[h("button",{class:"pri",text:t("c_apply")})]);
 };
 function fcFlags(b){return["Pause","Asym"].filter(function(s,i){return b&(1<<i)}).join(", ")||"-"}
 function mockStatus(){
