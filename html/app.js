@@ -163,6 +163,14 @@ var LANG = {
         stp_ctrx: "TC received",
         stp_cttx: "TC sent",
         stp_cage: "Last BPDU [s]",
+        lldp_tlvs: "Optional TLVs",
+        lldp_t_portdesc: "Port Description",
+        lldp_t_syscap: "System Capabilities",
+        lldp_t_mgmt: "Management Address",
+        lldp_t_pvid: "Port VLAN ID",
+        lldp_t_macphy: "MAC/PHY Status",
+        lldp_t_lag: "Link Aggregation",
+        lldp_t_mfs: "Maximum Frame Size",
         st_title: "Port statistics",
         st_h: "totals since boot",
         st_txg: "TX good",
@@ -2387,6 +2395,7 @@ var CONF_CMDS = [
     /^igmp\s+(on|off)$/,
     /^mtu\s+\d+\s+\d+$/,
     /^lldp\s+(on|off)$/,
+    /^lldp\s+tlv\s+(portdesc|syscap|mgmt|pvid|macphy|lag|mfs)\s+(on|off)$/,
     /^bw\s+(in|out)\s+\d+\s+\S+$/,
     /^storm\s+\d+\s+(bcast|mcast|ucast|umcast)\s+(off|\d+\s+(pps|kbps))$/,
 ];
@@ -4480,9 +4489,36 @@ tabHooks.lag = {
     }
 };
 
+
+var LLDP_TLVS = ["portdesc", "syscap", "mgmt", "pvid", "macphy", "lag", "mfs"];
+
 function lldpLoad() {
     return getJSON("/lldp.json").then(function(s) {
         $("lldp_en").checked = s.on;
+        var box = $("lldp_tlvs");
+        box.innerHTML = "";
+        LLDP_TLVS.forEach(function(k, i) {
+            var sw = h("span", {
+                class: "switch"
+            }, [
+                h("input", {
+                    type: "checkbox",
+                    onchange: function() {
+                        var el = this;
+                        postCmd("lldp tlv " + k + " " + (el.checked ? "on" : "off")).catch(function() {
+                            el.checked = !el.checked
+                        });
+                    }
+                }), h("i")
+            ]);
+            sw.firstChild.checked = s.tlv >> i & 1;
+            box.appendChild(h("label", {
+                class: "row"
+            }, [h("span", {
+                class: "lb",
+                text: t("lldp_t_" + k)
+            }), sw]));
+        });
         var tb = $("lldp_table").tBodies[0];
         tb.innerHTML = "";
         byPort(s.portStatus).forEach(function(p) {
@@ -5105,7 +5141,7 @@ var CONF_OVERWRITE = [
     /^stp\s+(port\s+\d{1,2}|lag\s+[1-4])\s+(edge|cost|prio|guard|filter|p2p)\b/,
     /^igmp\b/, /^mtu\s+\d{1,2}\b/, /^storm\s+\d{1,2}\s+(bcast|mcast|ucast|umcast)\b/,
 ];
-var CONF_TOGGLE = [/^(syslog)\s+(on|off)$/, /^(ntp)\s+(on|off)$/, /^(stp)\s+(on|off)$/, /^(lldp)\s+(on|off)$/, /^(stp\s+(port\s+\d{1,2}|lag\s+[1-4]))\s+(on|off)$/];
+var CONF_TOGGLE = [/^(syslog)\s+(on|off)$/, /^(ntp)\s+(on|off)$/, /^(stp)\s+(on|off)$/, /^(lldp)\s+(on|off)$/, /^(lldp\s+tlv\s+\w+)\s+(on|off)$/, /^(stp\s+(port\s+\d{1,2}|lag\s+[1-4]))\s+(on|off)$/];
 
 function mergeConf(base, texts) {
     var conf = base.slice();
