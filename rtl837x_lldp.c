@@ -22,7 +22,6 @@ extern __xdata uint8_t outbuf[];
 extern __xdata uint16_t slen;
 extern __xdata uint8_t sfr_data[4];
 
-extern __xdata uint8_t sfr_data[4];
 static __code const uint8_t lldp_oui_8021[3] = {0x00, 0x80, 0xc2};
 static __code const uint8_t lldp_oui_8023[3] = {0x00, 0x12, 0x0f};
 
@@ -425,6 +424,9 @@ bool lldp_in(void) __banked __reentrant
         case LLDP_SYSNAME_TLV_TYPE:
             lldp_copy_string(lldp_tmp.sys_name, p, len, LLDP_NB_SYS_NAME_LENGTH);
             break;
+        case LLDP_SYSDESC_TLV_TYPE:
+            lldp_copy_string(lldp_tmp.sys_desc, p, len, LLDP_NB_SYS_DESC_LENGTH);
+            break;
         case LLDP_PORT_DESC_TLV_TYPE:
             lldp_copy_string(lldp_tmp.port_desc, p, len, LLDP_NB_PORT_DESC_LENGTH);
             break;
@@ -561,6 +563,8 @@ void lldp_neighbors_to_html(void) __banked __reentrant
         lldp_put_string(lldp_nb[i].port_id, true);
         slen += strtox(outbuf + slen, "\",\"sysName\":\"");
         lldp_put_string(lldp_nb[i].sys_name, true);
+        slen += strtox(outbuf + slen, "\",\"sysDesc\":\"");
+        lldp_put_string(lldp_nb[i].sys_desc, true);
         slen += strtox(outbuf + slen, "\",\"portDesc\":\"");
         lldp_put_string(lldp_nb[i].port_desc, true);
         slen += strtox(outbuf + slen, "\",\"mgmtAddr\":\"");
@@ -597,6 +601,8 @@ void lldp_show(void) __banked __reentrant
         lldp_put_string(lldp_nb[i].port_id, false);
         print_string("  ");
         lldp_put_string(lldp_nb[i].sys_name, false);
+        print_string("  ");
+        lldp_put_string(lldp_nb[i].sys_desc, false);
         print_string("  ");
         lldp_put_string(lldp_nb[i].port_desc, false);
         print_string("  ");

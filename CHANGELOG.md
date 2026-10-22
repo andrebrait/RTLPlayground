@@ -75,10 +75,13 @@
   - Text fields already used bounded copies with an explicit trailing NUL; embedded NUL,
     controls, quotes and backslashes remain replaced by dots. The garbled binary Port ID
     was not a missing-terminator bug.
-  - Port IDs retain at most 17 printable characters locally, not the IEEE wire maximum:
-    identifiers contain 1..255 octets plus a subtype byte. Longer valid IDs are truncated.
-    This branch accepts only six-octet MAC Chassis IDs; arbitrary Chassis ID storage and
-    its separate display-capacity correction belong to the neighbor-details branch.
+  - Retain 17 Chassis ID octets and 17 printable Port ID characters locally, not the IEEE
+    wire maximum: identifiers contain 1..255 octets plus a subtype byte. Longer valid IDs
+    are truncated. Chassis IDs are length-delimited raw bytes, sanitized only at output;
+    their former 16-octet cap cut a textual MAC address, rather than overrunning storage.
+    Chassis IDs sharing the retained prefix can still merge on the same ingress port.
+    The MAC-only link-down branch has no arbitrary Chassis ID storage to enlarge.
+
 - Config
   - A startup configuration line longer than the command buffer no longer stops the replay:
     the offending line is skipped and the following lines are still applied.

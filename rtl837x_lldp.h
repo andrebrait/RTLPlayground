@@ -80,16 +80,17 @@
 #define LLDP_NETWORK_ADDR_IPV4_LENGTH 5
 
 #define LLDP_NB_MAX 16
-#define LLDP_NB_CHASSIS_LENGTH 16
-/* shortcut: retain 17 printable ID characters; expand only when full remote IDs are needed. */
+/* shortcut: retain 17 ID bytes; expand when full IDs must distinguish matching prefixes. */
+#define LLDP_NB_CHASSIS_LENGTH 17
 #define LLDP_NB_PORT_ID_LENGTH 17
 #define LLDP_NB_SYS_NAME_LENGTH 16
+#define LLDP_NB_SYS_DESC_LENGTH 32
 #define LLDP_NB_PORT_DESC_LENGTH 16
 #define LLDP_AGG_ANNOUNCED 0x80
 #define LLDP_WARN_MTU 0x01
 #define LLDP_WARN_AGG 0x02
 #define LLDP_WARN_DUPLICATE 0x04
-#define LLDP_NB_JSON_LENGTH 226	/* separator + worst-case neighbour entry in /lldp.json */
+#define LLDP_NB_JSON_LENGTH 272	/* separator + worst-case neighbour entry in /lldp.json */
 
 struct lldp_neighbor {
     uint8_t port;		/* logical ingress port */
@@ -98,6 +99,7 @@ struct lldp_neighbor {
     uint8_t chassis[LLDP_NB_CHASSIS_LENGTH];	/* Chassis ID without the subtype byte */
     char port_id[LLDP_NB_PORT_ID_LENGTH + 1];	/* NUL terminated, printable ASCII */
     char sys_name[LLDP_NB_SYS_NAME_LENGTH + 1];	/* NUL terminated, printable ASCII */
+    char sys_desc[LLDP_NB_SYS_DESC_LENGTH + 1];	/* NUL terminated, printable ASCII */
     char port_desc[LLDP_NB_PORT_DESC_LENGTH + 1];	/* NUL terminated, printable ASCII */
     uint8_t mgmt_addr[4];	/* IPv4 management address, all zero = none */
     uint16_t caps;		/* enabled System Capabilities bits */
