@@ -313,7 +313,13 @@ bool lldp_in(void) __banked __reentrant
     uint8_t type;
     uint8_t any;
     uint16_t len;
-    uint8_t body = TRAP_RX_BODY();
+    uint8_t body;
+
+    if (uip_len < TRAP_RX_HDR_SIZE + LLDP_ETHERTYPE_LENGTH)
+        return false;
+    body = TRAP_RX_BODY();
+    if (uip_len < body + LLDP_ETHERTYPE_LENGTH)
+        return false;
 
     memcpyc(lldp_tmp.chassis, LLDP_MULTICAST_ADDR, MAC_ADDR_LEN);
     if (!lldp_mac_eq(uip_buf, lldp_tmp.chassis))
@@ -329,22 +335,34 @@ bool lldp_in(void) __banked __reentrant
 
     p = &uip_buf[body + LLDP_ETHERTYPE_LENGTH];
     end = &uip_buf[uip_len];
-    while (p + 2 <= end) {
+    while (p < end) {
+        if (end - p < 2)
+            return true;
         type = p[0] >> 1;
         len = ((uint16_t)(p[0] & 1) << 8) | p[1];
         p += 2;
-        if (type == LLDP_END_TLV_TYPE || p + len > end)
+        if (len > end - p)
+            return true;
+        if (type == LLDP_END_TLV_TYPE) {
+            if (len)
+                return true;
             break;
+        }
         switch (type) {
         case LLDP_CHASSIS_ID_TLV_TYPE:
             if (len == LLDP_CHASSIS_ID_TLV_LENGTH && p[0] == LLDP_CHASSIS_ID_TLV_SUBTYPE)
                 memcpy(lldp_tmp.chassis, p + 1, MAC_ADDR_LEN);
             break;
         case LLDP_PORT_ID_TLV_TYPE:
-            if (len == MAC_ADDR_LEN + 1 && p[0] == LLDP_PORT_ID_SUBTYPE_MAC) {
+            /* 1..255 octets and a subtype 1..7, a MAC address is exactly six octets */
+            if (len < 2 || len > 256 || p[0] < 1 || p[0] > 7)
+                return true;
+            if (p[0] == LLDP_PORT_ID_SUBTYPE_MAC) {
+                if (len != MAC_ADDR_LEN + 1)
+                    return true;
                 lldp_tmp.port_id_mac = 1;
                 memcpy(lldp_tmp.port_id, p + 1, MAC_ADDR_LEN);
-            } else if (len > 1)
+            } else
                 lldp_copy_string(lldp_tmp.port_id, p + 1, len - 1, LLDP_NB_PORT_ID_LENGTH);
             break;
         case LLDP_TTL_TLV_TYPE:
@@ -361,7 +379,7 @@ bool lldp_in(void) __banked __reentrant
     any = 0;
     for (type = 0; type < MAC_ADDR_LEN; type++)
         any |= lldp_tmp.chassis[type];
-    if (!any)
+    if (!any || !(lldp_tmp.port_id_mac || lldp_tmp.port_id[0]))
         return true;
 
     nb = lldp_find();
