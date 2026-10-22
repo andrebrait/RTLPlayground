@@ -457,6 +457,8 @@ void send_mtu(int s)
 	json_object_put(mtus);
 }
 
+int lldp_tlv = 0x7f;
+
 void send_lldp(int s)
 {
 	struct json_object *c, *portStatuses, *p;
@@ -466,6 +468,7 @@ void send_lldp(int s)
 
 	c = json_object_new_object();
 	json_object_object_add(c, "on", json_object_new_int(1));
+	json_object_object_add(c, "tlv", json_object_new_int(lldp_tlv));
 	portStatuses = json_object_new_array_ext(PORTS);
 
 	for (int i = 1; i <= PORTS; i++) {
@@ -835,9 +838,14 @@ void launch(struct Server *server)
 					strcpy(cmd_history[cmd_ptr], p + 4);
 					cmd_ptr++;
 					{
-						char w[16];
+						char w[16], tlv[16];
 						int n;
-						if (sscanf(p + 4, "port %d fc %3s", &n, w) == 2 && n >= 1 && n <= PORTS)
+						if (sscanf(p + 4, "lldp tlv %15s", tlv) == 1) {
+							const char *names[] = { "portdesc", "syscap", "mgmt", "pvid", "macphy", "lag", "mfs" };
+							for (int n = 0; n < 7; n++)
+								if (!strcmp(tlv, names[n]))
+									lldp_tlv = strstr(p + 4, " on") ? lldp_tlv | 1 << n : lldp_tlv & ~(1 << n);
+						} else if (sscanf(p + 4, "port %d fc %3s", &n, w) == 2 && n >= 1 && n <= PORTS)
 							pause_off[n] = !strcmp(w, "off");
 						else if (sscanf(p + 4, "eee %3s %d", w, &n) == 2 && n >= 1 && n <= PORTS)
 							eee_off[n] = !strcmp(w, "off");

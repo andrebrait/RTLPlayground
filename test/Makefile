@@ -40,7 +40,8 @@ TESTS = $(BUILDDIR)/test_cmd_editor \
         $(BUILDDIR)/test_tick_gate \
         $(BUILDDIR)/test_nic_rx \
         $(BUILDDIR)/test_lacp \
-        $(BUILDDIR)/test_lldp
+        $(BUILDDIR)/test_lldp \
+        $(BUILDDIR)/test_lldp_tx
 
 # The table tests link the register mock and one environment file; stub/
 # stands in for the two headers a firmware build generates.
@@ -52,7 +53,7 @@ TESTS += $(BUILDDIR)/test_rx_bounds
 $(BUILDDIR)/test_rx_bounds: test_rx_bounds.c $(SRCROOT)/uip/uip_rx.h | $(BUILDDIR)
 	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS)
 
-all: run
+all: run lldp-conf
 
 $(BUILDDIR):
 	mkdir -p $(BUILDDIR)
@@ -96,6 +97,9 @@ endif
 $(BUILDDIR)/test_httpd_tx: test_httpd_tx.c $(SRCROOT)/httpd/httpd.c $(SRCROOT)/uip/uip.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@ $(LDFLAGS)
 
+$(BUILDDIR)/test_lldp_tx: test_lldp_tx.c $(SRCROOT)/rtl837x_lldp.c $(SRCROOT)/rtl837x_lldp_tx_strings.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) $(GC_CFLAGS) $^ -o $@ $(LDFLAGS) $(GC_LDFLAGS)
+
 run: $(TESTS) snmp snmp-horaco-profile snmp-status snmp-cli snmp-replay config-replay
 	@fail=0; for t in $(TESTS); do \
 		echo "=== $$t ==="; \
@@ -104,10 +108,15 @@ run: $(TESTS) snmp snmp-horaco-profile snmp-status snmp-cli snmp-replay config-r
 	done; \
 	if [ $$fail -ne 0 ]; then echo "TESTS FAILED"; exit 1; else echo "ALL TESTS PASSED"; fi
 
+# Save to flash keeps one "lldp tlv" line per TLV (html/app.js mergeConf)
+NODE ?= node
+lldp-conf:
+	cd $(SRCROOT) && $(NODE) test/test_lldp_conf.cjs
+
 clean:
 	rm -rf $(BUILDDIR)
 
-.PHONY: all run clean
+.PHONY: all run lldp-conf clean
 
 
 # SNMP host benches compile the same firmware sources; listener is opt-in here.
