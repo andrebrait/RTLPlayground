@@ -96,6 +96,16 @@ static bool frame(uint8_t port, uint8_t subtype, const char *id, uint8_t id_len)
 	return lldp_in();
 }
 
+static int nb_count(void)
+{
+	uint8_t i;
+	int n = 0;
+
+	for (i = 0; i < LLDP_NB_MAX; i++)
+		n += lldp_nb[i].ttl != 0;
+	return n;
+}
+
 static void reset(bool enabled, uint16_t links)
 {
 	ticks = 0;
@@ -108,7 +118,8 @@ static void reset(bool enabled, uint16_t links)
 int main(void)
 {
 	uint8_t i;
-	int busy = 0;
+	int busy = 0, bad = 0;
+	uint16_t cut, full;
 
 	reset(true, 0x0108);
 	put(0, 3, 120);
@@ -164,6 +175,28 @@ int main(void)
 	CHECK(frame(6, LLDP_PORT_ID_TLV_SUBTYPE, "\x94*o\xd2%n", MAC_ADDR_LEN)
 	      && !strcmp(lldp_nb[2].port_id, ".*o.%n"),
 	      "L11 six bytes with another subtype stay text with dots for the unprintable");
+
+	reset(true, 0x01ff);
+	frame(1, LLDP_PORT_ID_TLV_SUBTYPE, "", 0);
+	frame(2, 0, "abc", 3);
+	frame(3, 8, "abc", 3);
+	frame(4, LLDP_PORT_ID_SUBTYPE_MAC, (const char *)ap_mac, MAC_ADDR_LEN - 1);
+	frame(5, LLDP_PORT_ID_SUBTYPE_MAC, "\x94\x2a\x6f\xd2\x25\x6e\x00", MAC_ADDR_LEN + 1);
+	CHECK(nb_count() == 0,
+	      "L12 a Port ID with no octets, a reserved subtype or a MAC address of another length is ignored");
+	frame(1, LLDP_PORT_ID_TLV_SUBTYPE, "ge1", 3);
+	CHECK(nb_count() == 1, "L13 the same frame with a valid Port ID is kept");
+
+	/* The only cuts that may leave a neighbour are the TLV boundaries after the Port ID and the TTL. */
+	full = uip_len;
+	for (cut = 0; cut < full; cut++) {
+		lldp_init();
+		uip_len = cut;
+		lldp_in();
+		if (nb_count() && cut != full - 6 && cut != full - 2)
+			bad++;
+	}
+	CHECK(!bad, "L14 a frame cut inside a TLV or inside the header publishes no neighbour");
 
 	printf("\n%s (%d failure%s)\n", failures ? "SANDBOX: FAILURES" : "SANDBOX: ALL PASS",
 	       failures, failures == 1 ? "" : "s");
