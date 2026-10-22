@@ -4553,7 +4553,7 @@ function lldpWarning(cell, n, bit, key, s) {
     cell.appendChild(document.createTextNode(" "));
     cell.appendChild(h("button", {
         type: "button",
-        id: "lldp-warning-" + n.port + "-" + bit,
+        id: "lldp-warning-" + n.port + "-" + encodeURIComponent(n.chassis) + "-" + bit,
         class: "ctl",
         text: "⚠",
         title: label,
