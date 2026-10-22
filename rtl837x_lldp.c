@@ -240,11 +240,11 @@ static void lldp_copy_string(__xdata char *dst, __xdata uint8_t *src, uint16_t l
     dst[i] = 0;
 }
 
-static bool lldp_mac_eq(__xdata uint8_t *a, __xdata uint8_t *b) __reentrant
+static bool lldp_bytes_eq(__xdata uint8_t *a, __xdata uint8_t *b, uint8_t n) __reentrant
 {
     uint8_t i;
 
-    for (i = 0; i < MAC_ADDR_LEN; i++) {
+    for (i = 0; i < n; i++) {
         if (a[i] != b[i])
             return false;
     }
@@ -257,7 +257,9 @@ static __xdata struct lldp_neighbor *lldp_find(void) __reentrant
 
     for (i = 0; i < LLDP_NB_MAX; i++) {
         if (lldp_nb[i].ttl && lldp_nb[i].port == lldp_tmp.port
-            && lldp_mac_eq(lldp_nb[i].chassis, lldp_tmp.chassis))
+            && lldp_nb[i].chassis_subtype == lldp_tmp.chassis_subtype
+            && lldp_nb[i].chassis_len == lldp_tmp.chassis_len
+            && lldp_bytes_eq(lldp_nb[i].chassis, lldp_tmp.chassis, lldp_tmp.chassis_len))
             return &lldp_nb[i];
     }
     return 0;
@@ -283,12 +285,11 @@ bool lldp_in(void) __banked __reentrant
     __xdata uint8_t *end;
     __xdata struct lldp_neighbor *nb;
     uint8_t type;
-    uint8_t any;
     uint16_t len;
     uint8_t body = TRAP_RX_BODY();
 
     memcpyc(lldp_tmp.chassis, LLDP_MULTICAST_ADDR, MAC_ADDR_LEN);
-    if (!lldp_mac_eq(uip_buf, lldp_tmp.chassis))
+    if (!lldp_bytes_eq(uip_buf, lldp_tmp.chassis, MAC_ADDR_LEN))
         return false;
     if (uip_buf[body] != (LLDP_ETHERTYPE >> 8) || uip_buf[body + 1] != (LLDP_ETHERTYPE & 0xff))
         return false;
@@ -309,8 +310,11 @@ bool lldp_in(void) __banked __reentrant
             break;
         switch (type) {
         case LLDP_CHASSIS_ID_TLV_TYPE:
-            if (len == LLDP_CHASSIS_ID_TLV_LENGTH && p[0] == LLDP_CHASSIS_ID_TLV_SUBTYPE)
-                memcpy(lldp_tmp.chassis, p + 1, MAC_ADDR_LEN);
+            if (len > 1) {
+                lldp_tmp.chassis_subtype = p[0];
+                lldp_tmp.chassis_len = len - 1 > LLDP_NB_CHASSIS_LENGTH ? LLDP_NB_CHASSIS_LENGTH : len - 1;
+                memcpy(lldp_tmp.chassis, p + 1, lldp_tmp.chassis_len);
+            }
             break;
         case LLDP_PORT_ID_TLV_TYPE:
             if (len > 1)
@@ -327,10 +331,7 @@ bool lldp_in(void) __banked __reentrant
         p += len;
     }
 
-    any = 0;
-    for (type = 0; type < MAC_ADDR_LEN; type++)
-        any |= lldp_tmp.chassis[type];
-    if (!any)
+    if (!lldp_tmp.chassis_len)
         return true;
 
     nb = lldp_find();
@@ -372,16 +373,30 @@ static void lldp_put_string(__xdata char *s, bool html) __reentrant
         lldp_put(*s++, html);
 }
 
-static void lldp_put_mac(__xdata uint8_t *mac, bool html) __reentrant
+static void lldp_put_chassis(__xdata struct lldp_neighbor *nb, bool html) __reentrant
 {
     uint8_t i;
 
-    for (i = 0; i < MAC_ADDR_LEN; i++) {
-        if (i)
-            lldp_put(':', html);
-        lldp_put(itohex(mac[i] >> 4), html);
-        lldp_put(itohex(mac[i]), html);
+    if (nb->chassis_subtype == LLDP_CHASSIS_ID_TLV_SUBTYPE && nb->chassis_len == MAC_ADDR_LEN) {
+        for (i = 0; i < MAC_ADDR_LEN; i++) {
+            if (i)
+                lldp_put(':', html);
+            lldp_put(itohex(nb->chassis[i] >> 4), html);
+            lldp_put(itohex(nb->chassis[i]), html);
+        }
+        return;
     }
+    if (nb->chassis_subtype == LLDP_CHASSIS_ID_SUBTYPE_NETWORK_ADDR
+        && nb->chassis[0] == LLDP_ADDR_FAMILY_IPV4 && nb->chassis_len == LLDP_NETWORK_ADDR_IPV4_LENGTH) {
+        for (i = 1; i < LLDP_NETWORK_ADDR_IPV4_LENGTH; i++) {
+            if (i > 1)
+                lldp_put('.', html);
+            lldp_put_dec(nb->chassis[i], html);
+        }
+        return;
+    }
+    for (i = 0; i < nb->chassis_len; i++)
+        lldp_put(lldp_printable(nb->chassis[i]), html);
 }
 
 void lldp_neighbors_to_html(void) __banked __reentrant
@@ -401,7 +416,7 @@ void lldp_neighbors_to_html(void) __banked __reentrant
         slen += strtox(outbuf + slen, "{\"port\":");
         lldp_put_dec(machine.log_to_phys_port[lldp_nb[i].port], true);
         slen += strtox(outbuf + slen, ",\"chassis\":\"");
-        lldp_put_mac(lldp_nb[i].chassis, true);
+        lldp_put_chassis(&lldp_nb[i], true);
         slen += strtox(outbuf + slen, "\",\"portId\":\"");
         lldp_put_string(lldp_nb[i].port_id, true);
         slen += strtox(outbuf + slen, "\",\"sysName\":\"");
@@ -423,7 +438,7 @@ void lldp_show(void) __banked __reentrant
         print_string("Port ");
         lldp_put_dec(machine.log_to_phys_port[lldp_nb[i].port], false);
         print_string("  ");
-        lldp_put_mac(lldp_nb[i].chassis, false);
+        lldp_put_chassis(&lldp_nb[i], false);
         print_string("  ");
         lldp_put_string(lldp_nb[i].port_id, false);
         print_string("  ");
