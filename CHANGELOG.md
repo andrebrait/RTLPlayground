@@ -66,6 +66,9 @@
     the offending line is skipped and the following lines are still applied.
   - The web UI and the configuration upload now refuse a line the replay cannot take,
     instead of writing it to flash.
+- Web UI
+  - The Statistics table and the Dashboard's Traffic table are only as wide as their content, and
+    their counter headers line up with their right-aligned values instead of stretching across the page.
 
 - Serial console
   - Keys that send an escape sequence the line editor does not use (Home, End, PgUp, the function keys,
