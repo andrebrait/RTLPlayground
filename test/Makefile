@@ -30,7 +30,8 @@ TESTS = $(BUILDDIR)/test_cmd_editor \
         $(BUILDDIR)/test_httpd_tx \
         $(BUILDDIR)/test_tick_gate \
         $(BUILDDIR)/test_nic_rx \
-        $(BUILDDIR)/test_lacp
+        $(BUILDDIR)/test_lacp \
+        $(BUILDDIR)/test_lldp
 
 # The table tests link the register mock and one environment file; stub/
 # stands in for the two headers a firmware build generates.
@@ -64,6 +65,17 @@ $(BUILDDIR)/test_page_json: test_page_json.c $(TABLE_ENV) hw_mock.h | $(BUILDDIR
 # rtl837x_lacp.c is compiled UNMODIFIED from the firmware tree.
 $(BUILDDIR)/test_lacp: test_lacp.c $(SRCROOT)/rtl837x_lacp.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
+
+# Keep the production parser and serializers; discard unrelated hardware TX paths.
+$(BUILDDIR)/test_lldp: test_lldp.c $(SRCROOT)/rtl837x_lldp.c $(SRCROOT)/rtl837x_lldp.h | $(BUILDDIR)
+	$(CC) $(CFLAGS) $(LLDP_JSON_CFLAGS) -ffunction-sections -fdata-sections $(filter %.c,$^) -o $@ $(LDFLAGS) $(LLDP_JSON_LIBS) $(if $(filter Darwin,$(shell uname -s)),-Wl$(comma)-dead_strip,-Wl$(comma)--gc-sections)
+
+comma := ,
+LLDP_JSON_LIBS = -ljson-c
+ifeq ($(shell uname -s),Darwin)
+LLDP_JSON_CFLAGS := $(shell pkg-config --cflags json-c)
+LLDP_JSON_LIBS := $(shell pkg-config --libs json-c)
+endif
 
 # httpd/httpd.c and uip/uip.c are compiled UNMODIFIED from the firmware tree;
 # this test carries the environment below them itself.
