@@ -4,6 +4,7 @@
 #include "rtl837x_common.h"
 #include "rtl837x_lldp.h"
 #include "rtl837x_sfr.h"
+#include "rtl837x_regs.h"
 #include "rtl837x_common.h"
 #include "dhcp.h"
 #include "uip.h"
@@ -19,6 +20,7 @@ extern __xdata bool lldp_enabled;
 extern __code const struct machine machine;
 extern __xdata uint8_t outbuf[];
 extern __xdata uint16_t slen;
+extern __xdata uint8_t sfr_data[4];
 
 extern __xdata uint8_t sfr_data[4];
 static __code const uint8_t lldp_oui_8021[3] = {0x00, 0x80, 0xc2};
@@ -47,8 +49,14 @@ void lldp_tick(void) __banked
         return;
     lldp_tick_last += SYS_TICK_HZ;
 
+    /* Drop the neighbours of a port whose link is down, rather than wait for the TTL */
+    reg_read_m(RTL837X_REG_LINKS_STS);
     for (i = 0; i < LLDP_NB_MAX; i++) {
-        if (lldp_nb[i].ttl)
+        if (!lldp_nb[i].ttl)
+            continue;
+        if (!((sfr_data[(lldp_nb[i].port >> 3) + 1] >> (lldp_nb[i].port & 7)) & 1))
+            lldp_nb[i].ttl = 0;
+        else
             lldp_nb[i].ttl--;
     }
 
@@ -240,6 +248,19 @@ static void lldp_copy_string(__xdata char *dst, __xdata uint8_t *src, uint16_t l
     dst[i] = 0;
 }
 
+static void lldp_mac_string(__xdata char *dst, __xdata uint8_t *mac) __reentrant
+{
+    uint8_t i;
+
+    for (i = 0; i < MAC_ADDR_LEN; i++) {
+        if (i)
+            *dst++ = ':';
+        *dst++ = itohex(mac[i] >> 4);
+        *dst++ = itohex(mac[i]);
+    }
+    *dst = 0;
+}
+
 static bool lldp_bytes_eq(__xdata uint8_t *a, __xdata uint8_t *b, uint8_t n) __reentrant
 {
     uint8_t i;
@@ -286,7 +307,13 @@ bool lldp_in(void) __banked __reentrant
     __xdata struct lldp_neighbor *nb;
     uint8_t type;
     uint16_t len;
-    uint8_t body = TRAP_RX_BODY();
+    uint8_t body;
+
+    if (uip_len < TRAP_RX_HDR_SIZE + LLDP_ETHERTYPE_LENGTH)
+        return false;
+    body = TRAP_RX_BODY();
+    if (uip_len < body + LLDP_ETHERTYPE_LENGTH)
+        return false;
 
     memcpyc(lldp_tmp.chassis, LLDP_MULTICAST_ADDR, MAC_ADDR_LEN);
     if (!lldp_bytes_eq(uip_buf, lldp_tmp.chassis, MAC_ADDR_LEN))
@@ -302,23 +329,39 @@ bool lldp_in(void) __banked __reentrant
 
     p = &uip_buf[body + LLDP_ETHERTYPE_LENGTH];
     end = &uip_buf[uip_len];
-    while (p + 2 <= end) {
+    while (p < end) {
+        if (end - p < 2)
+            return true;
         type = p[0] >> 1;
         len = ((uint16_t)(p[0] & 1) << 8) | p[1];
         p += 2;
-        if (type == LLDP_END_TLV_TYPE || p + len > end)
+        if (len > end - p)
+            return true;
+        if (type == LLDP_END_TLV_TYPE) {
+            if (len)
+                return true;
             break;
+        }
         switch (type) {
         case LLDP_CHASSIS_ID_TLV_TYPE:
-            if (len > 1) {
-                lldp_tmp.chassis_subtype = p[0];
-                lldp_tmp.chassis_len = len - 1 > LLDP_NB_CHASSIS_LENGTH ? LLDP_NB_CHASSIS_LENGTH : len - 1;
-                memcpy(lldp_tmp.chassis, p + 1, lldp_tmp.chassis_len);
-            }
+            if (len < 2 || len > 256 || p[0] < 1 || p[0] > 7)
+                return true;
+            if (p[0] == LLDP_CHASSIS_ID_TLV_SUBTYPE && len != MAC_ADDR_LEN + 1)
+                return true;
+            lldp_tmp.chassis_subtype = p[0];
+            lldp_tmp.chassis_len = len - 1 > LLDP_NB_CHASSIS_LENGTH ? LLDP_NB_CHASSIS_LENGTH : len - 1;
+            memcpy(lldp_tmp.chassis, p + 1, lldp_tmp.chassis_len);
             break;
         case LLDP_PORT_ID_TLV_TYPE:
-            if (len > 1)
+            if (len < 2 || len > 256 || p[0] < 1 || p[0] > 7)
+                return true;
+            if (p[0] == LLDP_PORT_ID_SUBTYPE_MAC) {
+                if (len != MAC_ADDR_LEN + 1)
+                    return true;
+                lldp_mac_string(lldp_tmp.port_id, p + 1);
+            } else {
                 lldp_copy_string(lldp_tmp.port_id, p + 1, len - 1, LLDP_NB_PORT_ID_LENGTH);
+            }
             break;
         case LLDP_TTL_TLV_TYPE:
             if (len == LLDP_TTL_TLV_LENGTH)
@@ -331,7 +374,7 @@ bool lldp_in(void) __banked __reentrant
         p += len;
     }
 
-    if (!lldp_tmp.chassis_len)
+    if (!lldp_tmp.chassis_len || !lldp_tmp.port_id[0])
         return true;
 
     nb = lldp_find();
