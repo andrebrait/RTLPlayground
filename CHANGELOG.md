@@ -58,6 +58,11 @@
     and it was cleared only in `main()`, after the C startup code had copied and cleared them.
     This showed as a random web session timeout and LLDP blocked on some ports without config.
 
+- LLDP
+  - An LLDPDU with a malformed Port ID (no identifier octets, a reserved subtype, a MAC address
+    that is not six octets) or a truncated TLV is ignored instead of publishing a neighbour with
+    an empty Port ID or the default TTL.
+
 ## Breaking changes
 
 - Config
