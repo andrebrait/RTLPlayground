@@ -25,6 +25,9 @@
 
 ## Fixed
 
+- Web UI
+  - Give the LLDP Name column the remaining table width and wrap long names.
+
 - Config
   - A startup configuration line longer than the command buffer no longer stops the replay:
     the offending line is skipped and the following lines are still applied.

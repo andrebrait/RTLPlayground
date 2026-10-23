@@ -30,14 +30,15 @@ TESTS = $(BUILDDIR)/test_cmd_editor \
         $(BUILDDIR)/test_httpd_tx \
         $(BUILDDIR)/test_tick_gate \
         $(BUILDDIR)/test_nic_rx \
-        $(BUILDDIR)/test_lacp
+        $(BUILDDIR)/test_lacp \
+        $(BUILDDIR)/test_lldp_tx
 
 # The table tests link the register mock and one environment file; stub/
 # stands in for the two headers a firmware build generates.
 TABLE_ENV = support.c hw_mock.c env_tables.c $(SRCROOT)/cmd_editor.c \
             $(SRCROOT)/rtl837x_port.c $(SRCROOT)/httpd/page_impl.c
 
-all: run
+all: run lldp-conf
 
 $(BUILDDIR):
 	mkdir -p $(BUILDDIR)
@@ -70,6 +71,9 @@ $(BUILDDIR)/test_lacp: test_lacp.c $(SRCROOT)/rtl837x_lacp.c | $(BUILDDIR)
 $(BUILDDIR)/test_httpd_tx: test_httpd_tx.c $(SRCROOT)/httpd/httpd.c $(SRCROOT)/uip/uip.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@ $(LDFLAGS)
 
+$(BUILDDIR)/test_lldp_tx: test_lldp_tx.c $(SRCROOT)/rtl837x_lldp.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
+
 run: $(TESTS)
 	@fail=0; for t in $(TESTS); do \
 		echo "=== $$t ==="; \
@@ -78,7 +82,12 @@ run: $(TESTS)
 	done; \
 	if [ $$fail -ne 0 ]; then echo "TESTS FAILED"; exit 1; else echo "ALL TESTS PASSED"; fi
 
+# Save to flash keeps one "lldp tlv" line per TLV (html/app.js mergeConf)
+NODE ?= node
+lldp-conf:
+	cd $(SRCROOT) && $(NODE) test/test_lldp_conf.cjs
+
 clean:
 	rm -rf $(BUILDDIR)
 
-.PHONY: all run clean
+.PHONY: all run lldp-conf clean

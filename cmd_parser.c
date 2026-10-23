@@ -944,6 +944,8 @@ void parse_port(void)
 		print_string("\"\n");
 	} else if (cmd_compare(2, "lldp")) {
 		if (cmd_compare(3, "block")){
+			if (lldp_enabled)
+				lldp_shutdown((uint16_t)1 << phy_settings.port);
 			lldp_logical_port_status &= ~((uint16_t)1 << phy_settings.port);
 		} else if (cmd_compare(3, "permit")) {
 			lldp_logical_port_status |= (uint16_t)1 << phy_settings.port;
@@ -1669,6 +1671,31 @@ err:
 	print_string("usage: storm [<port> bcast|mcast|ucast|umcast <rate> pps|kbps|off]\n");
 }
 
+static __code const char * __code const lldp_tlv_names[LLDP_TX_N] = { "portdesc", "syscap", "mgmt", "pvid", "macphy", "lag", "mfs" };
+
+void parse_lldp_tlv(void)
+{
+	__xdata uint8_t tlv = 0;
+
+	if (cmd_words_len != 4)
+		goto err;
+	while (!cmd_compare(2, lldp_tlv_names[tlv])) {
+		if (++tlv == LLDP_TX_N)
+			goto err;
+	}
+
+	if (cmd_compare(3, "on"))
+		lldp_tlv_mask |= 1 << tlv;
+	else if (cmd_compare(3, "off"))
+		lldp_tlv_mask &= ~(1 << tlv);
+	else
+		goto err;
+	return;
+
+err:
+	cmd_error("lldp tlv portdesc|syscap|mgmt|pvid|macphy|lag|mfs on|off\n");
+}
+
 void parse_syslog(void)
 {
 	if (cmd_words_len < 2) // no argument -> print status
@@ -2077,12 +2104,16 @@ void cmd_parser(void) __banked
 		} else if (cmd_compare(0, "session")) {
 			parse_session();
 		} else if (cmd_compare(0, "lldp")) {
-			if (cmd_compare(1, "on")) {
+			if (cmd_compare(1, "tlv")) {
+				parse_lldp_tlv();
+			} else if (cmd_compare(1, "on")) {
 				print_string("LLDP enabled\n");
 				lldp_enabled = 1;
 				trap_rma_set(RTL837X_RMA0E_CONF, RTL837X_RMA_ACT_TRAP);
 			} else {
 				print_string("LLDP disabled\n");
+				if (lldp_enabled)
+					lldp_shutdown(lldp_logical_port_status);
 				lldp_enabled = 0;
 				trap_rma_set(RTL837X_RMA0E_CONF, RTL837X_RMA_ACT_FORWARD);
 			}
