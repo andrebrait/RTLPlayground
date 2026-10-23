@@ -58,7 +58,7 @@ static void frame_start(bool tagged)
 
 static void tlv(uint8_t type, const uint8_t *bytes, uint16_t len)
 {
-    assert(uip_len + len + 2 < sizeof(uip_buf));
+    assert((size_t)(uip_len + len + 2) < sizeof(uip_buf));
     uip_buf[uip_len++] = (type << 1) | (len >> 8);
     uip_buf[uip_len++] = len;
     if (len) memcpy(uip_buf + uip_len, bytes, len);
@@ -89,7 +89,7 @@ static struct json_object *output(void)
     /* The production serializer appends a property to an existing object. */
     slen += strtox(outbuf + slen, "\"enabled\":true");
     lldp_neighbors_to_html();
-    assert(slen + 2 < sizeof(outbuf));
+    assert((size_t)(slen + 2) < sizeof(outbuf));
     outbuf[slen++] = '}';
     outbuf[slen] = 0;
     root = json_tokener_parse((char *)outbuf);
