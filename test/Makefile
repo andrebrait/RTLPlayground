@@ -111,7 +111,7 @@ clean:
 
 # SNMP host benches compile the same firmware sources; listener is opt-in here.
 SNMPFLAGS = $(CFLAGS) -DSNMP
-SNMPENV = $(SRCROOT)/snmp.c $(SRCROOT)/snmp_control.c $(SRCROOT)/uip/uip.c $(SRCROOT)/httpd/httpd.c
+SNMPENV = $(SRCROOT)/snmp.c $(SRCROOT)/snmp_control.c $(SRCROOT)/uip/uip.c $(SRCROOT)/httpd/httpd.c $(SRCROOT)/sessions.c
 $(BUILDDIR)/test_snmp: test_snmp.c test_httpd_tx.c $(SNMPENV) | $(BUILDDIR)
 	$(CC) $(SNMPFLAGS) test_snmp.c $(SNMPENV) -o $@ $(LDFLAGS)
 
