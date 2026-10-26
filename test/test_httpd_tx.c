@@ -1329,19 +1329,18 @@ static void scenario_udp_lengths(void)
 
 static void scenario_information_auth(void)
 {
-    extern char session_id[13];extern uint32_t last_session_use;
     const char *denied="GET /information.json HTTP/1.1\r\nHost: sw\r\n\r\n";
     const char *allowed="GET /information.json HTTP/1.1\r\nHost: sw\r\nCookie: session=012345abcdef\r\n\r\n";
     session_start(MSS_FULL);information_calls=0;
     client_send(TCP_ACK|TCP_PSH,denied,strlen(denied));drain(MSS_FULL);
     stream[stream_len<STREAM_MAX?stream_len:STREAM_MAX-1]=0;
     CHECK(strstr((char *)stream,"401 Unauthorized") && !information_calls,"information.json requires authentication before serialization");
-    session_start(MSS_FULL);strcpy(session_id,"012345abcdef");last_session_use=0;
+    session_start(MSS_FULL);strcpy(session_id,"012345abcdef");last_session_use[0]=0;
     client_send(TCP_ACK|TCP_PSH,allowed,strlen(allowed));drain(MSS_FULL);
     stream[stream_len<STREAM_MAX?stream_len:STREAM_MAX-1]=0;
     CHECK(strstr((char *)stream,"200 OK") && information_calls==1,"authenticated information.json reaches existing serializer");
     const char *config="GET /config HTTP/1.1\r\nHost: sw\r\nCookie: session=012345abcdef\r\n\r\n";
-    session_start(MSS_FULL);configuration_reads=0;
+    session_start(MSS_FULL);strcpy(session_id,"012345abcdef");last_session_use[0]=0;configuration_reads=0;
     client_send(TCP_ACK|TCP_PSH,config,strlen(config));drain(MSS_FULL);
     stream[stream_len<STREAM_MAX?stream_len:STREAM_MAX-1]=0;
     CHECK(strstr((char *)stream,"200 OK") && strstr((char *)stream,"ip 192.0.2.1") &&
@@ -1352,7 +1351,7 @@ static void scenario_information_auth(void)
     client_send(TCP_ACK|TCP_PSH,snmp_denied,strlen(snmp_denied));drain(MSS_FULL);
     stream[stream_len<STREAM_MAX?stream_len:STREAM_MAX-1]=0;
     CHECK(strstr((char *)stream,"401 Unauthorized")&&!command_calls,"SNMP toggle command requires authentication");
-    session_start(MSS_FULL);strcpy(session_id,"012345abcdef");last_session_use=0;
+    session_start(MSS_FULL);strcpy(session_id,"012345abcdef");last_session_use[0]=0;
     client_send(TCP_ACK|TCP_PSH,snmp_allowed,strlen(snmp_allowed));drain(MSS_FULL);
     stream[stream_len<STREAM_MAX?stream_len:STREAM_MAX-1]=0;
     CHECK(strstr((char *)stream,"200 OK")&&command_calls==1,"authenticated SNMP toggle command uses existing command endpoint");
