@@ -41,6 +41,7 @@ void reg_read_m(uint16_t reg_addr)
 
 void memcpyc(uint8_t *dst, const uint8_t *src, uint16_t len) { memcpy(dst, src, len); }
 uint16_t strlen_x(const char *s) { return strlen(s); }
+char port_names[9][PORT_NAME_SIZE];	/* read by lldp_portdesc() from #590 */
 uint16_t strtox(uint8_t *dst, const char *s) { uint16_t n = strlen(s); memcpy(dst, s, n); return n; }
 
 static int failures;
