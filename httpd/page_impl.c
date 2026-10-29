@@ -678,6 +678,8 @@ void send_lldp(void)
 
 	slen += strtox(outbuf + slen, "{\"on\":");
 	bool_to_html(lldp_enabled);
+	slen += strtox(outbuf + slen, ",\"tlv\":");
+	itoa_html(lldp_tlv_mask);
 	slen += strtox(outbuf + slen, ",\"portStatus\":[");
 
 	for (uint8_t i = MACHINE_MIN_PORT; i <= MACHINE_MAX_PORT; i++) {
