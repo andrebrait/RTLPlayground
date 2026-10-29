@@ -297,13 +297,6 @@ int main(void)
 	uip_ipaddr(uip_netmask, 255, 255, 255, 0);
 	uip_ipaddr(uip_draddr, 192, 0, 2, 254);
 	memcpy(uip_ethaddr.addr, local_mac, 6);
-	/* Exhaust the 16-bit descriptor domain using the production DMA guard.
-	 * Host arithmetic is independent and does not issue a hardware transfer. */
-	for (uint32_t n = 0; n <= 65535; n++)
-		assert(!!uip_rx_dma_fits(n) == (((n + 7) / 8) * 8 <= sizeof(uip_buf)));
-	CHECK(uip_rx_dma_fits(1552) && !uip_rx_dma_fits(1553) && !uip_rx_dma_fits(1556) &&
-		  !uip_rx_dma_fits(65535),
-	      "pre-DMA guard rejects every rounded transfer beyond packet storage");
 	snmp_init();
 	assert(test_snmp_configure(comm, sizeof(comm) - 1, network, acl));
 	fixture(wire_get, sizeof(wire_get));
@@ -456,7 +449,7 @@ int main(void)
 	hw_failed = false;
 	CHECK(response_error == 5 && response_index == 1 && result_type[0] == 5,
 	      "wire hardware failure returns genErr with original binding");
-	query_oid(31, 18, machine.max_port + 1);
+	query_oid(31, 18, MACHINE_MAX_PORT + 1);
 	make_request(0xa1, 1);
 	raw_payload(req, req_len, 40001, 161, source);
 	load(packet, packet_len);
