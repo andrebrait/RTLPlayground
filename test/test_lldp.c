@@ -27,8 +27,16 @@ volatile uint16_t SFR_DATA_U16;
 static uint32_t links_sts;
 static int reg_reads, tx_frames;
 
-void print_string(const char *s) { (void)s; }
-void write_char(char c) { (void)c; }
+static char console[512];
+static unsigned console_len;
+
+void write_char(char c)
+{
+	if (console_len < sizeof(console) - 1)
+		console[console_len++] = c;
+	console[console_len] = 0;
+}
+void print_string(const char *s) { while (*s) write_char(*s++); }
 void tcpip_output(void) { tx_frames++; }
 uint8_t port_lag_of(uint8_t port) { (void)port; return PORT_LAG_NONE; }
 
@@ -123,6 +131,130 @@ static void reset(bool enabled, uint16_t links)
 	reg_reads = tx_frames = 0;
 }
 
+/* An LLDPDU in the receive buffer: start it, append TLVs, end it. */
+static void rx_start(uint8_t port, bool vlan)
+{
+	memcpy(uip_buf, LLDP_MULTICAST_ADDR, MAC_ADDR_LEN);
+	uip_len = TRAP_RX_HDR_SIZE - 1;
+	uip_buf[uip_len++] = port;
+	if (vlan) {
+		memcpy(uip_buf + uip_len, "\x81\x00\x00\x01", VLAN_TAG_SIZE);
+		uip_len += VLAN_TAG_SIZE;
+	}
+	uip_buf[uip_len++] = LLDP_ETHERTYPE >> 8;
+	uip_buf[uip_len++] = LLDP_ETHERTYPE & 0xff;
+}
+
+static void tlv(uint8_t type, const void *v, uint16_t len)
+{
+	uip_buf[uip_len++] = type << 1 | len >> 8;
+	uip_buf[uip_len++] = len;
+	memcpy(uip_buf + uip_len, v, len);
+	uip_len += len;
+}
+
+static const uint8_t ttl120[] = {0, 120};
+static const uint8_t chassis_mac[] = {LLDP_CHASSIS_ID_TLV_SUBTYPE, 0x02, 0, 0x22, 0, 0x44, 0x55};
+static const uint8_t port_text[] = {LLDP_PORT_ID_TLV_SUBTYPE, 'p'};
+
+static void ids(const uint8_t *chassis, uint16_t chassis_len, const uint8_t *port, uint16_t port_len)
+{
+	tlv(LLDP_CHASSIS_ID_TLV_TYPE, chassis, chassis_len);
+	tlv(LLDP_PORT_ID_TLV_TYPE, port, port_len);
+	tlv(LLDP_TTL_TLV_TYPE, ttl120, sizeof(ttl120));
+}
+
+static bool rx_end(void)
+{
+	tlv(LLDP_END_TLV_TYPE, "", 0);
+	return lldp_in();
+}
+
+static const char *nb_json(void)
+{
+	slen = 0;
+	lldp_neighbors_to_html();
+	outbuf[slen] = 0;
+	return (const char *)outbuf;
+}
+
+static const char *nb_shown(void)
+{
+	console_len = 0;
+	console[0] = 0;
+	lldp_show();
+	return console;
+}
+
+static void test_neighbor_fields(void)
+{
+	static const uint8_t port_mac[] = {LLDP_PORT_ID_SUBTYPE_MAC, 0, 0x11, 0, 0xab, 0, 0xff};
+	static const uint8_t dirty[] = {'N', '"', '\\', 0, 2, 0x7f, 0xff, 'Z'};
+	static const char forty[] = "0123456789012345678901234567890123456789";
+	int vlan;
+
+	for (vlan = 0; vlan < 2; vlan++) {
+		reset(true, 0x01ff);
+		rx_start(4, vlan);
+		ids(chassis_mac, sizeof(chassis_mac), port_mac, sizeof(port_mac));
+		tlv(LLDP_SYSNAME_TLV_TYPE, "desk-pc", 7);
+		tlv(LLDP_SYSDESC_TLV_TYPE, "Linux 6.8 x86_64", 16);
+		tlv(LLDP_PORT_DESC_TLV_TYPE, "eth0", 4);
+		CHECK(rx_end() && nb_count() == 1 && strstr(nb_json(),
+		      "{\"port\":5,\"chassis\":\"02:00:22:00:44:55\",\"portId\":\"00:11:00:ab:00:ff\","
+		      "\"sysName\":\"desk-pc\",\"sysDesc\":\"Linux 6.8 x86_64\",\"portDesc\":\"eth0\""),
+		      vlan ? "N1 neighbour fields in /lldp.json, behind a VLAN tag"
+			   : "N1 neighbour fields in /lldp.json, system description between name and port description");
+		CHECK(strstr(nb_shown(), "00:11:00:ab:00:ff  desk-pc  Linux 6.8 x86_64  eth0  "),
+		      vlan ? "N2 lldp show prints the same fields, behind a VLAN tag"
+			   : "N2 lldp show prints the system description between name and port description");
+	}
+
+	reset(true, 0x01ff);
+	rx_start(4, false);
+	ids(chassis_mac, sizeof(chassis_mac), port_text, sizeof(port_text));
+	tlv(LLDP_SYSNAME_TLV_TYPE, dirty, sizeof(dirty));
+	tlv(LLDP_SYSDESC_TLV_TYPE, dirty, sizeof(dirty));
+	tlv(LLDP_PORT_DESC_TLV_TYPE, dirty, sizeof(dirty));
+	rx_end();
+	CHECK(strstr(nb_json(), "\"sysName\":\"N......Z\",\"sysDesc\":\"N......Z\",\"portDesc\":\"N......Z\""),
+	      "N3 NUL, control characters, quotes and backslashes in the text fields become dots");
+
+	reset(true, 0x01ff);
+	rx_start(4, false);
+	ids(chassis_mac, sizeof(chassis_mac), port_text, sizeof(port_text));
+	tlv(LLDP_SYSNAME_TLV_TYPE, forty, 40);
+	tlv(LLDP_SYSDESC_TLV_TYPE, forty, 40);
+	tlv(LLDP_PORT_DESC_TLV_TYPE, forty, 40);
+	rx_end();
+	CHECK(strstr(nb_json(), "\"sysName\":\"0123456789012345\","
+		    "\"sysDesc\":\"01234567890123456789012345678901\",\"portDesc\":\"0123456789012345\""),
+	      "N4 name and port description are cut at 16 characters, system description at 32");
+
+	rx_start(4, false);
+	ids(chassis_mac, sizeof(chassis_mac), port_text, sizeof(port_text));
+	tlv(LLDP_SYSNAME_TLV_TYPE, "X", 1);
+	rx_end();
+	CHECK(nb_count() == 1 && strstr(nb_json(), "\"sysName\":\"X\",\"sysDesc\":\"\",\"portDesc\":\"\""),
+	      "N5 a refresh replaces the entry, system description and port description not sent again are cleared");
+
+	/* worst case: every field full, a MAC address Port ID, all digits at their maximum */
+	reset(true, 0x01ff);
+	memset(&lldp_nb[0], 'x', sizeof(lldp_nb[0]));
+	lldp_nb[0].port = 3;
+	lldp_nb[0].chassis_len = LLDP_NB_CHASSIS_LENGTH;
+	lldp_nb[0].port_id_mac = 1;
+	lldp_nb[0].sys_name[LLDP_NB_SYS_NAME_LENGTH] = 0;
+	lldp_nb[0].sys_desc[LLDP_NB_SYS_DESC_LENGTH] = 0;
+	lldp_nb[0].port_desc[LLDP_NB_PORT_DESC_LENGTH] = 0;
+	memset(lldp_nb[0].mgmt_addr, 0xff, sizeof(lldp_nb[0].mgmt_addr));
+	lldp_nb[0].caps = 0xffff;
+	lldp_nb[0].ttl = 0xffff;
+	/* the reply is ',"neighbors":[' + entry + ']' and the guard counts the separator too */
+	CHECK(strlen(nb_json()) - strlen(",\"neighbors\":[]") + 1 <= LLDP_NB_JSON_LENGTH,
+	      "N6 LLDP_NB_JSON_LENGTH holds a worst-case entry and its separator");
+}
+
 int main(void)
 {
 	uint8_t i;
@@ -208,6 +340,8 @@ int main(void)
 			bad++;
 	}
 	CHECK(!bad, "L15 a frame cut inside a TLV or inside the header publishes no neighbour");
+
+	test_neighbor_fields();
 
 	printf("\n%s (%d failure%s)\n", failures ? "SANDBOX: FAILURES" : "SANDBOX: ALL PASS",
 	       failures, failures == 1 ? "" : "s");

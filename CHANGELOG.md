@@ -100,6 +100,11 @@
     that is not six octets) or a truncated TLV is ignored instead of publishing a neighbour with
     an empty Port ID or the default TTL.
 
+- LLDP
+  - An LLDPDU with a malformed Port ID (no identifier octets, a reserved subtype, a MAC address
+    that is not six octets) or a truncated TLV is ignored instead of publishing a neighbour with
+    an empty Port ID or the default TTL.
+
 ## Breaking changes
 
 - Config
