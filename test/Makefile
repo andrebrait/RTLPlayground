@@ -112,6 +112,10 @@ clean:
 # SNMP host benches compile the same firmware sources; listener is opt-in here.
 SNMPFLAGS = $(CFLAGS) -DSNMP
 SNMPENV = $(SRCROOT)/snmp.c $(SRCROOT)/snmp_control.c $(SRCROOT)/uip/uip.c $(SRCROOT)/httpd/httpd.c $(SRCROOT)/sessions.c
+# Eight-port mock (logical ports 0..7); the *_nine benches keep the default 0..8.
+$(BUILDDIR)/test_snmp $(BUILDDIR)/test_snmp_transport $(BUILDDIR)/test_snmp_cli: CFLAGS += -DMACHINE_MAX_PORT=7
+# Six user ports (logical 3..8), as on an RTL8372 board.
+$(BUILDDIR)/test_snmp_hw_six: CFLAGS += -DMACHINE_MIN_PORT=3
 $(BUILDDIR)/test_snmp: test_snmp.c test_httpd_tx.c $(SNMPENV) | $(BUILDDIR)
 	$(CC) $(SNMPFLAGS) test_snmp.c $(SNMPENV) -o $@ $(LDFLAGS)
 
@@ -122,7 +126,7 @@ $(BUILDDIR)/test_snmp_nine: test_snmp.c test_httpd_tx.c $(SNMPENV) | $(BUILDDIR)
 	$(CC) $(SNMPFLAGS) -DSNMP_TEST_NINE test_snmp.c $(SNMPENV) -o $@ $(LDFLAGS)
 
 $(BUILDDIR)/test_snmp_hw_six: test_snmp_hw.c $(SRCROOT)/snmp_hw.c | $(BUILDDIR)
-	$(CC) $(SNMPFLAGS) -DSNMP_HW_SIX test_snmp_hw.c -o $@ $(LDFLAGS)
+	$(CC) $(SNMPFLAGS) test_snmp_hw.c -o $@ $(LDFLAGS)
 
 .PHONY: snmp snmp-unit
 snmp-unit: $(BUILDDIR)/test_snmp $(BUILDDIR)/test_snmp_nine $(BUILDDIR)/test_snmp_hw $(BUILDDIR)/test_snmp_hw_six
