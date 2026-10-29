@@ -94,6 +94,11 @@
   - Keys that send an escape sequence the line editor does not use (Home, End, PgUp, the function keys,
     Ctrl-arrows, ...) no longer hang the switch. The sequence is now ignored. #664
 
+- LLDP
+  - An LLDPDU with a malformed Port ID (no identifier octets, a reserved subtype, a MAC address
+    that is not six octets) or a truncated TLV is ignored instead of publishing a neighbour with
+    an empty Port ID or the default TTL.
+
 ## Breaking changes
 
 - Config
