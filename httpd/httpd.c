@@ -12,7 +12,7 @@
 // #define DEBUG
 #include "debug.h"
 
-#define SESSION_TIMEOUT_DEFAULT 200
+#define SESSION_TIMEOUT_DEFAULT 3600
 
 /* Seconds of inactivity after which a session cookie stops validating.
  * Configurable with the "session" command, see cmd_parser.c. */
@@ -1055,6 +1055,8 @@ void httpd_appcall(void)
 				send_lldp();
 			} else if (is_word(q, "/lacp.json")) {
 				send_lacp();
+			} else if (is_word(q, "/stpcnt.json")) {
+				send_stp_counters();
 			} else if (is_word(q, "/vlanlist")) {
 				send_vlanlist();
 			} else if (is_word(q, "/config")) {

@@ -23,6 +23,11 @@
 
 ## Changed
 
+- Web UI
+  - The web session expires after one hour without a request (was 200 seconds). The UI stops
+    polling while its tab is hidden, so with 200 seconds switching tabs for a few minutes logged
+    you out. `session <seconds>` still sets it.
+
 ## Fixed
 
 - Time
@@ -37,6 +42,7 @@
     defaults (NTP off, no server, UTC-12:00) instead of the switch's settings.
   - Accept firmware uploads regardless of the file part's MIME type, including
     `application/macbinary` sent by Chrome on macOS for `.bin` files.
+  - Give the LLDP Name column the remaining table width and wrap long names.
 
 - Health
   - `HEALTH=1` builds no longer write past the phase timing arrays at the LLDP checkpoint, which

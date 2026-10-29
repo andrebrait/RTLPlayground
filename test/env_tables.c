@@ -88,6 +88,7 @@ struct syslog_state syslog_state;
 bool     stp_enabled;
 bool lldp_enabled;
 uint16_t lldp_logical_port_status;
+uint8_t lldp_tlv_mask;
 
 
 uip_ipaddr_t uip_hostaddr, uip_draddr, uip_netmask;
@@ -121,6 +122,12 @@ uint8_t  stp_pflags[STP_ENTITIES];
 uint8_t  stp_pp2p[STP_ENTITIES];
 uint8_t  stp_pprio[STP_ENTITIES];
 uint8_t  stp_prio = 0x80, stp_root_port = 0xff, stp_rstp = 1, stp_txhold = 6;
+uint8_t  stp_bpdu_filter, stp_pcost_short, stp_root_fwd = 15, stp_root_maxage = 20;
+uint16_t stp_legacy, stp_link_prev = 0x3ff;
+uint16_t stp_info_while[STP_ENTITIES];
+uint32_t stp_cnt[STP_CNT_N][STP_ENTITIES];
+uint32_t stp_tc_secs;
+uint8_t  stp_ent_id(uint8_t e) { return e >= STP_LAG_BASE ? e + 101 - STP_LAG_BASE : machine.log_to_phys_port[e]; }
 
 /* ---- SFP: no module present, reads fail ---- */
 uint8_t sfp_buf[16];
