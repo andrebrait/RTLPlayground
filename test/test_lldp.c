@@ -8,6 +8,7 @@
 #include "uip.h"
 #include "rtl837x_lldp.h"
 #include "rtl837x_trap.h"
+#include "rtl837x_port.h"
 
 uint8_t uip_buf[UIP_CONF_BUFFER_ALLOC_SIZE];
 uint16_t uip_len;
@@ -21,6 +22,7 @@ uint16_t slen;
 volatile uint32_t ticks;
 bool lldp_enabled;
 uint8_t sfr_data[4];
+volatile uint16_t SFR_DATA_U16;
 
 static uint32_t links_sts;
 static int reg_reads, tx_frames;
@@ -28,6 +30,7 @@ static int reg_reads, tx_frames;
 void print_string(const char *s) { (void)s; }
 void write_char(char c) { (void)c; }
 void tcpip_output(void) { tx_frames++; }
+uint8_t port_lag_of(uint8_t port) { (void)port; return PORT_LAG_NONE; }
 
 void reg_read_m(uint16_t reg_addr)
 {
@@ -43,11 +46,9 @@ void memcpyc(uint8_t *dst, const uint8_t *src, uint16_t len) { memcpy(dst, src, 
 uint16_t strlen_x(const char *s) { return strlen(s); }
 char port_names[9][PORT_NAME_SIZE];	/* read by lldp_portdesc() from #590 */
 uint16_t strtox(uint8_t *dst, const char *s) { uint16_t n = strlen(s); memcpy(dst, s, n); return n; }
-/* Read by the 802.1/802.3 organisational TLVs from #600 */
-volatile uint16_t SFR_DATA_U16;
+/* Read by the 802.1/802.3 organisational TLVs from #600; #605 provides SFR_DATA_U16 and port_lag_of() */
 void phy_read(uint8_t phy_id, uint8_t dev_id, uint16_t reg) { (void)phy_id; (void)dev_id; (void)reg; SFR_DATA_U16 = 0; }
 uint16_t port_pvid_get(uint8_t port) { (void)port; return 1; }
-uint8_t port_lag_of(uint8_t port) { (void)port; return 0xff; }
 
 static int failures;
 #define CHECK(cond, name) do { \
