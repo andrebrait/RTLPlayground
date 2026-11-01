@@ -381,6 +381,36 @@ static void test_admin(void)
 	puts("PASS real admin up/down from MMD31.a610 bit 11, SFP always up, invalid ports");
 }
 
+/* Any of the 52 selectors: one word zero-extended, or both as a 64-bit snapshot. */
+static void test_stat(void)
+{
+	struct snmp_counter c;
+	uint8_t saved = expected_selector;
+	high = 0x11223344;
+	low = 0x55667788;
+	expected_selector = 15;
+	memset(c.bytes, 0xee, 8);
+	assert(snmp_hw_stat(3, 15, true, false, &c));
+	expect_counter(1, &c, high, low);
+	native_order = false; /* a lone low word is read without the high word */
+	memset(c.bytes, 0xee, 8);
+	assert(snmp_hw_stat(3, 15, false, true, &c));
+	expect_counter(2, &c, high, low);
+	native_order = true;
+	expected_selector = 51;
+	assert(snmp_hw_stat(3, 51, true, true, &c));
+	expect_counter(0, &c, high, low);
+	unsigned before = commands;
+	sentinel(&c);
+	assert(!snmp_hw_stat(3, 52, true, true, &c) && !snmp_hw_stat(3, 15, false, false, &c) &&
+	       !snmp_hw_stat(9, 15, true, true, &c) && is_sentinel(&c));
+	assert(commands == before);
+	expected_selector = saved;
+	high = 0x80000001;
+	low = 0;
+	puts("PASS snmp_hw_stat: either word, 64-bit snapshot, selector and argument bounds");
+}
+
 int main(int argc, char **argv)
 {
 	struct snmp_counter c;
@@ -419,6 +449,7 @@ int main(int argc, char **argv)
 	puts(
 	    "PASS modeled latch coherence, live rollover, repeated reads, reset and all selectors");
 	test_counter32();
+	test_stat();
 	test_admin();
 	assert(snmp_hw_link(3, &link) && link == 8);
 	uint16_t speed;

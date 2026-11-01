@@ -134,6 +134,12 @@ bool snmp_hw_counter32(uint8_t port, __xdata uint8_t selector, __xdata bool high
 	return selector == 48 && stat_get(port, selector, high, !high, value);
 }
 
+bool snmp_hw_stat(uint8_t port, __xdata uint8_t selector, __xdata bool high, __xdata bool low,
+		  __xdata struct snmp_counter *__xdata value) __banked
+{
+	return selector < 52 && (high || low) && stat_get(port, selector, high, low, value);
+}
+
 /* Copper admin state is PHY MMD31.a610 bit 11 (power down); SFP has no switch. */
 bool snmp_hw_admin(uint8_t port, __xdata uint8_t *__xdata state) __banked
 {
