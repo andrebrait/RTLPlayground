@@ -2,8 +2,8 @@
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
 const src=fs.readFileSync('html/app.js','utf8'),context={};
 vm.createContext(context);
-vm.runInContext(src.slice(src.indexOf('var CONF_CMDS='),src.indexOf('function setDirty(')),context);
-vm.runInContext(src.slice(src.indexOf('var CONF_OVERWRITE='),src.indexOf('function writeConfig(')),context);
+vm.runInContext(src.slice(src.indexOf('var CONF_CMDS ='),src.indexOf('function setDirty(')),context);
+vm.runInContext(src.slice(src.indexOf('var CONF_OVERWRITE ='),src.indexOf('function writeConfig(')),context);
 const {mergeConf,isConfCmd}=context;
 
 assert(isConfCmd('lldp tlv portdesc off')&&isConfCmd('lldp tlv lag on')&&isConfCmd('lldp tlv mfs off'));
