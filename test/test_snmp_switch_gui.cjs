@@ -18,10 +18,10 @@ function fixture(configured=false,failAt=-1){
    return failAt==='hold'&&index===0?new Promise(resolve=>{release=()=>resolve(reply())}):Promise.resolve(reply());},
   pollInfo(){S.info.snmp=Array.from(server);ctx.renderSnmp(S.info.snmp);return Promise.resolve()}};
  vm.createContext(ctx);
- vm.runInContext(src.slice(src.indexOf('var CONF_CMDS='),src.indexOf('function setDirty(')),ctx);
+ vm.runInContext(src.slice(src.indexOf('var CONF_CMDS ='),src.indexOf('function setDirty(')),ctx);
  vm.runInContext(src.slice(src.indexOf('function postCmd('),src.indexOf('function toast(')),ctx);
  vm.runInContext(src.slice(src.indexOf('function redactSnmp('),src.indexOf('$("sy-cmd").addEventListener("input"')),ctx);
- vm.runInContext(src.slice(src.indexOf('var IPRE='),src.indexOf('function sysLoad(')),ctx);
+ vm.runInContext(src.slice(src.indexOf('var IPRE ='),src.indexOf('function sysLoad(')),ctx);
  ctx.renderSnmp(S.info.snmp);
  function edit(manager,community,enabled){$('sy-snmp-manager').value=manager;$('sy-snmp-secret').value=community;$('sy-snmp-toggle').checked=enabled;$('sy-snmp-manager').events.input();}
  return {ctx,$,posted,toasts,server,edit,dirty:()=>dirty,release:()=>release()};

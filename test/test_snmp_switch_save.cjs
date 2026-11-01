@@ -8,9 +8,9 @@ const context={S:{info:{snmp:[1,1,192,0,2,250,255,255,255,255]}},
  if(path==='/snmp_config')return fail?Promise.reject(new Error('unavailable')):Promise.resolve('snmp manager 192.0.2.250/32\nsnmp community current-value\nsnmp '+(state?'on':'off')+'\n');throw Error(path)},
  writeConfig(text,title,fromLog){saved.push({text,title,fromLog})}};
 vm.createContext(context);
-vm.runInContext(src.slice(src.indexOf('var CONF_CMDS='),src.indexOf('function setDirty(')),context);
-vm.runInContext(src.slice(src.indexOf('var CONF_OVERWRITE='),src.indexOf('function writeConfig(')),context);
-vm.runInContext(src.slice(src.indexOf('$("saveBtn").addEventListener('),src.indexOf('var fwBuf=')),context);
+vm.runInContext(src.slice(src.indexOf('var CONF_CMDS ='),src.indexOf('function setDirty(')),context);
+vm.runInContext(src.slice(src.indexOf('var CONF_OVERWRITE ='),src.indexOf('function writeConfig(')),context);
+vm.runInContext(src.slice(src.indexOf('$("saveBtn").addEventListener('),src.indexOf('var fwBuf =')),context);
 (async()=>{handler();await new Promise(setImmediate);
  const prefix='hostname lab\nsnmp future retained\nsnmp manager 192.0.2.250/32\nsnmp community current-value\nsnmp ';
  assert.equal(saved[0].text,prefix+'off');assert(!saved[0].text.includes('snmp changed'));assert.equal(saved[0].fromLog,true);

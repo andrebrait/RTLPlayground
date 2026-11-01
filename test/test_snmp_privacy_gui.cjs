@@ -6,8 +6,8 @@ const ctx={$,Blob,t:(x,o)=>x+(o?JSON.stringify(o):''),toast(){},cfgBytes(){},cfg
  h(tag,attrs,children){return {tag,...attrs,value:'',style:{},children,addEventListener(e,f){this[e]=f}}},
  modal(t,content,buttons){modalNodes={content,buttons}},api(){return denied?Promise.reject(Error('denied')):Promise.resolve({ok:true,body})},
  doWriteConfig(raw){posted=raw}};vm.createContext(ctx);
-vm.runInContext(src.slice(src.indexOf('var CONF_CMDS='),src.indexOf('function setDirty(')),ctx);
-vm.runInContext(src.slice(src.indexOf('var cfgHidden='),src.indexOf('function cfgReload(')),ctx);
+vm.runInContext(src.slice(src.indexOf('var CONF_CMDS ='),src.indexOf('function setDirty(')),ctx);
+vm.runInContext(src.slice(src.indexOf('var cfgHidden ='),src.indexOf('function cfgReload(')),ctx);
 vm.runInContext(src.slice(src.indexOf('function cfgLongLine('),src.indexOf('function cfgBytes(')),ctx);
 vm.runInContext(src.slice(src.indexOf('function writeConfig('),src.indexOf('function doWriteConfig(')),ctx);
 vm.runInContext(src.slice(src.indexOf('function sysConsole('),src.indexOf('$("sy-reboot")')),ctx);

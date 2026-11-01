@@ -2,7 +2,7 @@ const fs=require('node:fs'),assert=require('node:assert/strict');
 const {chromium}=require('playwright');
 const src=fs.readFileSync('html/app.js','utf8');
 const html=fs.readFileSync(process.env.SYSTEM_HTML||'html/index.html','utf8').replace(/<script\b[^>]*>[\s\S]*?<\/script>/g,'');
-const render=src.slice(src.indexOf('var snmpPending='),src.indexOf('function snmpManagerValue('));
+const render=src.slice(src.indexOf('var snmpPending ='),src.indexOf('function snmpManagerValue('));
 (async()=>{const browser=await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHANNEL?{channel:process.env.PLAYWRIGHT_CHANNEL}:{})});
 try{const page=await browser.newPage();await page.setContent(html);
  await page.addScriptTag({content:'function $(id){return document.getElementById(id)}\n'+render});

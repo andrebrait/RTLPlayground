@@ -1,4 +1,4 @@
-/* Actual machine/SWTGW218AS.c profile; hardware edge stays mocked. */
+/* Actual machine/MOKERLINK_ZX_SWTGW218AS.c profile; hardware edge stays mocked. */
 #define SNMP_HORACO_CONTROL_CLOCK
 #define SNMP_REAL_MACHINE
 #define SNMP_TRANSPORT_TEST

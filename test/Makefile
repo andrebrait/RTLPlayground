@@ -160,8 +160,8 @@ snmp: snmp-unit $(BUILDDIR)/test_snmp_transport $(BUILDDIR)/test_snmp_transport_
 	$(BUILDDIR)/test_snmp_transport_nine
 
 # Real HORACO profile compatibility; all hardware access is mocked.
-$(BUILDDIR)/test_snmp_horaco_profile: test_snmp_horaco_profile.c test_snmp.c test_httpd_tx.c $(SNMPENV) $(SRCROOT)/machine/SWTGW218AS.c | $(BUILDDIR)
-	$(CC) $(SNMPFLAGS) -DMACHINE_SWTGW218AS -DMACHINE_NAME=SWTGW218AS test_snmp_horaco_profile.c $(SNMPENV) $(SRCROOT)/machine/SWTGW218AS.c -o $@ $(LDFLAGS)
+$(BUILDDIR)/test_snmp_horaco_profile: test_snmp_horaco_profile.c test_snmp.c test_httpd_tx.c $(SNMPENV) $(SRCROOT)/machine/MOKERLINK_ZX_SWTGW218AS.c | $(BUILDDIR)
+	$(CC) $(SNMPFLAGS) -DMACHINE_MOKERLINK_ZX_SWTGW218AS -DMACHINE_NAME=MOKERLINK_ZX_SWTGW218AS test_snmp_horaco_profile.c $(SNMPENV) $(SRCROOT)/machine/MOKERLINK_ZX_SWTGW218AS.c -o $@ $(LDFLAGS)
 .PHONY: snmp-horaco-profile
 snmp-horaco-profile: $(BUILDDIR)/test_snmp_horaco_profile
 	$(BUILDDIR)/test_snmp_horaco_profile

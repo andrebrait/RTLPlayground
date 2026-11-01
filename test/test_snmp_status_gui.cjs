@@ -1,7 +1,7 @@
 /* Isolated renderer test; no browser, network, or external libraries. */
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
 const src=fs.readFileSync('html/app.js','utf8');
-const render=src.slice(src.indexOf('var snmpPending='),src.indexOf('function snmpManagerValue('));
+const render=src.slice(src.indexOf('var snmpPending ='),src.indexOf('function snmpManagerValue('));
 const nodes={};const $=id=>nodes[id]??={style:{},textContent:'',value:''};
 const context={$};vm.createContext(context);vm.runInContext(render,context);
 context.renderSnmp([1,1,192,0,2,250,255,255,255,255]);
