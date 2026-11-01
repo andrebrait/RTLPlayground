@@ -60,6 +60,9 @@ $(BUILDDIR)/test_rx_bounds: test_rx_bounds.c $(SRCROOT)/uip/uip_rx.h | $(BUILDDI
 TESTS += $(BUILDDIR)/test_metrics
 $(BUILDDIR)/test_metrics: test_metrics.c $(SRCROOT)/metrics.c $(SRCROOT)/metrics_cli.c $(SRCROOT)/metrics.h | $(BUILDDIR)
 	$(CC) $(CFLAGS) -DPROMETHEUS test_metrics.c $(SRCROOT)/metrics_cli.c -o $@ $(LDFLAGS)
+TESTS += $(BUILDDIR)/test_metrics_http
+$(BUILDDIR)/test_metrics_http: test_metrics_http.c test_httpd_tx.c $(SRCROOT)/httpd/httpd.c $(SRCROOT)/uip/uip.c $(SRCROOT)/sessions.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) -DPROMETHEUS test_metrics_http.c $(SRCROOT)/httpd/httpd.c $(SRCROOT)/uip/uip.c $(SRCROOT)/sessions.c -o $@ $(LDFLAGS)
 
 all: run
 
