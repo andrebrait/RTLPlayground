@@ -2345,6 +2345,7 @@ function getText(p) {
 
 var CONF_CMDS = [
     /^snmp\s+(on|off)$/, /^snmp\s+community\s+[!-~]{1,32}$/, /^snmp\s+manager\s+(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/, /^snmp\s+changed\s+(unknown|\d{1,10})$/,
+    /^prometheus\s+(on|off)$/,
     /^ip\s+(\d{1,3}\.){3}\d{1,3}$/,
     /^ip\s+dhcp$/,
     /^gw\s+(\d{1,3}\.){3}\d{1,3}$/,
@@ -2909,7 +2910,8 @@ function pollInfo() {
     return getJSON("/information.json").then(function(j) {
         S.info = j;
         renderInfo();
-        renderSnmp(j.snmp)
+        renderSnmp(j.snmp);
+        renderPrometheus(j.prometheus)
     });
 }
 
@@ -4874,6 +4876,26 @@ function snmpApply() {
         renderSnmp(S.info.snmp)
     });
 }
+/* Prometheus exporter card; information.json has no "prometheus" when it is not built. */
+var promPending = false;
+
+function renderPrometheus(v) {
+    $("sy-prom").style.display = v === undefined ? "none" : "";
+    if (v === undefined) return;
+    if (!promPending) $("sy-prom-toggle").checked = !!v;
+    $("sy-prom-toggle").disabled = promPending;
+    $("sy-prom-url").textContent = v ? "http://" + location.host + "/metrics" : "";
+}
+$("sy-prom-toggle").addEventListener("change", function() {
+    promPending = true;
+    renderPrometheus(S.info.prometheus);
+    postCmds(["prometheus " + (this.checked ? "on" : "off")]).catch(function() {}).then(pollInfo).catch(function() {
+        toast("Could not refresh the Prometheus exporter status.", "err");
+    }).then(function() {
+        promPending = false;
+        renderPrometheus(S.info.prometheus)
+    });
+});
 ["manager", "secret"].forEach(function(id) {
     $("sy-snmp-" + id).addEventListener("input", function() {
         snmpEdited = true

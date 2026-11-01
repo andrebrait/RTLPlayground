@@ -63,8 +63,11 @@ $(BUILDDIR)/test_metrics: test_metrics.c $(SRCROOT)/metrics.c $(SRCROOT)/metrics
 TESTS += $(BUILDDIR)/test_metrics_http
 $(BUILDDIR)/test_metrics_http: test_metrics_http.c test_httpd_tx.c $(SRCROOT)/httpd/httpd.c $(SRCROOT)/uip/uip.c $(SRCROOT)/sessions.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) -DPROMETHEUS test_metrics_http.c $(SRCROOT)/httpd/httpd.c $(SRCROOT)/uip/uip.c $(SRCROOT)/sessions.c -o $@ $(LDFLAGS)
+TESTS += $(BUILDDIR)/test_prometheus_status_json
+$(BUILDDIR)/test_prometheus_status_json: test_prometheus_status_json.c test_page_json.c $(TABLE_ENV) hw_mock.h | $(BUILDDIR)
+	$(CC) $(CFLAGS) -DPROMETHEUS test_prometheus_status_json.c $(filter %.c,$(TABLE_ENV)) -o $@ $(LDFLAGS)
 
-all: run
+all: run prometheus-gui
 
 $(BUILDDIR):
 	mkdir -p $(BUILDDIR)
@@ -117,10 +120,15 @@ run: $(TESTS) snmp snmp-horaco-profile snmp-status snmp-cli snmp-replay config-r
 	done; \
 	if [ $$fail -ne 0 ]; then echo "TESTS FAILED"; exit 1; else echo "ALL TESTS PASSED"; fi
 
+NODE ?= node
+# Prometheus card on the System page and its saved on/off command
+prometheus-gui:
+	cd $(SRCROOT) && $(NODE) test/test_prometheus_gui.cjs
+
 clean:
 	rm -rf $(BUILDDIR)
 
-.PHONY: all run clean
+.PHONY: all run lldp-conf prometheus-gui clean
 
 
 # SNMP host benches compile the same firmware sources; listener is opt-in here.
