@@ -1,8 +1,8 @@
 /* Isolated Prometheus card renderer and saved-command filter; no browser. */
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
 const src=fs.readFileSync('html/app.js','utf8');
-const render=src.slice(src.indexOf('var promPending='),src.indexOf('$("sy-prom-toggle").addEventListener('));
-const conf=src.slice(src.indexOf('var CONF_CMDS='),src.indexOf('];',src.indexOf('var CONF_CMDS='))+2);
+const render=src.slice(src.indexOf('var promPending ='),src.indexOf('$("sy-prom-toggle").addEventListener('));
+const conf=src.slice(src.indexOf('var CONF_CMDS ='),src.indexOf('];',src.indexOf('var CONF_CMDS ='))+2);
 const nodes={};const $=id=>nodes[id]??={style:{},textContent:'',checked:false,disabled:false};
 const context={$,location:{host:'192.0.2.9'}};vm.createContext(context);
 vm.runInContext(render+conf+';this.CONF_CMDS=CONF_CMDS;',context);
@@ -17,8 +17,8 @@ assert.ok(saved('prometheus on')&&saved('prometheus off')&&!saved('prometheus ma
 console.log('PASS Prometheus card: toggle state, scrape URL, hidden without firmware support; on/off saved');
 /* Save to flash keeps one "prometheus" line however often it is toggled. */
 const mc={};vm.createContext(mc);
-vm.runInContext(src.slice(src.indexOf('var CONF_CMDS='),src.indexOf('function setDirty(')),mc);
-vm.runInContext(src.slice(src.indexOf('var CONF_OVERWRITE='),src.indexOf('function writeConfig(')),mc);
+vm.runInContext(src.slice(src.indexOf('var CONF_CMDS ='),src.indexOf('function setDirty(')),mc);
+vm.runInContext(src.slice(src.indexOf('var CONF_OVERWRITE ='),src.indexOf('function writeConfig(')),mc);
 const once=mc.mergeConf(['ip 192.0.2.10','prometheus on'],['prometheus off\nprometheus on\nprometheus off']);
 assert.deepEqual(once,['ip 192.0.2.10','prometheus off']);
 assert.deepEqual(mc.mergeConf(once,['prometheus on']),['ip 192.0.2.10','prometheus on']);

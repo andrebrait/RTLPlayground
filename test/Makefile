@@ -128,7 +128,7 @@ prometheus-gui:
 clean:
 	rm -rf $(BUILDDIR)
 
-.PHONY: all run lldp-conf prometheus-gui clean
+.PHONY: all run prometheus-gui clean
 
 
 # SNMP host benches compile the same firmware sources; listener is opt-in here.
