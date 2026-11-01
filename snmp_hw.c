@@ -4,8 +4,9 @@
 #include "machine.h"
 #include "snmp_hw.h"
 
-#pragma codeseg BANK3
-#pragma constseg BANK3
+/* BANK4, beside its callers snmp.c and metrics.c. */
+#pragma codeseg BANK4
+#pragma constseg BANK4
 
 extern __code const struct machine machine;
 /* Set when a statistics request timed out: its selector may still be pending.

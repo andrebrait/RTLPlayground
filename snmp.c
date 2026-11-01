@@ -12,8 +12,9 @@ extern bool EA;
 #include "snmp.h"
 #include "snmp_internal.h"
 #include "snmp_hw.h"
-#pragma codeseg BANK3
-#pragma constseg BANK3
+/* BANK4: BANK3 had 286 bytes left with SNMP and the Prometheus exporter built. */
+#pragma codeseg BANK4
+#pragma constseg BANK4
 extern __code const struct machine machine;
 __xdata uint8_t snmp_response[SNMP_MAX_MESSAGE];
 volatile __xdata uint32_t snmp_uptime;
