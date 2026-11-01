@@ -38,7 +38,7 @@ uint8_t sfr_data[4];
 uint8_t sfp_pins_last, sfp_options[2], sfp_buf[16];
 char sfp_module_vendor[2][17], sfp_module_model[2][17], sfp_module_serial[2][17];
 static uint8_t a2[256];
-static int fail_port = -1, fail_sel = -1;
+static int fail_port = -1, fail_sel = -1, fail_a2 = -1;
 
 bool snmp_hw_link(uint8_t port, uint32_t *v) { *v = 1u << 0; return port <= 8; }
 bool snmp_hw_speed(uint8_t port, uint16_t *mbps) { *mbps = port == 0 ? 1000 : 0; return true; }
@@ -57,6 +57,8 @@ bool snmp_hw_stat(uint8_t port, uint8_t sel, bool high, bool low, struct snmp_co
 bool sfp_read_block(uint8_t slot, uint8_t reg, uint8_t len)
 {
 	assert(slot == 0 && len <= 16 && reg + len <= 256);
+	if (reg == fail_a2)
+		return false;
 	memcpy(sfp_buf, a2 + reg, len);
 	return true;
 }
@@ -79,7 +81,7 @@ static void fixture(void)
 	strcpy(sfp_module_model[0], "SFP-10GSR-85");
 	strcpy(sfp_module_serial[0], "S123");
 	memcpy(a2 + 224, (uint8_t[]){0xfe, 0xc0, 0x80, 0xe8, 0x0b, 0xb8, 0x13, 0x88, 0x0f, 0xa0}, 10);
-	fail_port = fail_sel = -1;
+	fail_port = fail_sel = fail_a2 = -1;
 }
 
 static char scrape[65536];
@@ -262,6 +264,33 @@ static void pull_module(void)
 	sfp_pins_last |= 0x01;
 }
 
+static void test_sfp_external_calibration(void)
+{
+	fixture();
+	sfp_options[0] = 0x70;	/* DDM implemented, internally and externally calibrated flags */
+	const char *s = render(false, NULL);
+	expect_valid(s);
+	expect_line(s, "rtlplayground_sfp_external_calibration{device=\"lan9\"} 1\n");
+	expect_line(s, "rtlplayground_sfp_info{device=\"lan9\"");
+	assert(!strstr(s, "sfp_lan9") && !strstr(s, "rtlplayground_sfp_voltage_volts{"));
+	puts("PASS an externally calibrated module reports the flag and no diagnostic values");
+}
+
+static void test_sfp_read_failure(void)
+{
+	fixture();
+	fail_a2 = 224 + 2;	/* the voltage word */
+	const char *s = render(false, NULL);
+	expect_valid(s);
+	assert(!strstr(s, "rtlplayground_sfp_voltage_volts{"));
+	expect_line(s, "rtlplayground_sfp_tx_bias_amperes{device=\"lan9\"} 0.006000\n");
+	fail_a2 = 224;	/* the temperature word */
+	s = render(false, NULL);
+	expect_valid(s);
+	assert(!strstr(s, "node_hwmon_temp_celsius{chip=\"sfp_lan9\""));
+	puts("PASS a failed SFP diagnostic read omits only that sample");
+}
+
 static void test_sfp_removed(void)
 {
 	fixture();
@@ -366,5 +395,7 @@ int main(void)
 	test_escaping();
 	test_mib();
 	test_sfp_removed();
+	test_sfp_external_calibration();
+	test_sfp_read_failure();
 	return 0;
 }

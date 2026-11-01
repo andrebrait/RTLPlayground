@@ -1,8 +1,9 @@
 # Prometheus exporter
 
 Build with `make MACHINE=<profile> PROMETHEUS=1`. Without the flag the
-exporter is omitted and the image is unchanged. It can be combined with
-`SNMP=1`; both use the same bounded hardware readers in `snmp_hw.c`.
+firmware has no exporter code; the Web UI's Prometheus card stays hidden. It
+can be combined with `SNMP=1`; both use the same bounded hardware readers in
+`snmp_hw.c`.
 
 The exporter serves `GET /metrics` on the web server's port 80, in the
 Prometheus text format (version 0.0.4). Metric names, types and labels follow

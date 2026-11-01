@@ -112,7 +112,7 @@ $(BUILDDIR)/test_cpu_vlan_8372: CFLAGS += -DMACHINE_MAX_PORT=7 -DMACHINE_MIN_POR
 $(BUILDDIR)/test_cpu_vlan_full $(BUILDDIR)/test_cpu_vlan_restricted $(BUILDDIR)/test_cpu_vlan_8372: test_cpu_vlan.c $(TABLE_ENV) | $(BUILDDIR)
 	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@ $(LDFLAGS)
 
-run: $(TESTS) snmp snmp-horaco-profile snmp-status snmp-cli snmp-replay config-replay
+run: $(TESTS) snmp snmp-horaco-profile snmp-status snmp-cli snmp-replay config-replay prometheus-replay
 	@fail=0; for t in $(TESTS); do \
 		echo "=== $$t ==="; \
 		$$t || fail=1; \
@@ -217,3 +217,7 @@ $(addprefix $(BUILDDIR)/,test_snmp test_snmp_nine test_snmp_horaco_profile test_
 .PHONY: config-replay
 config-replay:
 	cd $(SRCROOT) && CC="$(CC)" python3 test/test_config_replay.py
+
+.PHONY: prometheus-replay
+prometheus-replay:
+	cd $(SRCROOT) && CC="$(CC)" python3 test/test_prometheus_replay.py

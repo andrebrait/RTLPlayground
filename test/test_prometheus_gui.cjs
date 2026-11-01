@@ -15,3 +15,11 @@ context.renderPrometheus(undefined);assert.equal($('sy-prom').style.display,'non
 const saved=c=>context.CONF_CMDS.some(r=>r.test(c));
 assert.ok(saved('prometheus on')&&saved('prometheus off')&&!saved('prometheus maybe')&&!saved('prometheus show'));
 console.log('PASS Prometheus card: toggle state, scrape URL, hidden without firmware support; on/off saved');
+/* Save to flash keeps one "prometheus" line however often it is toggled. */
+const mc={};vm.createContext(mc);
+vm.runInContext(src.slice(src.indexOf('var CONF_CMDS='),src.indexOf('function setDirty(')),mc);
+vm.runInContext(src.slice(src.indexOf('var CONF_OVERWRITE='),src.indexOf('function writeConfig(')),mc);
+const once=mc.mergeConf(['ip 192.0.2.10','prometheus on'],['prometheus off\nprometheus on\nprometheus off']);
+assert.deepEqual(once,['ip 192.0.2.10','prometheus off']);
+assert.deepEqual(mc.mergeConf(once,['prometheus on']),['ip 192.0.2.10','prometheus on']);
+console.log('PASS Prometheus on/off: saves keep one line, the latest setting wins');

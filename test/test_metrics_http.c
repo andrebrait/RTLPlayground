@@ -14,12 +14,14 @@ extern uint16_t slen;
 uint8_t prometheus_enabled;
 bool metrics_more;
 static int starts, fills;
-static bool start_mib;
+static bool start_mib, empty_last;
 
+/* The real generator can end on an empty fill: its last rows had no sample. */
 void metrics_fill(void)
 {
-	for (int i = 0; i < FILL_LEN; i++)
-		outbuf[slen++] = 'a' + fills;
+	if (!(empty_last && fills == FILLS - 1))
+		for (int i = 0; i < FILL_LEN; i++)
+			outbuf[slen++] = 'a' + fills;
 	metrics_more = ++fills < FILLS;
 }
 
@@ -50,6 +52,21 @@ static int body_ok(void)
 		if (stream[off + i] != 'a' + i / FILL_LEN)
 			return 0;
 	return 1;
+}
+
+static void scenario_empty_last_fill(void)
+{
+	int off;
+	prometheus_enabled = 1;
+	empty_last = true;
+	session_start(MSS_FULL);
+	get("/metrics");
+	drain(MSS_FULL);
+	off = body_offset();
+	CHECK(fills == FILLS && off >= 0 && stream_len == off + (FILLS - 1) * FILL_LEN &&
+	      uip_conns[0].appstate.tstate == 3 /* TSTATE_CLOSED */,
+	      "metrics_empty_last_fill: an empty final fill still closes the connection");
+	empty_last = false;
 }
 
 static void scenario_disabled(void)
@@ -145,6 +162,7 @@ int main(int argc, char **argv)
 	scenario_no_cookie();
 	scenario_rexmit();
 	scenario_restart_after_abort();
+	scenario_empty_last_fill();
 	printf("\n%s (%d failure%s)\n", failures ? "BENCH: FAILURES" : "BENCH: ALL PASS",
 	       failures, failures == 1 ? "" : "s");
 	return failures ? 1 : 0;

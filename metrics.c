@@ -36,8 +36,9 @@ static void put_char(char c)
 	outbuf[slen++] = c;
 }
 
-/* Decimal of an 8-byte big-endian counter, by long division of a copy. */
-static void put_u64(__xdata const struct snmp_counter *__xdata v)
+/* Decimal of an 8-byte big-endian counter divided by 10^decimals, by long
+ * division of a copy. Byte-wise, so no 32-bit temporaries reach DATA. */
+static void put_dec(__xdata const struct snmp_counter *__xdata v, __xdata uint8_t decimals)
 {
 	__xdata uint8_t n[8], d[20];
 	__xdata uint8_t i, k = 0, nz;
@@ -55,25 +56,7 @@ static void put_u64(__xdata const struct snmp_counter *__xdata v)
 			nz |= n[i];
 		}
 		d[k++] = '0' + cur;
-	} while (nz);
-	while (k)
-		put_char(d[--k]);
-}
-
-/* v / 10^decimals, e.g. (-1250, 3) is "-1.250". */
-static void put_fixed(__xdata int32_t v, uint8_t decimals)
-{
-	__xdata uint8_t d[11], k = 0;
-	__xdata uint32_t u = v;
-
-	if (v < 0) {
-		put_char('-');
-		u = 0 - u;
-	}
-	do {
-		d[k++] = '0' + u % 10;
-		u /= 10;
-	} while (u || k <= decimals);
+	} while (nz || k <= decimals);
 	while (k) {
 		put_char(d[--k]);
 		if (k && k == decimals)
@@ -81,18 +64,35 @@ static void put_fixed(__xdata int32_t v, uint8_t decimals)
 	}
 }
 
-static void put_u32(__xdata uint32_t v)
+static void put_u64(__xdata const struct snmp_counter *__xdata v)
+{
+	put_dec(v, 0);
+}
+
+/* Unsigned 32-bit value v / 10^decimals. */
+static void put_u32(__xdata uint32_t v, __xdata uint8_t decimals)
 {
 	__xdata struct snmp_counter c;
 	__xdata uint8_t i;
 
-	for (i = 0; i < 4; i++)
+	for (i = 0; i < 4; i++) {
 		c.bytes[i] = 0;
-	for (i = 8; i > 4; i--) {
-		c.bytes[i - 1] = v;
+		c.bytes[7 - i] = v;
 		v >>= 8;
 	}
-	put_u64(&c);
+	put_dec(&c, decimals);
+}
+
+/* v / 10^decimals, e.g. (-1250, 3) is "-1.250". */
+static void put_fixed(__xdata int32_t v, __xdata uint8_t decimals)
+{
+	__xdata uint32_t u = v;
+
+	if (v < 0) {
+		put_char('-');
+		u = 0 - u;
+	}
+	put_u32(u, decimals);
 }
 
 static void put_str(__code const char *s)
@@ -307,11 +307,22 @@ static void end_sample_int(__xdata int32_t v, __xdata uint8_t decimals)
 	put_char('\n');
 }
 
-static uint32_t uptime(void)
+/* Adds (or with sub, subtracts) the 32-bit value whose bytes are b[0..3],
+ * least significant first, to the 8-byte big-endian acc. Byte-wise, because
+ * SDCC spills 32-bit arithmetic on xdata operands to DATA. */
+static void add_le32(__xdata uint8_t *__xdata acc, __xdata const uint8_t *__xdata b, __xdata bool sub)
 {
-	reg_read_m(RTL837X_REG_SEC_COUNTER);
-	return ((uint32_t)sfr_data[0] << 24) | ((uint32_t)sfr_data[1] << 16) |
-	       ((uint16_t)sfr_data[2] << 8) | sfr_data[3];
+	__xdata uint8_t i, x;
+	__xdata uint16_t carry = sub;	/* acc - b is acc + ~b + 1 */
+
+	for (i = 0; i < 8; i++) {
+		x = i < 4 ? b[i] : 0;
+		if (sub)
+			x = ~x;
+		carry += acc[7 - i] + x;
+		acc[7 - i] = carry;
+		carry >>= 8;
+	}
 }
 
 /* SFP slot of this row's port when a module is inserted, else 0xff. */
@@ -366,7 +377,7 @@ static void add64(__xdata uint8_t *__xdata acc, __xdata const uint8_t *__xdata b
 /* Emits this family's line for the current row, if it has one. */
 static void emit_row(void)
 {
-	__code const struct family *f = &families[fam];
+	__code const struct family *__xdata f = &families[fam];
 	__xdata uint8_t k, s;
 	__xdata uint16_t w = 0;	/* SDCC cannot see through the short-circuit reads */
 	__xdata uint32_t v;
@@ -388,12 +399,20 @@ static void emit_row(void)
 	case K_TIME:
 		if (row || !ntp_state.synced)
 			return;
-		v = ntp_state.utc - ntp_state.at;
-		if (f->kind == K_TIME)
-			v += uptime();
+		for (s = 0; s < 8; s++)
+			sum.bytes[s] = 0;
+		add_le32(sum.bytes, (__xdata uint8_t *)&ntp_state.utc, false);
+		add_le32(sum.bytes, (__xdata uint8_t *)&ntp_state.at, true);
+		if (f->kind == K_TIME) {
+			/* Uptime seconds, read as ntp_uptime() does. */
+			reg_read_m(RTL837X_REG_SEC_COUNTER);
+			for (s = 0; s < 4; s++)
+				c.bytes[s] = sfr_data[3 - s];
+			add_le32(sum.bytes, c.bytes, false);
+		}
 		begin_sample();
 		put_char(' ');
-		put_u32(v);
+		put_u64(&sum);
 		put_char('\n');
 		return;
 	case K_CHIP:
