@@ -30,6 +30,9 @@
 #ifdef SNMP
 #include "snmp.h"
 #endif
+#ifdef PROMETHEUS
+#include "metrics.h"
+#endif
 #include "uip/uip.h"
 #include "version.h"
 
@@ -2123,6 +2126,11 @@ void cmd_parser(void) __banked
 				trap_rma_set(RTL837X_RMA0E_CONF, RTL837X_RMA_ACT_FORWARD);
 			}
 		}
+#ifdef PROMETHEUS
+		else if (cmd_compare(0, "prometheus")) {
+			prometheus_command();
+		}
+#endif
 		else {
 			cmd_error("Unknown command\n");
 		}

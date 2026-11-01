@@ -56,6 +56,11 @@ TESTS += $(BUILDDIR)/test_rx_bounds
 $(BUILDDIR)/test_rx_bounds: test_rx_bounds.c $(SRCROOT)/uip/uip_rx.h | $(BUILDDIR)
 	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS)
 
+# Prometheus exporter: metrics.c is included by the test, metrics_cli.c is linked.
+TESTS += $(BUILDDIR)/test_metrics
+$(BUILDDIR)/test_metrics: test_metrics.c $(SRCROOT)/metrics.c $(SRCROOT)/metrics_cli.c $(SRCROOT)/metrics.h | $(BUILDDIR)
+	$(CC) $(CFLAGS) -DPROMETHEUS test_metrics.c $(SRCROOT)/metrics_cli.c -o $@ $(LDFLAGS)
+
 all: run
 
 $(BUILDDIR):
