@@ -11,11 +11,15 @@
  *   sdcc -mmcs51 --code-loc 0x1000 -Ibuild -o build/console.ihx console.c
  *   ./mkimage.py build/console.ihx build/console_up.bin flash_dump.bin build/console_flash.bin
  */
-#include <8051.h>
 #include <stdint.h>
 #include <string.h>
+#ifdef RTLP_HOST_TEST
+#include "../test/rtl8370n_hw.h"
+#else
+#include <8051.h>
 #include "../rtl837x_sfr.h"	/* same SFR block as the RTL837x: register access, NIC DMA, SPI flash */
 #include "phy_patch.h"
+#endif
 
 #define VERSION 1
 
@@ -26,27 +30,44 @@
  */
 static uint16_t wait_n;
 static __bit timed_out;
-#define WAIT_WHILE(cond) do { wait_n = 1; while ((cond) && ++wait_n); timed_out = !wait_n; } while (0)
+static __bit io_failed;	/* A timed-out controller must not receive another command until reset. */
+#define WAIT_WHILE(cond) do { wait_n = 1; while (!io_failed && (cond) && ++wait_n); timed_out = io_failed || !wait_n; } while (0)
 
 static uint16_t reg_read(uint16_t reg)
 {
+	uint16_t t = 1;
+
+	if (io_failed)
+		return 0;
 	SFR_REG_ADDRH = reg >> 8;
 	SFR_REG_ADDRL = reg;
 	SFR_EXEC_GO = SFR_EXEC_READ_REG;
-	for (uint16_t t = 1; SFR_EXEC_STATUS && t; t++)
+	do {
 		__asm__("nop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop");
+	} while (SFR_EXEC_STATUS && ++t);
+	if (!t) {
+		io_failed = 1;
+		return 0;
+	}
 	return (SFR_DATA_8 << 8) | SFR_DATA_0;	/* RTL8370N: 16-bit read data in 0xa6:0xa7 */
 }
 
 static void reg_write(uint16_t reg, uint16_t val)
 {
+	uint16_t t = 1;
+
+	if (io_failed)
+		return;
 	SFR_REG_ADDRH = reg >> 8;
 	SFR_REG_ADDRL = reg;
 	SFR_DATA_24 = val >> 8;			/* RTL8370N: 16-bit write data in 0xa4:0xa5 */
 	SFR_DATA_16 = val;
 	SFR_EXEC_GO = SFR_EXEC_WRITE_REG;
-	for (uint16_t t = 1; SFR_EXEC_STATUS && t; t++)
+	do {
 		__asm__("nop\n\tnop\n\tnop");
+	} while (SFR_EXEC_STATUS && ++t);
+	if (!t)
+		io_failed = 1;
 }
 
 /* SDK rtl8367c_setAsicRegBits: val is shifted to the mask's lowest bit */
@@ -170,12 +191,20 @@ static uint16_t switch_init(void)
  * RING bit 15 set = XDATA -> NIC; CTRL = length in 8-byte units, 0 when done */
 static void dma(__xdata uint8_t *x, uint16_t nic, uint8_t units)
 {
+	if (io_failed) {
+		timed_out = 1;
+		return;
+	}
 	SFR_NIC_DATA_L = (uint16_t)x;
 	SFR_NIC_DATA_H = (uint16_t)x >> 8;
 	SFR_NIC_RING_L = nic;
 	SFR_NIC_RING_H = nic >> 8;
 	SFR_NIC_CTRL = units;
-	WAIT_WHILE(SFR_NIC_CTRL);
+	wait_n = 1;
+	while (SFR_NIC_CTRL && ++wait_n);
+	timed_out = !wait_n;
+	if (timed_out)
+		io_failed = 1;
 }
 
 static void nic_init(void)
@@ -205,6 +234,8 @@ static __bit tx_started;
 static uint8_t nic_tx(uint8_t n)
 {
 	uint16_t p;
+	if (io_failed)
+		return 1;
 
 	for (; n < 60; n++)
 		txb[8 + n] = 0;
@@ -228,7 +259,7 @@ static uint8_t nic_tx(uint8_t n)
 	tx_last = reg_read(0x1a56);
 	tx_started = 1;
 	reg_write(0x1a0d, 1);
-	return 0;
+	return io_failed ? 1 : 0;
 }
 
 static __xdata __at(0x2700) uint8_t rx_hdr[8];	/* DMA targets stay 8-byte aligned, as in the boot code */
@@ -256,7 +287,7 @@ static uint16_t nic_rx(void)
 	if (timed_out)
 		return 0;
 	reg_write(0x1a0c, 1);
-	return n;
+	return io_failed ? 0 : n;
 }
 
 /* Frame layout: DA, SA, 0x88b5, op, seq, status, data */

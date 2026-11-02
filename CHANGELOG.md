@@ -30,6 +30,10 @@
 
 ## Fixed
 
+- Experimental TL-SG108PE V5 console
+  - Execute the vendor settling delays before polling switch-register commands. Stop further
+    register and NIC DMA commands after a controller timeout, rather than using stale data.
+
 - Time
   - `rtl8372_init()` sets SDS 0 to SGMII as the stock firmware does. The masks were 0, so on RTL8372
     boards without 10G ports both SerDes stayed off, and with SDS 0 off `RTL837X_REG_SEC_COUNTER`
