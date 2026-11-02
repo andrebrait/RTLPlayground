@@ -1,7 +1,7 @@
 # Prometheus exporter
 
 Build with `make MACHINE=<profile> PROMETHEUS=1`. Without the flag the
-firmware has no exporter code; the Web UI's Prometheus card stays hidden. It
+firmware has no exporter code; the Web UI's Metrics section stays hidden. It
 can be combined with `SNMP=1`; both use the same bounded hardware readers in
 `snmp_hw.c`.
 
@@ -12,8 +12,8 @@ alerting rules written for those switches also apply here.
 
 ## Turning it on
 
-The exporter starts disabled. Turn it on in **System → Prometheus**, or with
-the console or UART:
+The exporter starts disabled. Turn on **Prometheus exporter** in **System → Metrics**,
+or use the console or UART:
 
 ```
 prometheus on

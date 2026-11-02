@@ -32,6 +32,7 @@
   - The web session expires after one hour without a request (was 200 seconds). The UI stops
     polling while its tab is hidden, so with 200 seconds switching tabs for a few minutes logged
     you out. `session <seconds>` still sets it.
+  - Rename the Prometheus section to Metrics, keeping the toggle labelled Prometheus exporter.
 
 ## Fixed
 
