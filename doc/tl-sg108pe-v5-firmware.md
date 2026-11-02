@@ -282,11 +282,41 @@ The flash was read twice with a CH341A programmer at 3.3 V and a SOIC-8 clip, wi
 
 The update image contains only the firmware part. Its common code (file offset 0x14) is stored at flash 0x1002, and its banks (file offset 0x3012 onward) at flash 0x1c000 onward; all 23 bank-sized chunks of the 2026 image match the flash byte for byte. The header copy at file offset 0x4012 therefore lands at flash 0x1d000. The boot code in CODE 0x0000-0x0fff and banks 1-2 is not part of the update image.
 
-The boot code has its own network stack strings (TCP states), flash-handling routines and a message about loading the MAC address from configuration storage. Whether it offers a recovery mode has not been checked.
+The boot code is described in the next section.
 
 The identity block at 0x1fc000 contains the model name, the firmware version string, a 40-character hexadecimal string and binary data. Its format, and whether the boot code or firmware verifies it, are not known. Because it is written per device, a flash dump must not be copied to another unit. The settings area at 0x1ff000 contains the configured device description among other values.
 
-For a port, the shared layout means RTLPlayground's existing image format, linker bank addresses and bank-switching approach should carry over; this has not been tested.
+For a port, the shared layout means RTLPlayground's existing image format, linker bank addresses and bank-switching approach should carry over; this has not been tested. A firmware that keeps the TP-Link boot code must also live with its interrupt handling, described below.
+
+### Boot code
+
+The boot code was decompiled from the flash dump with Ghidra. Its common code is flash 0x2-0x1001 at CODE 0x0000, and banks 1 and 2 are flash 0x4000-0xffff and 0x10000-0x1bfff at CODE 0x4000. It uses the same register access protocol (SFRs 0xa0-0xa7) and polling delays as the firmware.
+
+The reset handler at CODE 0x0d26 clears internal RAM, sets the stack pointer to 0x7f and the bank register (SFR 0x96) to 1, unpacks its startup data table (bank 1, CODE 0x42e7) and calls its main routine. That routine then:
+
+1. Sets GPIO 7 to GPIO mode as an input (bit 7 of `0x1d25` set, bit 7 of `0x1d21` cleared) and configures one more GPIO as an output through `0x1d25`, `0x1d21` and `0x1d1d`. Which pin is not yet resolved; it is probably GPIO 0 or 1.
+2. Writes `IO_MISC_FUNC` (`0x1d32`) = `0x0004` (UART_EN) and `REG_TO_ECO2` (`0x1d3f`) = `0x0100`.
+3. Writes `LED_SYS_CONFIG` (`0x1b00`) = `0x540a` (serial LED output, LED I/O disabled, LED_SELECT 2) and `LED_CONFIGURATION` (`0x1b03`) = `0x0096`, sets PON_LIGHT_EN in `0x130c` and clears the LED_POWERON bits in `0x1b00`.
+4. Checks for a warm-start marker: registers `0x172e`-`0x1731` holding `0x5555`, `0x1234`, `0x5678`, `0xaaaa`. The runtime firmware writes this marker before it reboots into the boot code.
+5. Writes `MISCELLANEOUS_CONFIGURE0` (`0x130c`) = `0x1470` (FLASH_ENABLE, NIC_ENABLE, PON_LIGHT_EN, DW8051_EN, AUTOLOAD_EN).
+6. Writes `DW8051_RDY` (`0x1336`) = `0x0041` (DW8051_RATE 4, DW8051_READY), sets up the UART at 38,400 baud on Timer 2 (the reload value is also written to `0x13a0`) and initializes the NIC: buffer bounds in `0x1a44`-`0x1a48`, `NIC_DROP_MODE` = 1, `NIC_TXCR` = 1 (TX enabled), `NIC_RXCR1` = 3 (RX enabled, CRC removed).
+
+With the warm-start marker present, it prints `Loader warm start` and enters loader mode directly. Otherwise it prints a menu on the UART and waits for a key, up to five times:
+
+- No key, or a key other than those below: verify the runtime image (header magic, header checksum and payload checksum), print `RunTime Kernel Starting....` and jump to CODE 0x1000. A failed check enters loader mode.
+- `ESC`: enter loader mode, with the unknown-unicast, unknown-multicast and broadcast flood masks (`0x0890`-`0x0892`) set to all ports.
+- `v` or `V`: start an SPI flash viewer, which also has erase (`e`, `ev`) and reboot (`b`) commands. Leaving it resets the chip through `CHIP_RESET` (`0x1322`) = 1.
+
+Loader mode serves a small web page ("Loader Mode", with `/httpupg.cgi`, `/httpug.cgi` and `/reboot.cgi`). It switches the LEDs to parallel mode (`0x1b24`/`0x1b25` = `0xffff`, `0x1b00` = `0x1472`, `0x1b03` = `0x0960`). After a cold boot it also initializes the switch with code that follows the Realtek SDK's `rtk_switch_init()`:
+
+- The chip probe matches `rtk_switch_probe()`: `0x13c2` = `0x0249`, read `0x1300`, `0x13c2` = 0. IDs `0x0276`, `0x0597` and `0x6367` select the RTL8367C path; `0x0652` and `0x6368` select the RTL8370B path.
+- The RTL8370B path is an older form of `_rtk_switch_init_8370b()`. Its PHY patch table is the SDK's `PatchChipData` (210 entries, identical) followed by one extra write, PHY register `0xa400` = `0x1140`. Its per-port `0xa4b4` values match the SDK's `long_link` table. It does not perform the `0x1205` write, the PHY patch-ready handling or the final link check of the current SDK.
+- The RTL8370B path also writes `M10_FORCE_SELECT` (`0x131c`) = `0x1076` and `0x18e4` = `0x07ff`; these two writes were not found in the SDK.
+- The common part follows the SDK in order: maximum packet length, ACL mode, rate limits, `0x03fa` = 7, unknown-DA handling, the lookup method, the RMA entry, mirror isolation and INT_EN in `0x1d32`.
+
+The default address in loader mode is 192.168.0.1/255.255.255.0. After a cold boot, the boot code takes the address and MAC address from the settings area if the first four bytes at 0x1ff000 are `00 76 ad f1`. If loader mode was entered with `ESC` or after a failed image check, it also accepts `23 79 23 79` there. Otherwise it uses the defaults. The examined dump matches neither value, so the defaults should apply; this has not been tested.
+
+Only two interrupt vectors are populated. Timer 0 (`0x000b`) goes to a boot code handler that saves the registers and, while bit address 0x00 is clear, calls CODE `0x100b`, the runtime firmware's Timer 0 entry; with the bit set, it runs the boot code's own timer. External interrupt 1 (`0x0013`) goes to a boot code handler that masks the NIC interrupt and returns without calling the runtime firmware. The bytes at the other vector addresses (external interrupt 0, Timer 1, serial, Timer 2 and the extended interrupts) are boot code, not jumps. A firmware that keeps the TP-Link boot code therefore receives only the Timer 0 interrupt; RTLPlayground's current tick, serial, link and receive interrupts would need to be replaced by polling. A firmware that replaces the boot code, as the RTL837x OEM installer does, avoids this constraint, but an interrupted install leaves the switch without a working boot code.
 
 ## Open questions
 
