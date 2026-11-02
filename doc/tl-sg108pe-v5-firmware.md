@@ -2,7 +2,7 @@
 
 This note records what static analysis of TP-Link's public TL-SG108PE V5 firmware images shows. It is meant as groundwork for a possible port of RTLPlayground to the RTL8367C/RTL8370 family, discussed in [#287](https://github.com/logicog/RTLPlayground/issues/287).
 
-The evidence comes from the update images and TP-Link's release notes. No switch was probed, flashed or modified, and no modified image was uploaded. Inferences and untested behavior are distinguished from observations.
+The evidence comes from the update images, TP-Link's release notes, photographs of a V5.0 board and a read-only dump of that board's SPI flash. The switch was not flashed or reconfigured, and no modified image was uploaded. Inferences and untested behavior are distinguished from observations.
 
 The comparison uses release notes as landmarks for reverse engineering: to separate stable hardware interfaces from changing software and connect changes to their likely purpose. It is not an audit of every advertised fix or a hardware-compatibility certification.
 
@@ -34,7 +34,9 @@ The images contain `RTL8367C`, `RTL8367N` and the Realtek SDK function name `rtl
 
 The SDK used for comparison is the public mirror of Realtek's Unmanaged Switch Library 1.3.12 in [shiroichiheisen/Realtek-Unmanaged-Switch-Arduino-Library](https://github.com/shiroichiheisen/Realtek-Unmanaged-Switch-Arduino-Library). Its source files carry Realtek's restrictive license header; nothing from it is copied here beyond register addresses and names.
 
-No usable open-source firmware for this switch was found during the research. OpenWrt cannot run on an 8051-only platform. The update-image length does not establish the board's physical flash capacity.
+No usable open-source firmware for this switch was found during the research. OpenWrt cannot run on an 8051-only platform.
+
+The [RTL8370N-VB datasheet](https://datasheet.lcsc.com/datasheet/pdf/858258fb4f2d165541ae61d6abdbbbb4.pdf?productCode=C2803243) (section 9.17) lists the embedded 8051's memory: 256 bytes of internal RAM, 48 KB of data memory, 16 KB of code memory with code banking, and an 8 KB NIC buffer. For comparison, an RTLPlayground build for an RTL837x board with SNMP and Prometheus enabled allocates 19,786 bytes of external RAM, so data memory is not the limiting factor for a port. The 139 bytes left for the stack in internal RAM are the tighter constraint.
 
 ## Update image header
 
@@ -90,7 +92,7 @@ In the 2026 image:
 - 719 six-byte call stubs in the common area reach 15 distinct code banks.
 - Generic data pointers select their bank as `(R3 - 1) & 0x3f`.
 
-The common area and bank windows are offset from each other by two bytes. The meaning of the gap has not been established.
+The two-byte offset between the common area and the bank windows comes from the flash layout, described below: the flash starts with a two-byte prefix, so CODE address `a` in the common area lives at flash offset `a + 2`.
 
 ## Switch register access from the 8051
 
@@ -249,10 +251,46 @@ The comparison separates stable hardware-facing behavior from changing managemen
 
 Release notes provided landmarks for those discoveries. Unresolved advertised fixes are limits of this investigation, not a requirement to audit every vendor claim before the findings are useful.
 
+## Board and flash
+
+These observations come from one TL-SG108PE(UN) Ver 5.0 board running software 1.0.1 Build 20260330.
+
+### Board
+
+- The switch chip sits under a heatsink. Its pin 1 is at the bottom-left corner, which puts the Ethernet pairs (pins 1-64 and 103-128) on the edges facing the magnetics and places the SPI flash pins (67-70) next to U3 and the crystal pins (97/98) next to the 25 MHz crystal.
+- U3 is the SPI flash: a cFeon/ESMT `EN25QH16B`, 16 Mbit (2 MiB), rated for 2.3-3.6 V ([datasheet](https://www.endrich.com/Datenbl%C3%A4tter/Aktive%20Komponenten/EN25QH16B%20%282A%29.pdf)). flashrom identifies it as `EN25QH16` with JEDEC ID `1c 7015`.
+- U4 is an MPS MP3924, next to the PoE MOSFETs and 0.25 Ω sense resistors. The two EEC `DG48201P1-S` magnetics serve the four ports next to that section.
+- U5 is a Cmsemicon `CMS8S5880`, a separate 8051 microcontroller with 16 KB of flash. Its position next to the PoE section suggests it manages PoE; that is an inference.
+- J2, a five-pin header next to U5, is not the switch chip's console. From the left: pin 1 is wired to pin 5 through an unpopulated resistor (R59); pin 2 is idle at 0 V; pin 3 shows a changing voltage of roughly 1.3-1.8 V; pin 4 is ground; pin 5 (square pad) is 3.3 V. A USB serial adapter on pin 3 received nothing at 38,400 baud over about 70 seconds, with the switch running and without a power cycle. J2 is most likely U5's programming header.
+- No labelled UART pads for the switch chip were found on either side of the board. The datasheet does not list UART pins. On the RTL8367N, UART_RX shares a pin with GPIO1; whether the RTL8370N does the same has not been checked.
+- Circuit ground is isolated from the chassis.
+
+### Flash layout
+
+The flash was read twice with a CH341A programmer at 3.3 V and a SOIC-8 clip, with the switch unpowered; both reads were identical. The layout matches the RTL837x layout described in [ghidra.md](ghidra.md):
+
+| Flash offset | Contents |
+|---|---|
+| 0x000000 | Two-byte prefix `00 40` (the 0x4000-byte prefetch size), then TP-Link boot code for CODE 0x0000-0x0fff |
+| 0x001002 | Firmware common code for CODE 0x1000-0x3ffd |
+| 0x004000-0x01bfff | Banks 1 and 2, belonging to the boot code |
+| 0x01c000 + (bank - 3) × 0xc000 | Firmware banks 3-25 |
+| 0x01d000 | Update header, inside the bank 3 region |
+| 0x130000-0x1fbfff | Erased (816 KiB) |
+| 0x1fc000 | Device identity block |
+| 0x1ff000 | Settings |
+
+The update image contains only the firmware part. Its common code (file offset 0x14) is stored at flash 0x1002, and its banks (file offset 0x3012 onward) at flash 0x1c000 onward; all 23 bank-sized chunks of the 2026 image match the flash byte for byte. The header copy at file offset 0x4012 therefore lands at flash 0x1d000. The boot code in CODE 0x0000-0x0fff and banks 1-2 is not part of the update image.
+
+The boot code has its own network stack strings (TCP states), flash-handling routines and a message about loading the MAC address from configuration storage. Whether it offers a recovery mode has not been checked.
+
+The identity block at 0x1fc000 contains the model name, the firmware version string, a 40-character hexadecimal string and binary data. Its format, and whether the boot code or firmware verifies it, are not known. Because it is written per device, a flash dump must not be copied to another unit. The settings area at 0x1ff000 contains the configured device description among other values.
+
+For a port, the shared layout means RTLPlayground's existing image format, linker bank addresses and bank-switching approach should carry over; this has not been tested.
 
 ## Open questions
 
 - The meaning of `0x1085` and of the trailing `3322 55ff`/`3322 56ff` header bytes.
-- Whether the bootloader or updater accepts an image that only satisfies the two checksums, or also requires the flash signature.
-- The exact chip marking, UART pin location and PoE controller on the board.
+- Whether the boot code or updater accepts an image that only satisfies the two checksums, or also checks the identity block.
+- Where the switch chip's UART is routed, and what U5 does.
 - Whether hardware V5.6 differs in a way the 2022 firmware does not handle.
