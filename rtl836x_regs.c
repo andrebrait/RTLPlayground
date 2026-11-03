@@ -58,3 +58,54 @@ void reg_write_m(uint16_t reg_addr)
 	SFR_DATA_0 = 0;
 	reg_write(reg_addr);
 }
+
+
+/*
+ * PHY register access goes through the OCP window: OCP address bits 15:10 in
+ * GPHY_OCP_MSB_0, the rest select the register at 0x2000. A reg below 32 is
+ * the MII register at OCP 0xa400 + 2 reg. dev_id is ignored: the internal
+ * GPHYs have one OCP address space.
+ */
+static uint16_t phy_addr(uint8_t phy_id, uint16_t reg)
+{
+	uint16_t v;
+
+	if (reg < 32)
+		reg = RTL836X_OCP_MII + 2 * reg;
+	reg_read(RTL836X_REG_GPHY_OCP_MSB_0);
+	v = (SFR_DATA_U16 & ~0x003f) | (reg >> 10);
+	REG_SET(RTL836X_REG_GPHY_OCP_MSB_0, v);
+	return RTL836X_PHY_WINDOW | ((reg >> 6) & 0x0f) << 8 | (uint16_t)phy_id << 5 | ((reg >> 1) & 0x1f);
+}
+
+
+/* The result is in SFR a6:a7 (SFR_DATA_U16), as on the RTL837x */
+void phy_read(uint8_t phy_id, uint8_t dev_id, uint16_t reg)
+{
+	(void)dev_id;
+	reg_read(phy_addr(phy_id, reg));
+}
+
+
+void phy_write(uint8_t phy_id, uint8_t dev_id, uint16_t reg, uint16_t v)
+{
+	(void)dev_id;
+	reg = phy_addr(phy_id, reg);
+	REG_SET(reg, v);
+}
+
+
+void phy_write_mask(uint16_t phy_mask, uint8_t dev_id, uint16_t reg, uint16_t v)
+{
+	for (uint8_t phy_id = 0; phy_mask; phy_id++, phy_mask >>= 1) {
+		if (phy_mask & 1)
+			phy_write(phy_id, dev_id, reg, v);
+	}
+}
+
+
+void phy_modify(uint8_t phy_id, uint8_t dev_id, uint16_t reg, uint16_t mask, uint16_t set)
+{
+	phy_read(phy_id, dev_id, reg);
+	phy_write(phy_id, dev_id, reg, (SFR_DATA_U16 & ~mask) | set);
+}

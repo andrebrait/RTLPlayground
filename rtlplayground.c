@@ -1136,6 +1136,24 @@ void handle_button(void)
 
 void check_links(void)
 {
+#if SOC_FAMILY == RTL836X
+	/* Polled once a second: link is bit 4 of PORTn_STATUS, one bit per port in linkbits_last[3] */
+	__xdata uint8_t links = 0;
+
+	for (uint8_t p = 0; p <= MACHINE_MAX_PORT; p++) {
+		reg_read(RTL836X_REG_PORT0_STATUS + p);
+		if (SFR_DATA_0 & PORT_STATUS_LINK)
+			links |= 1 << p;
+	}
+	if (links != linkbits_last[3]) {
+		print_string("\n<new link: "); print_byte(links);
+		print_string(", was "); print_byte(linkbits_last[3]);
+		print_string(">\n");
+		linkbits_last[3] = links;
+	}
+#else
+	REG_SET(RTL837X_ISR_INT_PORT_LINK_CHG, 0x3ff);
+	EX0 = 1;
 	reg_read_m(RTL837X_REG_LINKS_89);
 	__xdata uint8_t linkbits_p89 = sfr_data[3];
 
@@ -1168,6 +1186,7 @@ void check_links(void)
 			cpy_4(linkbits_last, sfr_data);
 		}
 	}
+#endif
 }
 
 
@@ -1233,8 +1252,6 @@ void idle(void)
 	}
 	if (link_irq) {
 		link_irq = 0;
-		REG_SET(RTL837X_ISR_INT_PORT_LINK_CHG, 0x3ff);
-		EX0 = 1;
 		check_links();
 	}
 	health_phase(HEALTH_PH_LINK);
@@ -1338,6 +1355,7 @@ void setup_clock(void)
 }
 
 
+#if SOC_FAMILY == RTL837X	/* RTL836x: rtl836x_regs.c */
 /*
  * Write a register reg of multipule phys, using a mask to select them, in page page
  * Data to be written is in v
@@ -1437,6 +1455,7 @@ void phy_modify(uint8_t phy_id, uint8_t dev_id, uint16_t reg, uint16_t mask, uin
 	do {
 	} while (SFR_EXEC_STATUS != 0);
 }
+#endif
 
 
 void set_sys_led_state(uint8_t state)

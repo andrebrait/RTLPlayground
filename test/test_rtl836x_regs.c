@@ -13,6 +13,7 @@ static void mock_settle(void);
 
 static uint16_t SFR_REG_ADDR_U16;
 static uint8_t SFR_EXEC_GO, SFR_DATA_24, SFR_DATA_16, SFR_DATA_8, SFR_DATA_0;
+#define SFR_DATA_U16 ((uint16_t)(SFR_DATA_8 << 8 | SFR_DATA_0))
 #define SFR_EXEC_STATUS mock_status()
 #define SFR_EXEC_READ_REG 1
 #define SFR_EXEC_WRITE_REG 3
@@ -79,6 +80,28 @@ int main(void)
 	reg_write_m(0x1b03);
 	assert(registers[0x1b03] == 0x0960);
 	assert(written[0] == 0x09 && written[1] == 0x60 && written[2] == 0 && written[3] == 0);
+
+	printf("[test] PHY access: OCP bits 15:10 in GPHY_OCP_MSB_0, the rest in the 0x2000 window\n");
+	registers[0x1d15] = 0xab3f;	/* bits above the MSB field survive */
+	phy_write(3, 0x1f, 0xa4b4, 0x0210);
+	assert(registers[0x1d15] == (0xab00 | 0xa4b4 >> 10));
+	assert(registers[0x2000 | 0x2 << 8 | 3 << 5 | 0x1a] == 0x0210);
+
+	printf("[test] PHY access: MII register r is OCP 0xa400 + 2r, the result is in a6:a7\n");
+	registers[0x1d15] = 0;
+	registers[0x2000 | 2 << 5 | 4] = 0x0de1;
+	phy_read(2, 0, 4);
+	assert(registers[0x1d15] == 0x29 && SFR_DATA_U16 == 0x0de1);
+
+	printf("[test] phy_modify clears the mask and sets the bits in the same register\n");
+	registers[0x2000 | 5 << 5] = 0x1940;	/* BMCR: power down, autonegotiation */
+	phy_modify(5, 0, 0xa400, 0x0800, 0x0200);
+	assert(registers[0x2000 | 5 << 5] == 0x1340);
+
+	printf("[test] phy_write_mask writes every PHY in the mask\n");
+	phy_write_mask(0x81, 0, 9, 0x0200);
+	assert(registers[0x2000 | 0 << 5 | 9] == 0x0200 && registers[0x2000 | 7 << 5 | 9] == 0x0200);
+	assert(registers[0x2000 | 1 << 5 | 9] == 0);
 
 	printf("PASS\n");
 	return 0;
