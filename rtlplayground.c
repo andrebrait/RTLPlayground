@@ -251,6 +251,22 @@ __xdata uint8_t cmd_capture;
 extern __xdata uint8_t outbuf[TCP_OUTBUF_SIZE];
 extern __xdata uint16_t slen;
 
+/* The TX-empty wait gives up after far longer than one character takes (at least
+ * milliseconds), and a UART that timed out once counts as dead from then on: a UART
+ * that does not run must not hang the firmware at its first print. */
+static __bit uart_dead;
+
+static bool uart_ready(void)
+{
+	if (!uart_dead) {
+		for (uint16_t n = 0xffff; n; n--)
+			if (tx_buf_empty)
+				return true;
+		uart_dead = 1;
+	}
+	return false;
+}
+
 void write_char_no_syslog(char c)
 {
 	/* Capturing sits here rather than in write_char() so that the messages
@@ -264,13 +280,13 @@ void write_char_no_syslog(char c)
 			cmd_capture = 2;	/* out of room, httpd says so */
 	}
 
-	do {
-	} while (tx_buf_empty == 0);
+	if (!uart_ready())
+		return;
 	if (c =='\n') {
 		tx_buf_empty = 0;
 		SBUF = '\r';
-		do {
-		} while (tx_buf_empty == 0);
+		if (!uart_ready())
+			return;
 	}
 	tx_buf_empty = 0;
 	SBUF = c;
@@ -1226,6 +1242,10 @@ static void handle_tick(void)
 	lldp_tick();
 	health_phase(HEALTH_PH_LLDP);
 	cabletest_tick();
+#if SOC_FAMILY == RTL836X
+	/* Poll the NIC once per tick as well, so RX works even if INT1 never fires */
+	rx_irq = 1;
+#endif
 }
 
 

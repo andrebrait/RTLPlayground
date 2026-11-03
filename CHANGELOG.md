@@ -42,6 +42,11 @@
 - HTTP
   - `/cmd_log_clear` answers with an empty 200 instead of the MTU table.
 
+- Serial
+  - Waiting for the UART to take a character gives up after a bounded time, and a
+    UART that timed out once is no longer written to, so a UART that does not run
+    cannot hang the firmware.
+
 ## Fixed
 
 - Experimental TL-SG108PE V5 console

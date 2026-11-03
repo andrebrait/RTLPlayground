@@ -111,7 +111,9 @@ run: $(TESTS)
 		$$t || fail=1; \
 		echo; \
 	done; \
-	if [ $$fail -ne 0 ]; then echo "TESTS FAILED"; exit 1; else echo "ALL TESTS PASSED"; fi
+	if [ $$fail -ne 0 ]; then echo "TESTS FAILED"; exit 1; fi
+	CC="$(CC)" python3 test_bringup_safety.py
+	@echo "ALL TESTS PASSED"
 
 clean:
 	rm -rf $(BUILDDIR)
