@@ -500,6 +500,7 @@ void parse_mac_cmd(void)
 }
 
 
+#if SOC_FAMILY == RTL837X	/* LAG, VLAN, isolation, ingress filter and mirror commands */
 void parse_lag(void)
 {
 	__xdata uint8_t group;
@@ -901,6 +902,7 @@ err:
 	cmd_error("Port/command missing: mirror [status/off/<mirroring port> [port][t/r]]...\n");
 	return;
 }
+#endif
 
 
 void parse_port(void)
@@ -1017,6 +1019,7 @@ void parse_port(void)
 }
 
 
+#if SOC_FAMILY == RTL837X	/* MTU and SFP commands */
 void parse_mtu(void)
 {
 	uint8_t p;
@@ -1138,6 +1141,7 @@ void parse_sfp(void)
 err:
 	cmd_error("\nUsage:\n\tsfp\n\tsfp [1|2] [1g|2g5|10g]\n");
 }
+#endif
 
 
 void parse_regget(void)
@@ -1225,6 +1229,7 @@ err:
 }
 
 
+#if SOC_FAMILY == RTL837X	/* temperature and SerDes commands */
 static void print_temperature(uint16_t reg)
 {
 	int16_t v;
@@ -1349,6 +1354,7 @@ err:
 	cmd_error("sdsset <sds-id> <hex:page> <hex:reg> <hex:val>\n");
 	return;
 }
+#endif
 
 
 void parse_phyget(void)
@@ -1501,6 +1507,7 @@ void parse_passwd(void)
 }
 
 
+#if SOC_FAMILY == RTL837X	/* EEE, bandwidth and storm commands */
 void parse_eee(void)
 {
 	__xdata int8_t port = -1;
@@ -1684,6 +1691,7 @@ void parse_storm(void)
 err:
 	print_string("usage: storm [<port> bcast|mcast|ucast|umcast <rate> pps|kbps|off]\n");
 }
+#endif
 
 void parse_syslog(void)
 {
@@ -1821,6 +1829,7 @@ void cmd_tokenize(void) __banked
 	}
 }
 
+#if SOC_FAMILY == RTL837X
 // Print GPIO status
 void print_gpio_status(void) {
 	for (uint8_t idx = 0; idx < 2; idx++) {
@@ -1847,6 +1856,7 @@ void print_gpio_status(void) {
 		write_char('\n');
 	}
 }
+#endif
 
 // Show software version
 void print_sw_version(void) __banked {
@@ -1886,8 +1896,10 @@ void cmd_parser(void) __banked
 			print_string("\nFACTORY RESET\n\n");
 			flash_default_config();
 			reset_chip();
+#if SOC_FAMILY == RTL837X	/* RTL836x: commands not ported yet are unknown */
 		} else if (cmd_compare(0, "sfp")) {
 			parse_sfp();
+#endif
 		} else if (cmd_compare(0, "stat")) {
 			port_stats_print();
 		} else if (cmd_compare(0, "flash") && cmd_words_len == 2) {
@@ -1916,8 +1928,10 @@ void cmd_parser(void) __banked
 			}
 		} else if (cmd_compare(0, "port")) {
 			parse_port();
+#if SOC_FAMILY == RTL837X
 		} else if (cmd_compare(0, "mtu")) {
 			parse_mtu();
+#endif
 		} else if (cmd_compare(0, "syslog")) {
 			parse_syslog();
 		} else if (cmd_compare(0, "dns")) {
@@ -1980,6 +1994,7 @@ void cmd_parser(void) __banked
 				}
 			}
 			write_char('\n');
+#if SOC_FAMILY == RTL837X
 		} else if (cmd_compare(0, "l2")) {
 			if (cmd_compare(1, "forget"))
 				port_l2_forget();
@@ -1995,6 +2010,7 @@ void cmd_parser(void) __banked
 			else {
 				cmd_error("igmp on|off|show\n");
 			}
+#endif
 		} else if (cmd_compare(0, "mac")) {
 			parse_mac_cmd();
 		} else if (cmd_compare(0, "hostname")) {
@@ -2031,6 +2047,7 @@ void cmd_parser(void) __banked
 				lacp_off();
 			else
 				cmd_error("lacp (show | off); a group starts LACP with: lag <1-4> lacp <port>...\n");
+#if SOC_FAMILY == RTL837X
 		} else if (cmd_compare(0, "pvid")) {
 			if (cmd_words_len == 3 && cmd_parse_port_separator(cmd_words_b[1]) != 0
 			    && atoi_short(cmd_words_b[2]) && atoi_results_short <= 4094)
@@ -2053,16 +2070,19 @@ void cmd_parser(void) __banked
 			write_char('\n');
 		} else if (cmd_compare(0, "gpio")) {
 			print_gpio_status();
+#endif
 		} else if (cmd_compare(0, "leds")) {
 			leds_dump();
 		} else if (cmd_compare(0, "regget")) {
 			parse_regget();
 		} else if (cmd_compare(0, "regset")) {
 			parse_regset();
+#if SOC_FAMILY == RTL837X
 		} else if (cmd_compare(0, "sdsget")) {
 			parse_sdsget();
 		} else if (cmd_compare(0, "sdsset")) {
 			parse_sdsset();
+#endif
 		} else if (cmd_compare(0, "phyget")) {
 			parse_phyget();
 		} else if (cmd_compare(0, "physet")) {
@@ -2071,6 +2091,7 @@ void cmd_parser(void) __banked
 			parse_rnd();
 		} else if (cmd_compare(0, "passwd")) {
 			parse_passwd();
+#if SOC_FAMILY == RTL837X
 		} else if (cmd_compare(0, "eee")) {
 			parse_eee();
 		} else if (cmd_compare(0, "bw")) {
@@ -2079,6 +2100,7 @@ void cmd_parser(void) __banked
 			parse_temp();
 		} else if (cmd_compare(0, "storm")) {
 			parse_storm();
+#endif
 		} else if (cmd_compare(0, "version")) {
 			print_sw_version();
 		} else if (cmd_compare(0, "history")) {
@@ -2094,10 +2116,13 @@ void cmd_parser(void) __banked
 					write_char(cmd_history[p]);
 				p = (p + 1) & CMD_HISTORY_MASK;
 			}
+#if SOC_FAMILY == RTL837X
 		} else if (cmd_compare(0, "ingress")) {
 			parse_ingress();
+#endif
 		} else if (cmd_compare(0, "session")) {
 			parse_session();
+#if SOC_FAMILY == RTL837X
 		} else if (cmd_compare(0, "lldp")) {
 			if (cmd_compare(1, "on")) {
 				print_string("LLDP enabled\n");
@@ -2110,6 +2135,7 @@ void cmd_parser(void) __banked
 				lldp_enabled = 0;
 				trap_rma_set(RTL837X_RMA0E_CONF, RTL837X_RMA_ACT_FORWARD);
 			}
+#endif
 		}
 		else {
 			cmd_error("Unknown command\n");

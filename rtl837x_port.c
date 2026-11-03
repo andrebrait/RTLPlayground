@@ -10,7 +10,6 @@
 #include "rtl837x_common.h"
 #include "rtl837x_sfr.h"
 #include "rtl837x_regs.h"
-#include "rtl836x_regs.h"
 #include "rtl837x_port.h"
 #include "rtl837x_phy.h"
 #include "phy.h"
@@ -511,24 +510,6 @@ void port_media_show(uint8_t port) __banked
 
 void port_stats_print(void) __banked
 {
-#if SOC_FAMILY == RTL836X
-	/* shortcut: link and speed only, add the MIB counters (0x1000-0x1005) for the traffic columns */
-	print_string("\nPort\tState\tLink\n");
-	for (uint8_t i = MACHINE_MIN_PORT; i <= MACHINE_MAX_PORT; i++) {
-		print_phys_port(i); write_char('\t');
-		phy_read(i, PHY_MMD31, 0);
-		print_string(SFR_DATA_8 & 0x08 ? "Off\t" : "On\t");	/* BMCR power down */
-		reg_read(RTL836X_REG_PORT0_STATUS + i);
-		if (!(SFR_DATA_0 & PORT_STATUS_LINK))
-			print_string("Down\n");
-		else if ((SFR_DATA_0 & PORT_STATUS_SPEED_MASK) == 2)
-			print_string("1000M\n");
-		else if (SFR_DATA_0 & PORT_STATUS_SPEED_MASK)
-			print_string("100M\n");
-		else
-			print_string("10M\n");
-	}
-#else
 	print_string("\nPort\tState\tLink\tTxGood\t\tTxBad\t\tRxGood\t\tRxBad\t\tMACs\n");
 	for (uint8_t i = MACHINE_MIN_PORT; i <= MACHINE_MAX_PORT; i++) {
 		print_phys_port(i); write_char('\t');
@@ -608,7 +589,6 @@ void port_stats_print(void) __banked
 		itoa_short(SFR_DATA_U16 & L2_LRN_PORT_CNT_MASK);
 		print_string("\n");
 	}
-#endif
 }
 
 
