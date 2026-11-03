@@ -220,6 +220,9 @@ static void nic_init(void)
 	reg_write(0x1a5c, 0x0001);	/* DROP_MODE */
 	reg_write(0x1a16, 0x0001);	/* TXCR: TX enable */
 	reg_write(0x1a15, 0x0003);	/* RXCR1: RX enable, strip CRC */
+	/* CPU port 7, tag only trapped frames: as hlyi's Sodola SL-SG008W build (3:b373) and the TP-Link runtime */
+	reg_write(0x121a, 0x00bb);	/* CPU_CTRL */
+	reg_write(0x1219, 0x0080);	/* CPU_PORT_MASK */
 }
 
 
@@ -625,9 +628,12 @@ void main(void)
 	uint16_t ticks = 0;
 
 	IE = 0;
-	CKCON = 0;
-	TMOD = (TMOD & 0xf0) | 0x01;
-	TR0 = 1;
+	/* 5 ms Timer 2 tick at 62.5 MHz / 12, as hlyi's setup_timer2 (0:07a1); polled, ET2 stays off */
+	T2CON = 0;
+	CKCON &= ~0x20;
+	RCAP2_U16 = 0x9a47;
+	T2_U16 = 0x9a47;
+	T2CON = 0x04;	/* TR2 */
 
 	log_str("rtl8370n console\n");
 	nic_init();
@@ -639,10 +645,9 @@ void main(void)
 
 		if (len)
 			handle(len);
-		if (TF0) {
-			TF0 = 0;
-			/* Measured ~43 us per Timer 0 overflow (blink.c), so ~46500 per 2 s */
-			if (++ticks == 46500) {
+		if (T2CON & 0x80) {	/* TF2 */
+			T2CON &= ~0x80;
+			if (++ticks == 400) {	/* 2 s */
 				ticks = 0;
 				uptime_s += 2;
 				beacon();
