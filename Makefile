@@ -42,6 +42,9 @@ endif
 ifneq ($(HEALTH),)
 	CC_FLAGS += -DHEALTH
 endif
+ifneq ($(DEBUG),)
+	CC_FLAGS += -DDEBUG
+endif
 
 ifeq ($(CI),1)
 	CC_FLAGS += --Werror
@@ -178,6 +181,7 @@ SRCS += \
 SRCS += \
 	httpd/httpd.c \
 	httpd/page_impl.c \
+	httpd/html_out.c \
 	httpd/page_stp.c
 SRCS += \
 	uip/timer.c \

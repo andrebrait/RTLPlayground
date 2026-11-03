@@ -176,6 +176,15 @@ var LANG = {
         stp_ctrx: "TC received",
         stp_cttx: "TC sent",
         stp_cage: "Last BPDU [s]",
+        lldp_nb_title: "Neighbours",
+        lldp_nb_chassis: "Chassis ID",
+        lldp_nb_portid: "Port ID",
+        lldp_nb_sysname: "System Name",
+        lldp_nb_sysdesc: "System Description",
+        lldp_nb_portdesc: "Port Description",
+        lldp_nb_addr: "Address",
+        lldp_nb_caps: "Capabilities",
+        lldp_nb_ttl: "TTL",
         st_title: "Port statistics",
         st_h: "totals since boot",
         st_txg: "TX good",
@@ -2404,7 +2413,7 @@ var CONF_CMDS = [
     /^stp\s+(port\s+\d+|lag\s+[1-4])\s+prio\s+\d+$/,
     /^stp\s+(port\s+\d+|lag\s+[1-4])\s+guard\s+(none|bpdu|root)$/,
     /^stp\s+(port\s+\d+|lag\s+[1-4])\s+filter\s+(on|off)$/,
-    /^stp\s+(port\s+\d=|lag\s+[1-4])\s+p2p\s+(auto|on|off)$/,
+    /^stp\s+(port\s+\d+|lag\s+[1-4])\s+p2p\s+(auto|on|off)$/,
     /^igmp\s+(on|off)$/,
     /^mtu\s+\d+\s+\d+$/,
     /^lldp\s+(on|off)$/,
@@ -3209,7 +3218,7 @@ function stpKey(pt) {
 }
 
 function stpName(pt) {
-    return pt.lag ? "LAG" + pt.lag : String(pt.p)
+    return pt.lag ? "LAG" + pt.lag + " (" + rangeStr(maskToPorts(parseInt(pt.mbr, 16))) + ")" : String(pt.p)
 }
 
 function stpDhms(x) {
@@ -3334,7 +3343,9 @@ function stpLoad() {
         s.ports.sort(function(a, b) {
             return (a.lag - b.lag) || (a.p - b.p)
         });
-        var sig = s.ports.map(stpKey).join();
+        var sig = s.ports.map(function(pt) {
+            return stpKey(pt) + (pt.mbr || "")
+        }).join();
         if (sig !== stpSig) {
             stpSig = sig;
             stpBuild(s.ports);
@@ -4601,6 +4612,26 @@ tabHooks.lag = {
     }
 };
 
+
+var LLDP_CAPS = [
+    [1, "Other"],
+    [2, "Repeater"],
+    [4, "Bridge"],
+    [8, "WLAN AP"],
+    [16, "Router"],
+    [32, "Telephone"],
+    [64, "DOCSIS"],
+    [128, "Station"]
+];
+
+function lldpCaps(c) {
+    return LLDP_CAPS.filter(function(x) {
+        return c & x[0]
+    }).map(function(x) {
+        return x[1]
+    }).join(", ")
+}
+
 function lldpLoad() {
     return getJSON("/lldp.json").then(function(s) {
         $("lldp_en").checked = s.on;
@@ -4626,6 +4657,28 @@ function lldpLoad() {
             sw.firstChild.checked = p.permitted;
             tr.insertCell().appendChild(sw);
         });
+        var nb = $("lldp_nb_table").tBodies[0];
+        nb.innerHTML = "";
+        (s.neighbors || []).sort(function(a, b) {
+            return a.port - b.port
+        }).forEach(function(n) {
+            var tr = nb.insertRow();
+            tr.insertCell().textContent = n.port;
+            tr.insertCell().textContent = n.chassis;
+            tr.insertCell().textContent = n.portId;
+            tr.insertCell().textContent = n.sysName;
+            tr.insertCell().textContent = n.sysDesc || "";
+            tr.insertCell().textContent = n.portDesc || "";
+            var ac = tr.insertCell();
+            if (n.mgmtAddr) ac.appendChild(h("a", {
+                href: "http://" + n.mgmtAddr,
+                target: "_blank",
+                rel: "noopener",
+                text: n.mgmtAddr
+            }));
+            tr.insertCell().textContent = lldpCaps(n.caps);
+            tr.insertCell().textContent = n.ttl;
+        });
     });
 }
 
@@ -4635,8 +4688,14 @@ $("lldp_en").addEventListener("change", function() {
         el.checked = !el.checked
     });
 });
+var lldpPoller = new Poller(lldpLoad, 5000);
 tabHooks.lldp = {
-    enter: lldpLoad
+    enter: function() {
+        lldpPoller.start()
+    },
+    leave: function() {
+        lldpPoller.stop()
+    }
 };
 
 function eeeFlags(bits) {
