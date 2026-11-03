@@ -34,7 +34,8 @@ TESTS = $(BUILDDIR)/test_cmd_editor \
         $(BUILDDIR)/test_cpu_vlan_8372 \
         $(BUILDDIR)/test_nic_rx \
         $(BUILDDIR)/test_lacp \
-        $(BUILDDIR)/test_rtl8370n_console
+        $(BUILDDIR)/test_rtl8370n_console \
+        $(BUILDDIR)/test_rtl836x_regs
 
 # The table tests link the register mock and one environment file; stub/
 # stands in for the two headers a firmware build generates.
@@ -60,6 +61,11 @@ $(BUILDDIR)/test_tick_gate: test_tick_gate.c support.c $(SRCROOT)/cmd_editor.c |
 # The experimental console uses the same SDCC shim and a simulated SFR edge.
 $(BUILDDIR)/test_rtl8370n_console: test_rtl8370n_console.c rtl8370n_hw.h $(SRCROOT)/rtl8370n/console.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) -Wno-pointer-to-int-cast -Wno-int-to-pointer-cast $< -o $@ $(LDFLAGS)
+
+# The RTL836x register primitives on a model of the RTL8370N register controller.
+$(BUILDDIR)/test_rtl836x_regs: CFLAGS += -DMACHINE_NAME=TPLINK_TL_SG108PE_V5
+$(BUILDDIR)/test_rtl836x_regs: test_rtl836x_regs.c $(SRCROOT)/rtl836x_regs.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS)
 
 # Exercise the production RX ring reader; only the hardware DMA edge is mocked.
 # Discard unused TX functions so this RX fixture needs no TX register mocks.

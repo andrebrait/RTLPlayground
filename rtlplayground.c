@@ -589,6 +589,7 @@ void setup_timer2(void)
 }
 
 
+#if SOC_FAMILY == RTL837X	/* RTL836x: rtl836x_regs.c */
 void reg_read(uint16_t reg_addr)
 {
 	SFR_REG_ADDR_U16 = reg_addr;
@@ -646,6 +647,7 @@ void reg_write_m(uint16_t reg_addr)
 	do {
 	} while (SFR_EXEC_STATUS != 0);
 }
+#endif
 
 
 /*

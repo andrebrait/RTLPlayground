@@ -356,7 +356,16 @@
 #endif /* SOC_FAMILY == RTL837X */
 
 
-#ifdef REGDBG
+#if SOC_FAMILY == RTL836X
+/* 16-bit registers: write data in SFR a4 (high byte) and a5. No REG_WRITE: its users are RTL837x code */
+#define REG_SET(r, v) do { \
+	SFR_DATA_24 = ((uint16_t)(v)) >> 8; \
+	SFR_DATA_16 = (v) & 0xff; \
+	SFR_DATA_8 = 0; \
+	SFR_DATA_0 = 0; \
+	reg_write(r); \
+} while (0)
+#elif defined(REGDBG)
 
 #define REG_SET(r, v) do { \
 	SFR_DATA_24 = (((uint32_t)v) >> 24) & 0xff; \

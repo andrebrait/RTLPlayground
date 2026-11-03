@@ -1173,6 +1173,12 @@ err:
 }
 
 
+#if SOC_FAMILY == RTL836X
+#define REG_VALUE_BYTES 2	/* 16-bit registers */
+#else
+#define REG_VALUE_BYTES 4
+#endif
+
 void parse_regset(void)
 {
 	if (cmd_words_len != 3) {
@@ -1191,7 +1197,7 @@ void parse_regset(void)
 	}
 
 	hex_size = atoi_hex(cmd_words_b[2]);
-	if (hex_size == 0 || hex_size > 4) {
+	if (hex_size == 0 || hex_size > REG_VALUE_BYTES) {
 		goto err;
 	}
 
