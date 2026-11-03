@@ -923,22 +923,13 @@ void tcpip_output(void)
 		FRAME_Q->tci = HTONS(management_vlan);
 	}
 
-	reg_read_m(RTL837X_REG_CPU_TX_CURR_PKT);
-	uint16_t ring_ptr = ((uint16_t)sfr_data[2]) << 8;
-	ring_ptr |= sfr_data[3];
-
 	// Move data over from xmem buffer to ASIC side using DMA. A VLAN-tagged
 	// frame starts at uip_buf; an untagged frame retains four bytes of padding.
 	if (frame_tagged)
-		nic_tx_packet(uip_buf, FRAME_Q->len, ring_ptr);
+		nic_tx_packet(uip_buf, FRAME_Q->len, nic_tx_ptr(FRAME_Q->len));
 	else
-		nic_tx_packet(uip_buf + VLAN_TAG_SIZE, FRAME->len, ring_ptr);
-
-	// New position of the ring-pointer on the NIC-side indicates number of bytes transmitted
-	reg_read_m(RTL837X_REG_NIC_TX_CURR_PKT);
-
-	// Do actual TX of data on ASIC side
-	REG_SET(RTL837X_REG_NIC_TXCMD, 1);
+		nic_tx_packet(uip_buf + VLAN_TAG_SIZE, FRAME->len, nic_tx_ptr(FRAME->len));
+	nic_tx_start();
 }
 
 
@@ -950,14 +941,11 @@ void handle_rx(void)
 
 	while (budget--) {
 		// Check the amount of data available on the NIC/ASIC side
-		reg_read(RTL837X_REG_NIC_RX_BUFF_DATA);
-		if (!SFR_DATA_U16)
+		if (!nic_rx_pending())
 			break;
-		reg_read(RTL837X_REG_CPU_RX_CURR_PKT);
-		uint16_t ring_ptr = SFR_DATA_U16;
-		ring_ptr <<= 3;
+		uint16_t ring_ptr = nic_rx_ptr();
 		if (!nic_rx_header(ring_ptr)) {
-			REG_SET(RTL837X_REG_NIC_RXCMD, 1);
+			nic_rx_release();
 			return;
 		}
 #ifdef RXTXDBG
@@ -970,7 +958,7 @@ void handle_rx(void)
 		}
 #endif
 		if (!nic_rx_packet(uip_buf, ring_ptr + 8)) {
-			REG_SET(RTL837X_REG_NIC_RXCMD, 1);
+			nic_rx_release();
 			return;
 		}
 		health_rx_frame();
@@ -983,7 +971,7 @@ void handle_rx(void)
 			write_char(' ');
 		}
 #endif
-		REG_SET(RTL837X_REG_NIC_RXCMD, 1);
+		nic_rx_release();
 		uip_len = (((uint16_t)rx_headers[5]) << 8) | rx_headers[4];
 
 		rx_packet_vlan = NTOHS(ETH_IN->vlan_tag.vlan) & 0x0fff;
@@ -1258,9 +1246,8 @@ void idle(void)
 	if (rx_irq) {
 		rx_irq = 0;
 		handle_rx();
-		REG_SET(RTL837X_NIC_INT_STS, NIC_INT_RXIS);
-		reg_read(RTL837X_REG_NIC_RX_BUFF_DATA);
-		if (SFR_DATA_U16)
+		nic_rx_ack();
+		if (nic_rx_pending())
 			rx_irq = 1;
 		else
 			EX1 = 1;

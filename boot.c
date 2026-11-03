@@ -7,6 +7,7 @@
 
 #include "rtl837x_sfr.h"
 #include "rtl837x_regs.h"
+#include "rtl836x_regs.h"
 #include "rtl837x_common.h"
 #include "rtl837x_flash.h"
 #include "rtl837x_pins.h"
@@ -455,6 +456,35 @@ void setup_i2c(void) __banked
 		}
 	}
 	reg_write_m(RTL837X_PIN_MUX_1);	
+}
+#else
+/* The boot code's NIC init (FUN_CODE_4f41) as the console image does it, plus the RX interrupt */
+void nic_setup(void) __banked
+{
+	uint16_t v;
+
+	reg_read(RTL836X_REG_CHIP_RESET);
+	v = SFR_DATA_U16 | CHIP_RESET_NIC_RST;
+	REG_SET(RTL836X_REG_CHIP_RESET, v);
+	reg_read(RTL836X_REG_MISCELLANEOUS_CONFIGURE0);
+	v = SFR_DATA_U16 | MISC_CFG0_NIC_ENABLE;
+	REG_SET(RTL836X_REG_MISCELLANEOUS_CONFIGURE0, v);
+	REG_SET(RTL836X_REG_NIC_RXSTOPRL, 0x00ff);	/* RXSTOPR 0x2ff: RX ring 0x0000-0x17ff */
+	REG_SET(RTL836X_REG_NIC_RXSTOPRH, 0x0002);
+	REG_SET(RTL836X_REG_NIC_TXSTOPRL, 0x00fe);	/* TXSTOPR 0x3fe */
+	REG_SET(RTL836X_REG_NIC_TXSTOPRH, 0x0003);
+	REG_SET(RTL836X_REG_NIC_RXFSTR, 0x0004);
+	REG_SET(RTL836X_REG_NIC_GCR, 0x0000);
+	REG_SET(RTL836X_REG_NIC_DROP_MODE, 0x0001);
+	REG_SET(RTL836X_REG_NIC_TXCR, 0x0001);	/* TX enable */
+	REG_SET(RTL836X_REG_NIC_RXCR1, 0x0003);	/* RX enable, strip CRC */
+	/* CPU port 7, CPU tag only on trapped frames: as the TP-Link runtime and hlyi's RTL8370 build */
+	REG_SET(RTL836X_REG_CPU_CTRL, 0x00bb);
+	REG_SET(RTL836X_REG_CPU_PORT_MASK, 0x0080);
+	REG_SET(RTL836X_REG_NIC_IMR, NIC_IMR_RXIE);	/* INT1 on RX */
+
+	// Sequence number of TX packets
+	tx_seq = 0;
 }
 #endif
 

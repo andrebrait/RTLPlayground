@@ -35,7 +35,8 @@ TESTS = $(BUILDDIR)/test_cmd_editor \
         $(BUILDDIR)/test_nic_rx \
         $(BUILDDIR)/test_lacp \
         $(BUILDDIR)/test_rtl8370n_console \
-        $(BUILDDIR)/test_rtl836x_regs
+        $(BUILDDIR)/test_rtl836x_regs \
+        $(BUILDDIR)/test_rtl836x_nic
 
 # The table tests link the register mock and one environment file; stub/
 # stands in for the two headers a firmware build generates.
@@ -65,6 +66,11 @@ $(BUILDDIR)/test_rtl8370n_console: test_rtl8370n_console.c rtl8370n_hw.h $(SRCRO
 # The RTL836x register primitives on a model of the RTL8370N register controller.
 $(BUILDDIR)/test_rtl836x_regs: CFLAGS += -DMACHINE_NAME=TPLINK_TL_SG108PE_V5
 $(BUILDDIR)/test_rtl836x_regs: test_rtl836x_regs.c $(SRCROOT)/rtl836x_regs.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS)
+
+# RTL836x NIC frame conversion; the register controller and the DMA engine are modelled.
+$(BUILDDIR)/test_rtl836x_nic: CFLAGS += -DMACHINE_NAME=TPLINK_TL_SG108PE_V5
+$(BUILDDIR)/test_rtl836x_nic: test_rtl836x_nic.c $(SRCROOT)/rtl836x_nic.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS)
 
 # Exercise the production RX ring reader; only the hardware DMA edge is mocked.
