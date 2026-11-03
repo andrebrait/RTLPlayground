@@ -25,6 +25,8 @@ void phy_config_8224(void) __banked;
 void rtl8224_wait_ready(void) __banked;
 void phy_set_speed(void) __banked;
 void phy_set_duplex(void) __banked;
+/* RTL836x pause advertisement: 0 off, 1 symmetric, 2 asymmetric TX, 3 asymmetric RX. */
+void phy_set_flowcontrol(uint8_t mode) __banked;
 void phy_show(uint8_t port) __banked;
 void phy_reset(uint8_t port) __banked;
 void rtl8224_read_reg_u16(uint16_t reg) __banked;

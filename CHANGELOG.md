@@ -30,12 +30,20 @@
     The UI hides unsupported 2.5G and MTU controls; custom advertisements are
     displayed without silently replacing them. Saved duplex changes retain the
     speed command they modify.
-    VLAN, L2 table, LAG, STP, LLDP, IGMP, mirroring, EEE, bandwidth, storm control,
+    EEE controls use native PHY advertisement and MAC capability registers for
+    100M/1G; negotiated LPI is reported separately and unverified link-partner
+    capabilities remain unavailable. Pause advertisement can be disabled,
+    symmetric or asymmetric, with negotiated TX/RX pause shown in port details.
+    Speed and pause settings are saved independently. EEE speed labels now match
+    the advertised bit order on both chip families.
+    VLAN, L2 table, LAG, STP, LLDP, IGMP, mirroring, bandwidth, storm control,
     MTU and cable test are not ported: their commands are refused and their pages
     are empty. Temperature remains unavailable without a verified sensor mapping.
     Hardware checks passed for standalone boot, DHCP, ping, web login, settings
     persistence, web firmware updates and increasing native packet/byte counters
-    on the live network. Port-control hardware validation is pending.
+    on the live network. Port 1 negotiated 10M full, 100M half/full and returned
+    to Auto after disable/enable; the uplink stayed at 1G. EEE and pause controls
+    pass host checks; hardware validation is pending.
 
 - Web UI
   - Compress the embedded assets (minify + gzip) and switch to a single-page layout. #315

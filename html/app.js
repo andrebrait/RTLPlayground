@@ -89,6 +89,13 @@ var LANG = {
         pt_speed: "Speed",
         pt_mtu: "MTU",
         pt_custom: "Custom advertisement",
+        pt_flow: "Pause advertisement",
+        pt_fc_off: "Off",
+        pt_fc_on: "Symmetric",
+        pt_fc_tx: "TX asymmetric",
+        pt_fc_rx: "RX asymmetric",
+        pt_pause_tx: "Negotiated TX pause",
+        pt_pause_rx: "Negotiated RX pause",
         pt_sfp_note: "SFP speed is set per slot and is not saved in the startup config.",
         pt_name_err: "Port name: 1-15 characters, no spaces",
         pt_mtu_err: "MTU must be 64-16383",
@@ -2371,6 +2378,7 @@ var CONF_CMDS = [
     /^ingress(\s+\d+[tua])+$/, /^ingress\s+[tua]$/,
     /^port\s+\d+\s+(10m|100m|1g|2g5|5g|10g|auto|on|off)(\s+(half|full))?$/,
     /^port\s+\d+\s+duplex\s+(half|full)$/,
+    /^port\s+\d+\s+flowcontrol\s+(off|on|rx|tx)$/,
     /^port\s+\d+\s+name\s+\S+$/,
     /^port\s+\d+\s+lldp\s+(permit|block)+$/,
     /^eee\s+(on|off)(\s+\d+)?(\s+(100m|1g|2g5))?$/,
@@ -2799,6 +2807,11 @@ function portRows(p) {
     rows.push([t("st_txb"), counterText(p.txB) + " " + t("p_pkts")]);
     rows.push([t("st_rxg"), counterText(p.rxG) + " " + t("p_pkts")]);
     rows.push([t("st_rxb"), counterText(p.rxB) + " " + t("p_pkts")]);
+    if (p.flowcontrol != null) {
+        rows.push([t("pt_flow"), t(FLOWCONTROL[p.flowcontrol][1])]);
+        rows.push([t("pt_pause_tx"), p.pause_tx ? "On" : "Off"]);
+        rows.push([t("pt_pause_rx"), p.pause_rx ? "On" : "Off"]);
+    }
     if (p.isSFP) {
         if (p.sfp_vendor) rows.push([t("p_module"), [p.sfp_vendor, p.sfp_model, p.sfp_serial].filter(Boolean).join(" / ")]);
         var ext = p.sfp_options & 0x40;
@@ -2958,11 +2971,17 @@ function speedLabel(s) {
     return s.replace(" full", " " + t("c_full")).replace(" half", " " + t("c_half"));
 }
 
+var FLOWCONTROL = [
+    ["off", "pt_fc_off"], ["on", "pt_fc_on"],
+    ["tx", "pt_fc_tx"], ["rx", "pt_fc_rx"]
+];
+
 function buildPorts() {
     var tb = $("ptable").tBodies[0];
     if (tb.rows.length || !S.n) return;
     var rtl836x = S.info.mib_family === "rtl836x";
     document.querySelector('#ptable th[data-i18n="pt_mtu"]').hidden = rtl836x;
+    document.querySelector('#ptable th[data-i18n="pt_flow"]').hidden = !rtl836x;
     S.ports.forEach(function(p) {
         var i = p.portNum - 1;
         var spd = h("select", {
@@ -3015,6 +3034,14 @@ function buildPorts() {
             max: "16383",
             disabled: rtl836x
         }));
+        var flowCell = tr.insertCell();
+        flowCell.hidden = !rtl836x;
+        var flow = h("select", {class: "in", id: "pflow" + i});
+        FLOWCONTROL.forEach(function(o, mode) {
+            flow.appendChild(h("option", {value: String(mode), text: t(o[1])}));
+        });
+        flow.value = String(p.flowcontrol == null ? 0 : p.flowcontrol);
+        flowCell.appendChild(flow);
         tr.insertCell().appendChild(h("button", {
             class: "ctl",
             text: t("c_apply"),
@@ -3049,6 +3076,8 @@ function portsStatus() {
             v = p.isSFP ? 0 : ADVSEL[parseInt(p.adv, 2)];
         if (sel && v && document.activeElement !== sel) sel.value = v;
         else if (sel && S.info.mib_family === "rtl836x" && document.activeElement !== sel) sel.value = "custom";
+        var flow = $("pflow" + i);
+        if (flow && p.flowcontrol != null && document.activeElement !== flow) flow.value = String(p.flowcontrol);
     });
 }
 
@@ -3072,6 +3101,8 @@ function applyPort(i) {
         cmds.push("sfp " + S.sfpSlot[i] + " " + spd);
     } else if (spd !== "custom") cmds.push("port " + p.portNum + " " + spd);
     else if (!p.enabled) cmds.push("port " + p.portNum + " on");
+    if (p.flowcontrol != null && +$("pflow" + i).value !== p.flowcontrol)
+        cmds.push("port " + p.portNum + " flowcontrol " + FLOWCONTROL[+$("pflow" + i).value][0]);
     if (mtu && mtu !== S.mtu[i]) {
         if (mtu < 64 || mtu > 16383) {
             toast(t("pt_mtu_err"), "err");
@@ -4567,7 +4598,7 @@ tabHooks.lldp = {
 function eeeFlags(bits) {
     var b = parseInt(bits, 2);
     return ["100M", "1G", "2.5G"].map(function(s, i) {
-        return (b & (4 >> i)) ? s : null;
+        return (b & (1 << i)) ? s : null;
     }).filter(Boolean).join(", ") || "-";
 }
 
@@ -5199,6 +5230,11 @@ function mergeConf(base, texts) {
                 conf.push(line);
                 return;
             }
+            if ((m = line.match(/^(port \d{1,2}) flowcontrol (off|on|rx|tx)$/))) {
+                drop(new RegExp("^" + m[1] + " flowcontrol "));
+                conf.push(line);
+                return;
+            }
             if ((m = line.match(/^ingress (.+)$/))) {
                 if (/^[tua]$/.test(m[1])) {
                     drop(/^ingress /);
@@ -5257,7 +5293,8 @@ function mergeConf(base, texts) {
                     var key = line.match(rx)[0];
                     conf = conf.filter(function(item) {
                         return !(item === key || (item.indexOf(key + " ") === 0 &&
-                            !/\smgmt$/.test(item) && item.indexOf(key + " name ") !== 0 && item.indexOf(key + " lldp ") !== 0));
+                            !/\smgmt$/.test(item) && item.indexOf(key + " name ") !== 0 &&
+                            item.indexOf(key + " lldp ") !== 0 && item.indexOf(key + " flowcontrol ") !== 0));
                     });
                     break;
                 }

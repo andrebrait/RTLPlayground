@@ -7,6 +7,7 @@
 #include "rtl836x_regs.h"
 #include "cmd_parser.h"
 #include "machine.h"
+#include "rtl837x_port.h"
 #include "phy.h"
 
 #pragma codeseg BANK2
@@ -126,4 +127,83 @@ void phy_show(uint8_t port) __banked
 		print_string(status & 0x0004 ? " full duplex" : " half duplex");
 	}
 	write_char('\n');
+}
+
+void phy_set_flowcontrol(uint8_t mode) __banked
+{
+	if (!MACHINE_PORT_VALID(phy_settings.port) || mode > 3) {
+		invalid_mode();
+		return;
+	}
+	phy_read(phy_settings.port, 0, 4);
+	phy_write(phy_settings.port, 0, 4, (SFR_DATA_U16 & ~0x0c00) | (uint16_t)mode << 10);
+	phy_read(phy_settings.port, 0, 0);
+	phy_write(phy_settings.port, 0, 0, SFR_DATA_U16 | 0x0200);
+}
+
+static void set_eee(__xdata uint8_t port, __xdata uint8_t modes, __xdata bool restart)
+{
+	phy_read(port, 0, RTL836X_OCP_EEE_ADV);
+	phy_write(port, 0, RTL836X_OCP_EEE_ADV, (SFR_DATA_U16 & ~0x0006) | modes);
+	reg_read(RTL836X_REG_PORT0_EEE_CFG + ((uint16_t)port << 5));
+	uint16_t config = SFR_DATA_U16 & ~(RTL836X_EEE_100M | RTL836X_EEE_1G);
+	if (modes & 2)
+		config |= RTL836X_EEE_100M;
+	if (modes & 4)
+		config |= RTL836X_EEE_1G;
+	REG_SET(RTL836X_REG_PORT0_EEE_CFG + ((uint16_t)port << 5), config);
+	if (restart) {
+		phy_read(port, 0, 0);
+		phy_write(port, 0, 0, SFR_DATA_U16 | 0x0200);
+	}
+}
+
+void port_eee_enable(__xdata uint8_t port, __xdata uint8_t speed) __banked
+{
+	uint8_t limit = speed & ~EEE_NORESET;
+	if (!MACHINE_PORT_VALID(port) || (limit != EEE_100 && limit != EEE_1000)) {
+		invalid_mode();
+		return;
+	}
+	set_eee(port, limit == EEE_100 ? 2 : 6, !(speed & EEE_NORESET));
+}
+
+void port_eee_disable(uint8_t port) __banked
+{
+	if (!MACHINE_PORT_VALID(port)) {
+		invalid_mode();
+		return;
+	}
+	set_eee(port, 0, true);
+}
+
+void port_eee_status(uint8_t port) __banked
+{
+	print_string("Port "); print_phys_port(port); print_string(" EEE advertised:");
+	phy_read(port, 0, RTL836X_OCP_EEE_ADV);
+	uint16_t advertised = SFR_DATA_U16;
+	if (advertised & 2) print_string(" 100M");
+	if (advertised & 4) print_string(" 1G");
+	if (!(advertised & 6)) print_string(" off");
+	reg_read(RTL836X_REG_PORT0_STATUS + port);
+	print_string((SFR_DATA_U16 & PORT_STATUS_LINK) && (SFR_DATA_U16 & PORT_STATUS_EEE_CAP) ?
+		"; negotiated: yes\n" : "; negotiated: no\n");
+}
+
+void port_eee_enable_all(__xdata uint8_t speed) __banked
+{
+	for (uint8_t port = MACHINE_MIN_PORT; port <= MACHINE_MAX_PORT; port++)
+		port_eee_enable(port, speed);
+}
+
+void port_eee_disable_all(void) __banked
+{
+	for (uint8_t port = MACHINE_MIN_PORT; port <= MACHINE_MAX_PORT; port++)
+		port_eee_disable(port);
+}
+
+void port_eee_status_all(void) __banked
+{
+	for (uint8_t port = MACHINE_MIN_PORT; port <= MACHINE_MAX_PORT; port++)
+		port_eee_status(port);
 }

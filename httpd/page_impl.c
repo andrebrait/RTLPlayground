@@ -932,11 +932,29 @@ void send_mtu(void)
 	char_to_html(']');
 }
 #else
-/* shortcut: EEE, bandwidth, storm control, isolation and MTU are not ported to the RTL836x */
+/* Native EEE advertisement and negotiated LPI; no verified partner register yet. */
 void send_eee(void)
 {
-	send_json("[]");
+	slen = strtox(outbuf, HTTP_RESPONCE_JSON);
+	char_to_html('[');
+	for (uint8_t port = MACHINE_MIN_PORT; port <= MACHINE_MAX_PORT; port++) {
+		if (port != MACHINE_MIN_PORT)
+			char_to_html(',');
+		string_to_html("{\"portNum\":");
+		itoa_html(machine.log_to_phys_port[port]);
+		string_to_html(",\"isSFP\":0,\"eee\":\"0");
+		phy_read(port, 0, RTL836X_OCP_EEE_ADV);
+		uint16_t advertised = SFR_DATA_U16;
+		bool_to_html(advertised & 4);
+		bool_to_html(advertised & 2);
+		string_to_html("\",\"eee_lp\":null,\"active\":");
+		reg_read(RTL836X_REG_PORT0_STATUS + port);
+		bool_to_html((SFR_DATA_U16 & PORT_STATUS_LINK) && (SFR_DATA_U16 & PORT_STATUS_EEE_CAP));
+		char_to_html('}');
+	}
+	char_to_html(']');
 }
+/* shortcut: bandwidth, storm control, isolation and MTU are not ported to the RTL836x */
 
 void send_bandwidth(void)
 {
@@ -1055,12 +1073,21 @@ void send_status(void)
 			bool_to_html(!!(w & 0x40));		// 10Base-Full
 			bool_to_html(!!(w & 0x20));		// 10Base-Half
 			char_to_html('"');
+#if SOC_FAMILY == RTL836X
+			string_to_html(",\"flowcontrol\":");
+			itoa_html((w >> 10) & 3);
+#endif
 		}
 
 		slen += strtox(outbuf + slen, ",\"link\":");
 #if SOC_FAMILY == RTL836X
 		reg_read(RTL836X_REG_PORT0_STATUS + i);
-		char_to_html(SFR_DATA_0 & PORT_STATUS_LINK ? '1' + (SFR_DATA_0 & PORT_STATUS_SPEED_MASK) : '0');
+		uint16_t status = SFR_DATA_U16;
+		char_to_html(status & PORT_STATUS_LINK ? '1' + (status & PORT_STATUS_SPEED_MASK) : '0');
+		string_to_html(",\"pause_tx\":");
+		bool_to_html((status & 0x0050) == 0x0050);
+		string_to_html(",\"pause_rx\":");
+		bool_to_html((status & 0x0030) == 0x0030);
 		__xdata uint8_t value[8];
 		for (uint8_t metric = 0; metric < 4; metric++) {
 			switch (metric) {

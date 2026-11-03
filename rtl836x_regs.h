@@ -24,6 +24,10 @@
 #define RTL836X_REG_PORT0_STATUS		0x1352	/* + port */
 #define PORT_STATUS_LINK			0x0010
 #define PORT_STATUS_SPEED_MASK			0x0003	/* 0: 10M, 1: 100M, 2: 1000M */
+#define PORT_STATUS_EEE_CAP			0x0c00
+#define RTL836X_REG_PORT0_EEE_CFG		0x0018	/* + (port << 5) */
+#define RTL836X_EEE_100M			0x0800
+#define RTL836X_EEE_1G				0x0400
 
 /* Read-only MIB data latch; only the address selector is written. */
 #define RTL836X_REG_MIB_COUNTER			0x1000
@@ -81,6 +85,7 @@
 #define RTL836X_REG_GPHY_OCP_MSB_0		0x1d15
 #define RTL836X_PHY_WINDOW			0x2000
 #define RTL836X_OCP_MII				0xa400	/* MII register r is OCP 0xa400 + 2 r */
+#define RTL836X_OCP_EEE_ADV			0xa5d0	/* bits 1: 100M, 2: 1G */
 
 /* RLDP, also the random number generator */
 #define RTL836X_REG_RLDP_CTRL0			0x18e0

@@ -14,3 +14,15 @@ assert.deepEqual(plain(saved), ['port 1 100m full', 'port 8 auto', 'port 1 duple
 saved = context.mergeConf(saved, ['port 1 auto']);
 assert.deepEqual(plain(saved), ['port 8 auto', 'port 1 auto']);
 console.log('Port speed/duplex configuration replay order passed');
+vm.runInContext(source.slice(source.indexOf('function eeeFlags('), source.indexOf('function eeeLoad(')), context);
+assert.equal(context.eeeFlags('001'), '100M');
+assert.equal(context.eeeFlags('010'), '1G');
+assert.equal(context.eeeFlags('100'), '2.5G');
+assert.equal(context.eeeFlags(null), '-');
+saved = context.mergeConf(['port 1 100m full', 'port 8 auto'], ['port 1 flowcontrol rx']);
+assert.deepEqual(plain(saved), ['port 1 100m full', 'port 8 auto', 'port 1 flowcontrol rx']);
+saved = context.mergeConf(saved, ['port 1 auto']);
+assert.deepEqual(plain(saved), ['port 8 auto', 'port 1 flowcontrol rx', 'port 1 auto']);
+saved = context.mergeConf(saved, ['port 1 flowcontrol off']);
+assert.deepEqual(plain(saved), ['port 8 auto', 'port 1 auto', 'port 1 flowcontrol off']);
+console.log('EEE capability labels and independent pause configuration passed');

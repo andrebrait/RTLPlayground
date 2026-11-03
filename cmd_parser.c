@@ -914,6 +914,7 @@ void parse_port(void)
 					 "\nport <port> [10m|100m] [half|full]"
 					 "\nport <port> 1g"
 					 "\nport <port> duplex [half|full]"
+					 "\nport <port> flowcontrol [off|on|rx|tx]"
 #else
 					 "\nport <port> [10m|100m|1g|2g5|duplex] [half|full]"
 					 "\nport <port> cabletest [show]"
@@ -942,6 +943,12 @@ void parse_port(void)
 	} else if (cmd_compare(2, "duplex")) {
 		if (cmd_words_len != 4 || !(cmd_compare(3, "half") || cmd_compare(3, "full"))) {
 			cmd_error("Expected duplex half|full\n");
+			return;
+		}
+	} else if (cmd_compare(2, "flowcontrol")) {
+		if (cmd_words_len != 4 || !(cmd_compare(3, "off") || cmd_compare(3, "on") ||
+				cmd_compare(3, "rx") || cmd_compare(3, "tx"))) {
+			cmd_error("Expected flowcontrol off|on|rx|tx\n");
 			return;
 		}
 	} else if ((cmd_compare(2, "show") || cmd_compare(2, "on") ||
@@ -1045,6 +1052,11 @@ void parse_port(void)
 		else
 			phy_settings.duplex = PHY_DUPLEX_HALF;
 		phy_set_duplex();
+#if SOC_FAMILY == RTL836X
+	} else if (cmd_compare(2, "flowcontrol")) {
+		phy_set_flowcontrol(cmd_compare(3, "off") ? 0 : cmd_compare(3, "on") ? 1 :
+			cmd_compare(3, "tx") ? 2 : 3);
+#endif
 	} else {
 		cmd_error("Unknown port command\n");
 	}
@@ -1539,11 +1551,18 @@ void parse_passwd(void)
 }
 
 
-#if SOC_FAMILY == RTL837X	/* EEE, bandwidth and storm commands */
 void parse_eee(void)
 {
 	__xdata int8_t port = -1;
+#if SOC_FAMILY == RTL836X
+	__xdata uint8_t speed = EEE_1000;
+	if (cmd_words_len < 2 || cmd_words_len > 4) {
+		cmd_error("eee [on|off|status] [port] [100m|1g]\n");
+		return;
+	}
+#else
 	__xdata uint8_t speed = EEE_2G5;
+#endif
 	__xdata uint8_t speed_word = 0;
 
 	if (machine.n_10g)
@@ -1567,16 +1586,29 @@ void parse_eee(void)
 			// Check if word 3 is a speed
 			if (cmd_words_len >= 4)
 				speed_word = 3;
+#if SOC_FAMILY == RTL836X
+		} else {
+			cmd_error("Invalid EEE port or speed\n");
+			return;
+#endif
 		}
 	}
+#if SOC_FAMILY == RTL836X
+	if (cmd_words_len == 4 && speed_word != 3) {
+		cmd_error("Unexpected EEE argument\n");
+		return;
+	}
+#endif
 	// Parse speed if found
 	if (speed_word > 0) {
 		if (cmd_compare(speed_word, "100m"))
 			speed = EEE_100;
 		else if (cmd_compare(speed_word, "1g"))
 			speed = EEE_1000;
+#if SOC_FAMILY == RTL837X
 		else if (cmd_compare(speed_word, "2g5"))
 			speed = EEE_2G5;
+#endif
 		else 
 		{
 			cmd_error("Speed word invalid, use: [100m|1g|2g5]\n");
@@ -1604,6 +1636,7 @@ void parse_eee(void)
 }
 
 
+#if SOC_FAMILY == RTL837X	/* bandwidth and storm commands */
 void parse_bw(void)
 {
 	if (cmd_words_len < 3) // Check for at least 3 arguments
@@ -2123,9 +2156,9 @@ void cmd_parser(void) __banked
 			parse_rnd();
 		} else if (cmd_compare(0, "passwd")) {
 			parse_passwd();
-#if SOC_FAMILY == RTL837X
 		} else if (cmd_compare(0, "eee")) {
 			parse_eee();
+#if SOC_FAMILY == RTL837X
 		} else if (cmd_compare(0, "bw")) {
 			parse_bw();
 		} else if (cmd_compare(0, "temp")) {
