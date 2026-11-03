@@ -96,6 +96,11 @@ var LANG = {
         pt_fc_rx: "RX asymmetric",
         pt_pause_tx: "Negotiated TX pause",
         pt_pause_rx: "Negotiated RX pause",
+        pt_poe: "PoE",
+        poe_permitted: "PoE permitted",
+        poe_disabled: "PoE disabled",
+        poe_delivery: "PoE power delivery",
+        poe_unknown: "Unavailable (no telemetry)",
         pt_sfp_note: "SFP speed is set per slot and is not saved in the startup config.",
         pt_name_err: "Port name: 1-15 characters, no spaces",
         pt_mtu_err: "MTU must be 64-16383",
@@ -2379,6 +2384,7 @@ var CONF_CMDS = [
     /^port\s+\d+\s+(10m|100m|1g|2g5|5g|10g|auto|on|off)(\s+(half|full))?$/,
     /^port\s+\d+\s+duplex\s+(half|full)$/,
     /^port\s+\d+\s+flowcontrol\s+(off|on|rx|tx)$/,
+    /^poe\s+port\s+\d+\s+(on|off)$/,
     /^port\s+\d+\s+name\s+\S+$/,
     /^port\s+\d+\s+lldp\s+(permit|block)+$/,
     /^eee\s+(on|off)(\s+\d+)?(\s+(100m|1g|2g5))?$/,
@@ -2713,6 +2719,10 @@ function portLabel(p) {
     return p.name ? p.portNum + " " + p.name : String(p.portNum)
 }
 
+function poeLabel(p) {
+    return p.poe_admin == null ? "" : t(p.poe_admin ? "poe_permitted" : "poe_disabled");
+}
+
 function buildStrip() {
     var st = $("strip");
     st.innerHTML = "";
@@ -2737,6 +2747,7 @@ function buildStrip() {
                 id: "ppl" + i,
                 text: "..."
             }),
+            h("span", {class: "poe", id: "ppoeLabel" + i}),
         ]));
     })(i);
 }
@@ -2752,6 +2763,11 @@ function updateStrip() {
         el.classList.toggle("up", !!up);
         if (up) el.style.setProperty("--pc", "var(" + (LINKC[p.link] || "--s1000") + ")");
         lb.textContent = !p.enabled ? t("c_off") : (p.link > 0 ? LINKS[p.link] : t("c_down"));
+        var poe = $("ppoeLabel" + i);
+        if (poe) {
+            poe.hidden = p.poe_admin == null;
+            poe.textContent = poeLabel(p);
+        }
         el.title = portRows(p).map(function(r) {
             return r[0] + ": " + r[1]
         }).join("\n");
@@ -2811,6 +2827,10 @@ function portRows(p) {
         rows.push([t("pt_flow"), t(FLOWCONTROL[p.flowcontrol][1])]);
         rows.push([t("pt_pause_tx"), p.pause_tx ? "On" : "Off"]);
         rows.push([t("pt_pause_rx"), p.pause_rx ? "On" : "Off"]);
+    }
+    if (p.poe_admin != null) {
+        rows.push([t("pt_poe"), poeLabel(p)]);
+        rows.push([t("poe_delivery"), t("poe_unknown")]);
     }
     if (p.isSFP) {
         if (p.sfp_vendor) rows.push([t("p_module"), [p.sfp_vendor, p.sfp_model, p.sfp_serial].filter(Boolean).join(" / ")]);
@@ -2982,6 +3002,7 @@ function buildPorts() {
     var rtl836x = S.info.mib_family === "rtl836x";
     document.querySelector('#ptable th[data-i18n="pt_mtu"]').hidden = rtl836x;
     document.querySelector('#ptable th[data-i18n="pt_flow"]').hidden = !rtl836x;
+    document.querySelector('#ptable th[data-i18n="pt_poe"]').hidden = !S.info.poe_ports;
     S.ports.forEach(function(p) {
         var i = p.portNum - 1;
         var spd = h("select", {
@@ -3001,6 +3022,7 @@ function buildPorts() {
             }));
         });
         var tr = tb.insertRow();
+        tr.addEventListener("change", function() { tr.dataset.dirty = "1"; });
         tr.insertCell().textContent = p.portNum + (p.isSFP ? " (SFP)" : "");
         tr.insertCell().appendChild(h("input", {
             class: "in",
@@ -3031,17 +3053,26 @@ function buildPorts() {
             id: "pmtu" + i,
             type: "number",
             min: "64",
-            max: "16383",
-            disabled: rtl836x
+            max: "16383"
         }));
+        mtuCell.firstChild.disabled = rtl836x;
         var flowCell = tr.insertCell();
         flowCell.hidden = !rtl836x;
-        var flow = h("select", {class: "in", id: "pflow" + i});
+        var flow = h("select", {class: "in", id: "pflow" + i, "aria-label": t("pt_flow") + " " + p.portNum});
         FLOWCONTROL.forEach(function(o, mode) {
             flow.appendChild(h("option", {value: String(mode), text: t(o[1])}));
         });
         flow.value = String(p.flowcontrol == null ? 0 : p.flowcontrol);
         flowCell.appendChild(flow);
+        var poeCell = tr.insertCell();
+        poeCell.hidden = !S.info.poe_ports;
+        if (p.poe_admin != null) {
+            var poeSwitch = h("label", {class: "switch"}, [
+                h("input", {type: "checkbox", id: "ppoe" + i, "aria-label": "PoE " + p.portNum}), h("i")
+            ]);
+            poeSwitch.firstChild.checked = !!p.poe_admin;
+            poeCell.appendChild(poeSwitch);
+        } else poeCell.textContent = "-";
         tr.insertCell().appendChild(h("button", {
             class: "ctl",
             text: t("c_apply"),
@@ -3072,6 +3103,10 @@ function portsStatus() {
         var mc = $("pmac" + i);
         if (mc) mc.textContent = p.macs == null ? "-" : parseInt(p.macs, 16) & 0x1fff;
         if (el) el.innerHTML = linkBadge(p);
+        if ($("ptable").tBodies[0].rows[i].dataset.dirty) return;
+        $("pen" + i).checked = !!p.enabled;
+        var poe = $("ppoe" + i);
+        if (poe) poe.checked = !!p.poe_admin;
         var sel = $("pspd" + i),
             v = p.isSFP ? 0 : ADVSEL[parseInt(p.adv, 2)];
         if (sel && v && document.activeElement !== sel) sel.value = v;
@@ -3095,14 +3130,20 @@ function applyPort(i) {
         }
         cmds.push("port " + p.portNum + " name " + name);
     }
-    if (!en) cmds.push("port " + p.portNum + " off");
-    else if (p.isSFP) {
-        if (!p.enabled) cmds.push("port " + p.portNum + " on");
-        cmds.push("sfp " + S.sfpSlot[i] + " " + spd);
-    } else if (spd !== "custom") cmds.push("port " + p.portNum + " " + spd);
-    else if (!p.enabled) cmds.push("port " + p.portNum + " on");
+    var nativePort = S.info.mib_family === "rtl836x";
+    var currentSpeed = ADVSEL[parseInt(p.adv, 2)] || "custom";
+    if (!nativePort || en !== !!p.enabled || spd !== currentSpeed) {
+        if (!en) cmds.push("port " + p.portNum + " off");
+        else if (p.isSFP) {
+            if (!p.enabled) cmds.push("port " + p.portNum + " on");
+            cmds.push("sfp " + S.sfpSlot[i] + " " + spd);
+        } else if (spd !== "custom") cmds.push("port " + p.portNum + " " + spd);
+        else if (!p.enabled) cmds.push("port " + p.portNum + " on");
+    }
     if (p.flowcontrol != null && +$("pflow" + i).value !== p.flowcontrol)
         cmds.push("port " + p.portNum + " flowcontrol " + FLOWCONTROL[+$("pflow" + i).value][0]);
+    if (p.poe_admin != null && $("ppoe" + i).checked !== !!p.poe_admin)
+        cmds.push("poe port " + p.portNum + " " + ($("ppoe" + i).checked ? "on" : "off"));
     if (mtu && mtu !== S.mtu[i]) {
         if (mtu < 64 || mtu > 16383) {
             toast(t("pt_mtu_err"), "err");
@@ -3110,7 +3151,10 @@ function applyPort(i) {
         }
         cmds.push("mtu " + p.portNum + " " + mtu);
     }
-    postCmds(cmds).then(loadMtu).catch(function() {});
+    postCmds(cmds).then(function() {
+        delete $("ptable").tBodies[0].rows[i].dataset.dirty;
+        return loadMtu();
+    }).catch(function() {});
 }
 tabHooks.ports = {
     enter: function() {
@@ -5232,6 +5276,11 @@ function mergeConf(base, texts) {
             }
             if ((m = line.match(/^(port \d{1,2}) flowcontrol (off|on|rx|tx)$/))) {
                 drop(new RegExp("^" + m[1] + " flowcontrol "));
+                conf.push(line);
+                return;
+            }
+            if ((m = line.match(/^(poe port \d{1,2}) (on|off)$/))) {
+                drop(new RegExp("^" + m[1] + " (on|off)$"));
                 conf.push(line);
                 return;
             }

@@ -19,13 +19,16 @@
 
 void parse_port(void);
 void parse_eee(void);
+void parse_poe(void);
 const struct machine machine = {
-    .phys_to_log_port = {0, 1, 2, 3, 4, 5, 6, 7, 0xff}
+    .phys_to_log_port = {0, 1, 2, 3, 4, 5, 6, 7, 0xff},
+    .log_to_phys_port = {1, 2, 3, 4, 5, 6, 7, 8, 0}
 };
 bool lldp_enabled;
 uint16_t lldp_logical_port_status;
 static uint16_t registers[8][32];
 static uint16_t eee_advertised[8], eee_config[8];
+static uint16_t gpio_out;
 static unsigned writes, failures, checks;
 static char output[2048];
 static size_t output_len;
@@ -39,6 +42,7 @@ void write_char(char c) {
 void print_string(const char *s) { while (*s) write_char(*s++); }
 void print_string_x(char *s) { print_string(s); }
 void print_byte(uint8_t n) { char s[8]; snprintf(s, sizeof(s), "%u", n); print_string(s); }
+void itoa(uint8_t n) { print_byte(n); }
 void print_short(uint16_t n) { char s[8]; snprintf(s, sizeof(s), "%u", n); print_string(s); }
 void print_phys_port(uint8_t n) { print_byte(n + 1); }
 void lldp_shutdown(uint16_t ports) { (void)ports; }
@@ -58,7 +62,8 @@ void phy_write(uint8_t port, uint8_t dev, uint16_t reg, uint16_t value) {
     writes++;
 }
 void reg_read(uint16_t reg) {
-    if (reg >= RTL836X_REG_PORT0_EEE_CFG && reg <= RTL836X_REG_PORT0_EEE_CFG + 7 * 32 &&
+    if (reg == RTL836X_REG_GPIO_67C_O_X0) SFR_DATA_U16 = gpio_out;
+    else if (reg >= RTL836X_REG_PORT0_EEE_CFG && reg <= RTL836X_REG_PORT0_EEE_CFG + 7 * 32 &&
         (reg - RTL836X_REG_PORT0_EEE_CFG) % 32 == 0)
         SFR_DATA_U16 = eee_config[(reg - RTL836X_REG_PORT0_EEE_CFG) / 32];
     else {
@@ -69,9 +74,13 @@ void reg_read(uint16_t reg) {
     SFR_DATA_0 = SFR_DATA_U16;
 }
 void reg_write(uint16_t reg) {
-    if (reg < RTL836X_REG_PORT0_EEE_CFG || reg > RTL836X_REG_PORT0_EEE_CFG + 7 * 32 ||
-        (reg - RTL836X_REG_PORT0_EEE_CFG) % 32) abort();
-    eee_config[(reg - RTL836X_REG_PORT0_EEE_CFG) / 32] = (uint16_t)SFR_DATA_24 << 8 | SFR_DATA_16;
+    if (reg == RTL836X_REG_GPIO_67C_O_X0)
+        gpio_out = (uint16_t)SFR_DATA_24 << 8 | SFR_DATA_16;
+    else {
+        if (reg < RTL836X_REG_PORT0_EEE_CFG || reg > RTL836X_REG_PORT0_EEE_CFG + 7 * 32 ||
+            (reg - RTL836X_REG_PORT0_EEE_CFG) % 32) abort();
+        eee_config[(reg - RTL836X_REG_PORT0_EEE_CFG) / 32] = (uint16_t)SFR_DATA_24 << 8 | SFR_DATA_16;
+    }
     writes++;
 }
 
@@ -97,6 +106,7 @@ static void command(const char *s) {
     snprintf((char *)cmd_buffer, CMD_BUF_SIZE, "%s", s);
     cmd_tokenize();
     if (strncmp(s, "eee ", 4) == 0) parse_eee();
+    else if (strncmp(s, "poe ", 4) == 0) parse_poe();
     else parse_port();
 }
 static void uplink_unchanged(void) {
@@ -177,6 +187,28 @@ int main(void) {
     for (unsigned i = 0; i < sizeof(bad_controls)/sizeof(bad_controls[0]); i++) {
         reset(); command(bad_controls[i]);
         CHECK(err_status != ERR_OK && writes == 0, bad_controls[i]);
+    }
+    gpio_out = 0xffff;
+    command("poe port 2 off");
+    CHECK(err_status == ERR_OK && gpio_out == 0xffdf,
+          "PoE port 2 clears only GPIO 5, preserving controller reset and LED pins");
+    command("poe port 2 on");
+    CHECK(err_status == ERR_OK && gpio_out == 0xffff, "PoE port 2 restores only its enable pin");
+    command("poe port 3 off");
+    CHECK(err_status == ERR_OK && gpio_out == 0xfeff, "PoE port 3 maps to GPIO 8");
+    command("poe port 3 on");
+    CHECK(err_status == ERR_OK && gpio_out == 0xffff, "PoE port 3 can be re-enabled independently");
+    command("poe port 1 off");
+    CHECK(err_status == ERR_OK && gpio_out == 0xfffd, "physical port 1 maps to GPIO 1");
+    command("poe port 1 on");
+    command("poe port 4 off");
+    CHECK(err_status == ERR_OK && gpio_out == 0xfdff, "physical port 4 maps to GPIO 9");
+    command("poe port 4 on");
+    const char *bad_poe[] = {"poe port 0 off", "poe port 5 off", "poe port 8 off",
+        "poe port 2 bogus", "poe port 2 off extra", "poe global off"};
+    for (unsigned i = 0; i < sizeof(bad_poe)/sizeof(bad_poe[0]); i++) {
+        writes = 0; command(bad_poe[i]);
+        CHECK(err_status != ERR_OK && writes == 0 && gpio_out == 0xffff, bad_poe[i]);
     }
 
     const char *invalid[] = {"port 0 off", "port 9 off", "port 8x off", "port 1 2g5",

@@ -252,6 +252,7 @@ static void t_info(void)
 	CHECK(has("\"chip_temp\":\"n/a\""), "temperature n/a");
 	CHECK(balanced(), "valid JSON");
 	CHECK(has("\"mib_family\":\"rtl836x\""), "native label discriminator");
+	CHECK(has("\"poe_ports\":4"), "board reports four GPIO-controlled PoE ports");
 }
 
 static void t_counters(void)
@@ -282,6 +283,17 @@ static void t_eee(void)
 	CHECK(has("\"portNum\":8,\"isSFP\":0,\"eee\":\"011\",\"eee_lp\":null,\"active\":0"),
 	      "gigabit EEE advertisement is distinct from active negotiation and unknown peer data");
 	CHECK(balanced(), "native EEE JSON is valid");
+}
+
+static void t_poe(void)
+{
+	regfile[RTL836X_REG_GPIO_67C_O_X0] = 0x0386; /* only front port 2 is disabled */
+	send_status();
+	CHECK(port_has(0, "\"poe_admin\":1") && port_has(1, "\"poe_admin\":0") &&
+	      port_has(2, "\"poe_admin\":1") && port_has(3, "\"poe_admin\":1"),
+	      "PoE administrative state follows the GPIO map, not the Ethernet link");
+	CHECK(port_has(0, "\"poe_on\":null") && !port_has(4, "\"poe_admin\":"),
+	      "power delivery stays unknown and non-PoE ports are not presented as controllable");
 }
 
 static void t_unported(void)
@@ -315,6 +327,7 @@ int main(void)
 	t_info();
 	t_counters();
 	t_eee();
+	t_poe();
 	t_unported();
 	printf("\n%d checks, %d failed\n", tests_run, tests_failed);
 	return tests_failed ? 1 : 0;

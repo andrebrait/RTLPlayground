@@ -1,5 +1,6 @@
 #include "machine_init_defs.h"
 #include "rtl836x_regs.h"
+#include "poe.h"
 
 extern __xdata uint8_t sfr_data[4];
 
@@ -22,4 +23,30 @@ void machine_custom_init(void) __banked
 		sfr_mask_data(0, 0, 0xa6);
 		reg_write_m(r);
 	}
+}
+
+static __code const uint16_t poe_gpio[MACHINE_POE_PORTS] = {0x0002, 0x0020, 0x0100, 0x0200};
+
+bool poe_port_set(uint8_t port, __xdata bool enabled) __banked
+{
+	if (!port || port > MACHINE_POE_PORTS)
+		return false;
+	uint16_t mask = poe_gpio[port - 1];
+	reg_read(RTL836X_REG_GPIO_67C_O_X0);
+	uint16_t value = SFR_DATA_U16 & ~mask;
+	if (enabled)
+		value |= mask;
+	REG_SET(RTL836X_REG_GPIO_67C_O_X0, value);
+	return true;
+}
+
+uint8_t poe_admin_mask(void) __banked
+{
+	reg_read(RTL836X_REG_GPIO_67C_O_X0);
+	uint16_t value = SFR_DATA_U16;
+	uint8_t enabled = 0;
+	for (uint8_t port = 0; port < MACHINE_POE_PORTS; port++)
+		if (value & poe_gpio[port])
+			enabled |= 1 << port;
+	return enabled;
 }

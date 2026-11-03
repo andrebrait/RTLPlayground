@@ -33,6 +33,9 @@
 #include "machine.h"
 #include "rtl837x_leds.h"
 #include "phy.h"
+#ifdef MACHINE_POE_PORTS
+#include "poe.h"
+#endif
 
 #pragma codeseg BANK2
 #pragma constseg BANK2
@@ -1936,6 +1939,27 @@ void print_sw_version(void) __banked {
 
 
 // Identify command
+#ifdef MACHINE_POE_PORTS
+void parse_poe(void)
+{
+	if (cmd_words_len == 2 && cmd_compare(1, "status")) {
+		uint8_t enabled = poe_admin_mask();
+		for (uint8_t port = 1; port <= MACHINE_POE_PORTS; port++) {
+			print_string("PoE port "); itoa(port);
+			print_string(enabled & 1 ? ": permitted; power delivery unknown\n" : ": disabled\n");
+			enabled >>= 1;
+		}
+		return;
+	}
+	if (cmd_words_len == 4 && cmd_compare(1, "port") &&
+			cmd_parse_port_separator(cmd_words_b[2]) &&
+			(cmd_compare(3, "on") || cmd_compare(3, "off")) &&
+			poe_port_set(machine.log_to_phys_port[atoi_results_u8], cmd_compare(3, "on")))
+		return;
+	cmd_error("poe status | poe port <PoE port> on|off\n");
+}
+#endif
+
 void cmd_parser(void) __banked
 {
 #ifdef DEBUG
@@ -1967,6 +1991,10 @@ void cmd_parser(void) __banked
 #endif
 		} else if (cmd_compare(0, "stat")) {
 			port_stats_print();
+#ifdef MACHINE_POE_PORTS
+		} else if (cmd_compare(0, "poe")) {
+			parse_poe();
+#endif
 		} else if (cmd_compare(0, "flash") && cmd_words_len == 2) {
 			uint8_t c = cmd_buffer[cmd_words_b[1]];
 			if (c == 's') {

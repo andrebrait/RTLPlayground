@@ -48,11 +48,12 @@ TABLE_ENV = support.c hw_mock.c env_tables.c $(SRCROOT)/cmd_editor.c \
 all: run
 
 # The RTL836x web pages; the test carries its own 16-bit register file.
-$(BUILDDIR)/test_page_json_836x: CFLAGS += -DMACHINE_NAME=TPLINK_TL_SG108PE_V5
+$(BUILDDIR)/test_page_json_836x: CFLAGS += -DMACHINE_NAME=TPLINK_TL_SG108PE_V5 -ffunction-sections -fdata-sections
 $(BUILDDIR)/test_page_json_836x: test_page_json_836x.c support.c env_tables.c $(SRCROOT)/cmd_editor.c \
                                  $(SRCROOT)/httpd/page_impl.c $(SRCROOT)/httpd/page_stp.c \
-                                 $(SRCROOT)/rtl836x_mib.c $(SRCROOT)/rtl836x_port.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
+                                 $(SRCROOT)/rtl836x_mib.c $(SRCROOT)/rtl836x_port.c \
+                                 $(SRCROOT)/machine/TPLINK_TL_SG108PE_V5_init.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) -Wl,--gc-sections
 
 $(BUILDDIR):
 	mkdir -p $(BUILDDIR)
@@ -86,7 +87,8 @@ $(BUILDDIR)/test_rtl836x_nic: test_rtl836x_nic.c $(SRCROOT)/rtl836x_nic.c | $(BU
 $(BUILDDIR)/test_rtl836x_phy: CFLAGS += -DMACHINE_NAME=TPLINK_TL_SG108PE_V5 \
     -Wno-parentheses -Wno-incompatible-pointer-types -Wno-int-to-pointer-cast -Wno-pointer-to-int-cast \
     -ffunction-sections -fdata-sections
-$(BUILDDIR)/test_rtl836x_phy: test_rtl836x_phy.c $(SRCROOT)/cmd_parser.c $(SRCROOT)/rtl836x_phy.c | $(BUILDDIR)
+$(BUILDDIR)/test_rtl836x_phy: test_rtl836x_phy.c $(SRCROOT)/cmd_parser.c $(SRCROOT)/rtl836x_phy.c \
+    $(SRCROOT)/machine/TPLINK_TL_SG108PE_V5_init.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) -Wl,--gc-sections
 
 # Exercise the production RX ring reader; only the hardware DMA edge is mocked.

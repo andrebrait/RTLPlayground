@@ -26,3 +26,8 @@ assert.deepEqual(plain(saved), ['port 8 auto', 'port 1 flowcontrol rx', 'port 1 
 saved = context.mergeConf(saved, ['port 1 flowcontrol off']);
 assert.deepEqual(plain(saved), ['port 8 auto', 'port 1 auto', 'port 1 flowcontrol off']);
 console.log('EEE capability labels and independent pause configuration passed');
+saved = context.mergeConf(['poe port 2 on', 'poe port 3 on', 'port 8 auto'], ['poe port 2 off']);
+assert.deepEqual(plain(saved), ['poe port 3 on', 'port 8 auto', 'poe port 2 off']);
+saved = context.mergeConf(saved, ['poe port 2 on']);
+assert.deepEqual(plain(saved), ['poe port 3 on', 'port 8 auto', 'poe port 2 on']);
+console.log('Per-port PoE settings persist independently of Ethernet configuration');

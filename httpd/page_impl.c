@@ -21,6 +21,9 @@
 #include "rtl836x_regs.h"
 #include "rtl836x_mib.h"
 #endif
+#ifdef MACHINE_POE_PORTS
+#include "poe.h"
+#endif
 
 // #define DEBUG
 #include "debug.h"
@@ -347,7 +350,10 @@ void send_basic_info(void)
 #if SOC_FAMILY == RTL836X
 	string_to_html(",\"mib_family\":\"rtl836x\"");
 #endif
-
+#ifdef MACHINE_POE_PORTS
+	string_to_html(",\"poe_ports\":");
+	itoa_html(MACHINE_POE_PORTS);
+#endif
 	char_to_html('}');
 }
 
@@ -983,6 +989,9 @@ void send_status(void)
 	slen = strtox(outbuf, HTTP_RESPONCE_JSON);
 	dbg_string("sending status\n");
 	char_to_html('[');
+#ifdef MACHINE_POE_PORTS
+	__xdata uint8_t poe_enabled = poe_admin_mask();
+#endif
 
 	for (uint8_t i = MACHINE_MIN_PORT; i <= MACHINE_MAX_PORT; i++) {
 		slen += strtox(outbuf + slen, "{\"portNum\":");
@@ -1099,6 +1108,14 @@ void send_status(void)
 			bool available = rtl836x_mib_summary(i, metric, value);
 			mib_to_html(value, available);
 		}
+#ifdef MACHINE_POE_PORTS
+		uint8_t phys_port = machine.log_to_phys_port[i];
+		if (phys_port && phys_port <= MACHINE_POE_PORTS) {
+			string_to_html(",\"poe_admin\":");
+			bool_to_html(poe_enabled & (1 << (phys_port - 1)));
+			string_to_html(",\"poe_on\":null");
+		}
+#endif
 		string_to_html(",\"macs\":null}");
 #else
 		

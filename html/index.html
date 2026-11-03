@@ -141,6 +141,7 @@ label.row span.lb{width:110px;flex:none;color:var(--fg2);font-size:13px}
 .port.up.sfp .jack:before{background-color:color-mix(in srgb,var(--pc) 10%,var(--panel2))}
 .port.up .ps{color:var(--pc);font-weight:600}
 .port.dis{opacity:.45;border-style:dashed}
+.port .poe:not([hidden]){display:block;font-size:8px;line-height:1.2;color:var(--fg2)}
 .badge{font-size:11px;font-weight:600;border-radius:10px;padding:1px 8px;background:var(--panel2);color:var(--fg2)}
 .badge.ok{color:var(--ok)}.badge.bad{color:var(--bad)}
 .seg{display:inline-flex;border:1px solid var(--bd);border-radius:7px;overflow:hidden}
@@ -251,7 +252,7 @@ button.danger{background:var(--bad);color:#fff;border-color:transparent}
     <section class="tab" id="tab-ports">
       <div class="card"><h2 data-i18n="pt_title">Port configuration</h2>
         <div class="scrollx"><table class="t" id="ptable">
-          <thead><tr><th data-i18n="c_port">Port</th><th data-i18n="c_name">Name</th><th data-i18n="c_link">Link</th><th data-i18n="pt_conn">Devices learned</th><th data-i18n="pt_speed">Speed</th><th data-i18n="c_enabled">Enabled</th><th data-i18n="pt_mtu">MTU</th><th data-i18n="pt_flow" hidden>Pause advertisement</th><th></th></tr></thead>
+          <thead><tr><th data-i18n="c_port">Port</th><th data-i18n="c_name">Name</th><th data-i18n="c_link">Link</th><th data-i18n="pt_conn">Devices learned</th><th data-i18n="pt_speed">Speed</th><th data-i18n="c_enabled">Enabled</th><th data-i18n="pt_mtu">MTU</th><th data-i18n="pt_flow" hidden>Pause advertisement</th><th data-i18n="pt_poe" hidden>PoE</th><th></th></tr></thead>
           <tbody></tbody></table></div>
         <p class="small mut" style="margin-top:8px" data-i18n="pt_sfp_note">SFP speed is set per slot and is not saved in the startup config.</p>
       </div>

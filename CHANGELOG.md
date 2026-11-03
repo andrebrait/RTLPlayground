@@ -36,6 +36,11 @@
     symmetric or asymmetric, with negotiated TX/RX pause shown in port details.
     Speed and pause settings are saved independently. EEE speed labels now match
     the advertised bit order on both chip families.
+    GPIO-backed PoE administration is available for physical ports 1-4 through
+    `poe port <port> on|off`, the Ports page, dashboard indicators and port details.
+    The UI distinguishes permission to supply PoE from actual power delivery,
+    which remains unavailable along with voltage, current and PD class.
+    PoE-only changes do not restart the Ethernet PHY or touch the controller reset.
     VLAN, L2 table, LAG, STP, LLDP, IGMP, mirroring, bandwidth, storm control,
     MTU and cable test are not ported: their commands are refused and their pages
     are empty. Temperature remains unavailable without a verified sensor mapping.

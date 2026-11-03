@@ -3,5 +3,6 @@
 
 #define MACHINE_MODEL "TP-Link TL-SG108PE V5"
 #define MACHINE_CHIPSET RTL8370
+#define MACHINE_POE_PORTS 4
 
 #endif
