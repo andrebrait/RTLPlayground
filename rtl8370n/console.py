@@ -52,8 +52,10 @@ class Console:
         fcntl.ioctl(self.fd, BIOCSHDRCMPLT, struct.pack("I", 1))
         fcntl.ioctl(self.fd, BIOCSRTIMEOUT, struct.pack("qi4x", 0, 200000))
         self.blen = struct.unpack("I", fcntl.ioctl(self.fd, BIOCGBLEN, struct.pack("I", 0)))[0]
-        out = subprocess.run(["ifconfig", iface], capture_output=True, text=True).stdout
-        self.mac = bytes.fromhex(re.search(r"ether ([0-9a-f:]{17})", out).group(1).replace(":", ""))
+        # ifconfig can show a placeholder (02:00:00:00:00:00 on some USB adapters) while frames
+        # leave with the hardware address, and replies to the placeholder are filtered out.
+        out = subprocess.run(["networksetup", "-getmacaddress", iface], capture_output=True, text=True).stdout
+        self.mac = bytes.fromhex(re.search(r"([0-9a-f]{2}(:[0-9a-f]{2}){5})", out).group(1).replace(":", ""))
 
     def _raw(self):
         """Received frames until the read times out."""
