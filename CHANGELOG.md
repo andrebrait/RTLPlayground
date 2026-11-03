@@ -47,8 +47,16 @@
     Hardware checks passed for standalone boot, DHCP, ping, web login, settings
     persistence, web firmware updates and increasing native packet/byte counters
     on the live network. Port 1 negotiated 10M full, 100M half/full and returned
-    to Auto after disable/enable; the uplink stayed at 1G. EEE and pause controls
-    pass host checks; hardware validation is pending.
+    to Auto after disable/enable; the uplink stayed at 1G. Pause advertisement
+    and negotiated off/symmetric/TX-only states were checked on hardware.
+    Build `32a33d74` also passed live PoE UI checks: toggling physical port 2
+    changed only GPIO 5, its link dropped, and 100M link plus incoming camera
+    traffic resumed after re-enabling it. Other PoE ports and the uplink were
+    unchanged; saved configuration and GPIO state were preserved.
+    EEE configuration readback passed on ports 1 and 2, but neither negotiated
+    LPI, so power-saving operation remains unverified. One HTTP status request
+    timed out during pause renegotiation; the instrumented follow-up completed
+    normally. Browser DOM and action checks passed; screenshot capture timed out.
 
 - Web UI
   - Compress the embedded assets (minify + gzip) and switch to a single-page layout. #315
