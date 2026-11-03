@@ -14,13 +14,16 @@
     work, and the fitted T25S40 cannot be read in DIO mode on this board, so the
     target selects single-IO flash reads (`flash_sio`). New machine target
     `MACHINE_2G5F4_10G2_V1_01`, see `doc/devices/2G5F4_10G2_V1.01.md`.
-  - Experimental, not yet run on hardware: the TP-Link TL-SG108PE V5, an RTL8370N
+  - Experimental support for the TP-Link TL-SG108PE V5, an RTL8370N
     based 8-port gigabit switch with PoE on ports 1-4 (`MACHINE=TPLINK_TL_SG108PE_V5`,
     `RTL8370_DUMP=<flash dump>` for the PHY patch). The image sets up the switch,
     PoE, the NIC and the web UI; the status page shows link and speed. VLAN, L2
     table, LAG, STP, LLDP, IGMP, mirroring, EEE, bandwidth, storm control, MTU,
     cable test, port speed/duplex and the packet counters are not ported: their
     commands are refused and their pages are empty.
+    Initial hardware checks passed for standalone boot, DHCP, ping, web login
+    and the live eight-port status dashboard. Configuration persistence and web
+    firmware updates have not yet been tested on this board.
 
 - Web UI
   - Compress the embedded assets (minify + gzip) and switch to a single-page layout. #315
