@@ -52,7 +52,7 @@ all: run
 # The RTL836x web pages; the test carries its own 16-bit register file.
 $(BUILDDIR)/test_page_json_836x: CFLAGS += -DMACHINE_NAME=TPLINK_TL_SG108PE_V5 -ffunction-sections -fdata-sections
 $(BUILDDIR)/test_page_json_836x: test_page_json_836x.c support.c env_tables.c $(SRCROOT)/cmd_editor.c \
-                                 $(SRCROOT)/httpd/page_impl.c $(SRCROOT)/httpd/page_stp.c \
+                                 $(SRCROOT)/httpd/page_impl.c $(SRCROOT)/httpd/page_stp.c $(SRCROOT)/httpd/html_out.c \
                                  $(SRCROOT)/rtl836x_mib.c $(SRCROOT)/rtl836x_port.c \
                                  $(SRCROOT)/machine/TPLINK_TL_SG108PE_V5_init.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) -Wl,--gc-sections
