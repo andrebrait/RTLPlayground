@@ -636,6 +636,7 @@ void main(void)
 	T2CON = 0x04;	/* TR2 */
 
 	log_str("rtl8370n console\n");
+	log_reg("nic_gcr", reg_read(0x1a17));	/* hlyi waits for bit 4 on cold boot (3:b221); shows NIC state left by the loader */
 	nic_init();
 	chip_id = switch_init();
 	beacon();
