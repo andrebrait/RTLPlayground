@@ -39,11 +39,17 @@
     GPIO-backed PoE administration is available for physical ports 1-4 through
     `poe port <port> on|off`, the Ports page, dashboard indicators and port details.
     The UI distinguishes permission to supply PoE from actual power delivery,
-    which remains unavailable along with voltage, current and PD class.
-    PoE-only changes do not restart the Ethernet PHY or touch the controller reset.
-    VLAN, L2 table, LAG, STP, LLDP, IGMP, mirroring, bandwidth, storm control,
-    MTU and cable test are not ported: their commands are refused and their pages
-    are empty. Temperature remains unavailable without a verified sensor mapping.
+    which the switch cannot measure. PoE-only changes do not restart the
+    Ethernet PHY or touch the controller reset.
+    LLDP sends and receives on the RTL836x: the NIC is the switch's port 10, so
+    it is now the CPU port and per-port LLDP frames leave only their own port, and
+    the RX descriptor's ingress port tells which port a neighbour is on. A PD that
+    announces 802.3 Power via MDI or LLDP-MED power shows af or at, its class and
+    requested power on the LLDP page and in the port details. LLDP is not trapped
+    yet, so the switch still forwards LLDP between its ports.
+    VLAN, L2 table, LAG, STP, IGMP, mirroring, bandwidth, storm control, MTU and
+    cable test are not ported: their commands are refused and their pages are
+    empty. Temperature remains unavailable without a verified sensor mapping.
     Hardware checks passed for standalone boot, DHCP, ping, web login, settings
     persistence, web firmware updates and increasing native packet/byte counters
     on the live network. Port 1 negotiated 10M full, 100M half/full and returned
