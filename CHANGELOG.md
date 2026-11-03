@@ -28,6 +28,13 @@
     polling while its tab is hidden, so with 200 seconds switching tabs for a few minutes logged
     you out. `session <seconds>` still sets it.
 
+- Time
+  - The uptime in seconds (sessions, NTP, the reset button) is counted in XDATA instead of
+    `RTL837X_REG_SEC_COUNTER`, so it no longer depends on SerDes 0 being on.
+
+- HTTP
+  - `/cmd_log_clear` answers with an empty 200 instead of the MTU table.
+
 ## Fixed
 
 - Experimental TL-SG108PE V5 console

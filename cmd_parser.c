@@ -1462,12 +1462,16 @@ err:
 
 void parse_rnd(void)
 {
+#if SOC_FAMILY == RTL836X
+	get_random_32();
+#else
 	// In order to get a new random numner, this bit has to be set each time!
 	reg_bit_set(RTL837X_RLDP_RLPP, RLDP_RND_EN);
 	reg_read_m(RTL837X_RAND_NUM1);
 	print_byte(sfr_data[2]);
 	print_byte(sfr_data[3]);
 	reg_read_m(RTL837X_RAND_NUM0);
+#endif
 	print_byte(sfr_data[0]);
 	print_byte(sfr_data[1]);
 	print_byte(sfr_data[2]);
@@ -2329,11 +2333,11 @@ static void ph_line(__code const char *name, uint8_t id)
 void health_show(void) __banked
 {
 	__xdata uint8_t i;
+	__xdata uint32_t up;
 
 	print_string("up ");
-	reg_read_m(RTL837X_REG_SEC_COUNTER);
-	print_byte(sfr_data[0]); print_byte(sfr_data[1]);
-	print_byte(sfr_data[2]); print_byte(sfr_data[3]);
+	read_reg_timer(&up);
+	print_long(up);
 	print_string(" ticks ");
 	print_long(ticks);
 	print_string(" loops ");

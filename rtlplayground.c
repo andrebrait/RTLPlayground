@@ -102,6 +102,7 @@ __xdata struct uip_eth_addr uip_ethaddr;
 
 volatile __xdata uint32_t ticks;
 volatile __xdata uint8_t sec_counter;
+__xdata uint32_t uptime_secs;	/* only handle_tick() writes it, so main-context readers need no EA bracket */
 volatile __xdata uint16_t sleep_ticks;
 __xdata uint8_t stp_tick_last;
 __xdata uint8_t arp_age_secs;
@@ -732,9 +733,19 @@ void sfr_set_zero(void) {
  */
 void get_random_32(void)
 {
+#if SOC_FAMILY == RTL836X
+	reg_bit_set(RTL836X_REG_RLDP_CTRL0, RLDP_GEN_RANDOM);
+	reg_read(RTL836X_REG_RLDP_RAND_NUM1);
+	sfr_data[0] = SFR_DATA_8;
+	sfr_data[1] = SFR_DATA_0;
+	reg_read(RTL836X_REG_RLDP_RAND_NUM0);
+	sfr_data[2] = SFR_DATA_8;
+	sfr_data[3] = SFR_DATA_0;
+#else
 	// In order to get a new random numner, this bit has to be set each time!
 	reg_bit_set(RTL837X_RLDP_RLPP, RLDP_RND_EN);
 	reg_read_m(RTL837X_RAND_NUM0);
+#endif
 }
 
 
@@ -868,17 +879,10 @@ void cpy_4(__xdata uint8_t dest[], __xdata uint8_t source[])
 }
 
 
+/* Seconds since boot */
 void read_reg_timer(__xdata uint32_t * tmr)
 {
-	uint8_t * val = (uint8_t *)tmr;
-	SFR_REG_ADDR_U16 = RTL837X_REG_SEC_COUNTER;
-	SFR_EXEC_GO = SFR_EXEC_READ_REG;
-	do {
-	} while (SFR_EXEC_STATUS != 0);
-	*val++ = SFR_DATA_0;
-	*val++ = SFR_DATA_8;
-	*val++ = SFR_DATA_16;
-	*val = SFR_DATA_24;
+	*tmr = uptime_secs;
 }
 
 
@@ -1098,10 +1102,9 @@ void handle_button(void)
 	if (button_last != button_pressed)
 	{
 		print_string(button_pressed ? "Button pressed\n" : "Button released\n");
-		reg_read_m(RTL837X_REG_SEC_COUNTER);
-		uint8_t diff_sec_counter = sfr_data[3] - button_sec_counter_last;
+		uint8_t diff_sec_counter = (uint8_t)uptime_secs - button_sec_counter_last;
 		button_last = button_pressed;
-		button_sec_counter_last = sfr_data[3];
+		button_sec_counter_last = uptime_secs;
 
 		if (!button_pressed)
 		{
@@ -1175,30 +1178,10 @@ static void handle_tick(void)
 {
 	if (sec_counter >= SYS_TICK_HZ) {
 		sec_counter -= SYS_TICK_HZ;
-		reg_read_m(RTL837X_REG_SEC_COUNTER);
-		uint8_t v = sfr_data[3];
 #ifdef DEBUG
 		print_string("  Tick counter: "); print_long(ticks); write_char('\n');
 #endif
-		v++;
-		sfr_data[3] = v;
-		if (!v) {
-			v = sfr_data[2];
-			v++;
-			sfr_data[2] = v;
-			if (!v) {
-				v = sfr_data[1];
-				v++;
-				sfr_data[1] = v;
-				if (!v) {
-					v = sfr_data[0];
-					v++;
-					sfr_data[0] = v;
-				}
-			}
-		}
-		reg_write_m(RTL837X_REG_SEC_COUNTER);
-		reg_read_m(RTL837X_REG_SEC_COUNTER);
+		uptime_secs++;
 
 		// Check for button presses once a second
 		handle_button();
@@ -1210,7 +1193,7 @@ static void handle_tick(void)
 		}
 
 #ifdef DEBUG
-		print_sfr_data();
+		print_long(uptime_secs);
 		write_char('\n');
 #endif
 	}
@@ -1769,23 +1752,6 @@ void main(void)
 	dns_init();
 	ntp_init();
 
-#ifdef DEBUG
-	// This register seems to work on the RTL8373 only if also the SDS
-	// Is correctly configured. Therefore, we can test it, here...
-	// Reset seconds counter
-	print_string("\nTIMER-TEST: \n");
-	REG_SET(RTL837X_REG_SEC_COUNTER, 0x0);
-	delay(100);
-	print_reg(RTL837X_REG_SEC_COUNTER); write_char(' ');
-	REG_SET(RTL837X_REG_SEC_COUNTER, 0x1);
-	delay(100);
-	print_reg(RTL837X_REG_SEC_COUNTER);
-	REG_SET(RTL837X_REG_SEC_COUNTER, 0x2); write_char(' ');
-	delay(100);
-	print_reg(RTL837X_REG_SEC_COUNTER);
-	REG_SET(RTL837X_REG_SEC_COUNTER, 0x3); write_char(' ');
-	print_reg(RTL837X_REG_SEC_COUNTER);
-#endif
 	stp_enabled = 0;
 	stp_defaults();		/* 802.1D/w default config before any "stp ..." replay */
 	lacpEnabled = 0;

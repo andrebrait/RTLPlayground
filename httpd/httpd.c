@@ -1065,7 +1065,7 @@ void httpd_appcall(void)
 				send_cmd_log();
 			} else if (is_word(q, "/cmd_log_clear")) {
 				clear_command_history();
-				send_mtu(); // dummy response
+				send_ok();
 			} else if (is_word(q, "/reset")) {
 				uip_close();
 				delay(1000); //wait for the close packet to be sent, otherwise the browser will retry
