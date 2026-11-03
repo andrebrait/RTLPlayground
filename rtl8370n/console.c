@@ -540,7 +540,7 @@ static void handle(uint16_t len)
 
 	if (len < 16 || rxb[12] != 0x88 || rxb[13] != 0xb5 || (op & REPLY))
 		return;
-	frame_start(rxb + 6, op | REPLY, rxb[15], ST_OK);
+	frame_start(0, op | REPLY, rxb[15], ST_OK);	/* broadcast: reaches the host even if it sent a wrong SA */
 
 	switch (op) {
 	case OP_REG_WRITE:
