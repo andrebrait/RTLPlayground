@@ -53,8 +53,9 @@
     changed only GPIO 5, its link dropped, and 100M link plus incoming camera
     traffic resumed after re-enabling it. Other PoE ports and the uplink were
     unchanged; saved configuration and GPIO state were preserved.
-    EEE configuration readback passed on ports 1 and 2, but neither negotiated
-    LPI, so power-saving operation remains unverified. One HTTP status request
+    EEE configuration readback passed on ports 1 and 2; neither negotiated LPI
+    with its peer. A later manual check showed EEE active on two ports, so
+    negotiation works with capable peers. One HTTP status request
     timed out during pause renegotiation; the instrumented follow-up completed
     normally. Browser DOM and action checks passed; screenshot capture timed out.
 
