@@ -478,9 +478,12 @@ void nic_setup(void) __banked
 	REG_SET(RTL836X_REG_NIC_DROP_MODE, 0x0001);
 	REG_SET(RTL836X_REG_NIC_TXCR, 0x0001);	/* TX enable */
 	REG_SET(RTL836X_REG_NIC_RXCR1, 0x0003);	/* RX enable, strip CRC */
-	/* CPU port 7, CPU tag only on trapped frames: as the TP-Link runtime and hlyi's RTL8370 build */
+	/* CPU tag only on trapped frames, as the TP-Link runtime and hlyi's RTL8370 build. The
+	 * NIC sits on port 10: only with CPU_PORT_MASK = port 10 does the switch honour the CPU
+	 * tag on NIC frames (one LLDP frame per port, not each flooded). Their port 7 marked the
+	 * front port 8 instead. shortcut: TRAP_PORT is still 7, so traps stay unused here. */
 	REG_SET(RTL836X_REG_CPU_CTRL, 0x00bb);
-	REG_SET(RTL836X_REG_CPU_PORT_MASK, 0x0080);
+	REG_SET(RTL836X_REG_CPU_PORT_MASK, 0x0400);
 	REG_SET(RTL836X_REG_NIC_IMR, NIC_IMR_RXIE);	/* INT1 on RX */
 
 	// Sequence number of TX packets

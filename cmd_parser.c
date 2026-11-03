@@ -2223,10 +2223,9 @@ void cmd_parser(void) __banked
 				trap_rma_set(RTL837X_RMA0E_CONF, RTL837X_RMA_ACT_TRAP);
 #else
 				/* shortcut: with RMA 0E (0x080e) set to trap, LLDP from front port 4
-				 * stopped reaching the NIC (port 8's still did), so trapped frames
-				 * probably go to CPU port 7 = front port 8. Untrapped LLDP reaches the
-				 * NIC flooded, so it is still forwarded between ports; trap once the
-				 * NIC's own port number is known. */
+				 * stopped reaching the NIC, as CPU_CTRL's TRAP_PORT 7 is front port 8,
+				 * not the NIC on port 10. Untrapped LLDP reaches the NIC flooded, so it
+				 * is still forwarded between ports; trap once RX takes tagged frames. */
 #endif
 			} else if (cmd_compare(1, "off")) {
 				print_string("LLDP disabled\n");
