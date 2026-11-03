@@ -1,7 +1,7 @@
 /*
  * RTL836x stand-ins for the RTL837x feature modules that have no RTL836x
  * implementation yet: bandwidth, IGMP, cable test, GPIO/I2C pins, the trap
- * setup and the PHY settings. Only what common code calls at runtime is here;
+ * setup. Only what common code calls at runtime is here;
  * the CLI commands of these features are compiled out on the RTL836x.
  */
 #include <stdint.h>
@@ -12,14 +12,9 @@
 #include "rtl837x_igmp.h"
 #include "rtl837x_pins.h"
 #include "rtl837x_trap.h"
-#include "rtl837x_phy.h"
 
 #pragma codeseg BANK3
 #pragma constseg BANK3
-
-/* parse_port() keeps the port it works on here */
-__xdata struct phy_settings phy_settings;
-
 
 void bandwidth_setup(void) __banked
 {

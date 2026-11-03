@@ -24,12 +24,18 @@
     per-port counters (64-bit octets, otherwise 32-bit) without fabricated queue
     counters. Busy/reset/selector failures and unsupported MAC occupancy are
     unavailable (`null` in JSON, `-` in the UI, `n/a` in the CLI).
+    Native port controls support PHY enable/disable, auto-negotiation, advertised
+    10/100 Mbps modes and duplex, gigabit full duplex, and read-only `port show`.
+    Speed selection retains auto-negotiation and preserves pause/master settings.
+    The UI hides unsupported 2.5G and MTU controls; custom advertisements are
+    displayed without silently replacing them. Saved duplex changes retain the
+    speed command they modify.
     VLAN, L2 table, LAG, STP, LLDP, IGMP, mirroring, EEE, bandwidth, storm control,
-    MTU, cable test and port speed/duplex are not ported: their commands are refused
-    and their pages are empty.
-    Initial hardware checks passed for standalone boot, DHCP, ping, web login
-    and the live eight-port status dashboard; persistence was confirmed after a
-    reboot. Web firmware updates and the MIB counters still need hardware checks.
+    MTU and cable test are not ported: their commands are refused and their pages
+    are empty. Temperature remains unavailable without a verified sensor mapping.
+    Hardware checks passed for standalone boot, DHCP, ping, web login, settings
+    persistence, web firmware updates and increasing native packet/byte counters
+    on the live network. Port-control hardware validation is pending.
 
 - Web UI
   - Compress the embedded assets (minify + gzip) and switch to a single-page layout. #315

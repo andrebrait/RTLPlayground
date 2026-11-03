@@ -88,6 +88,7 @@ var LANG = {
         pt_conn: "Devices learned",
         pt_speed: "Speed",
         pt_mtu: "MTU",
+        pt_custom: "Custom advertisement",
         pt_sfp_note: "SFP speed is set per slot and is not saved in the startup config.",
         pt_name_err: "Port name: 1-15 characters, no spaces",
         pt_mtu_err: "MTU must be 64-16383",
@@ -2369,6 +2370,7 @@ var CONF_CMDS = [
     /^pvid\s+\d+\s+\d+$/m,
     /^ingress(\s+\d+[tua])+$/, /^ingress\s+[tua]$/,
     /^port\s+\d+\s+(10m|100m|1g|2g5|5g|10g|auto|on|off)(\s+(half|full))?$/,
+    /^port\s+\d+\s+duplex\s+(half|full)$/,
     /^port\s+\d+\s+name\s+\S+$/,
     /^port\s+\d+\s+lldp\s+(permit|block)+$/,
     /^eee\s+(on|off)(\s+\d+)?(\s+(100m|1g|2g5))?$/,
@@ -2959,13 +2961,21 @@ function speedLabel(s) {
 function buildPorts() {
     var tb = $("ptable").tBodies[0];
     if (tb.rows.length || !S.n) return;
+    var rtl836x = S.info.mib_family === "rtl836x";
+    document.querySelector('#ptable th[data-i18n="pt_mtu"]').hidden = rtl836x;
     S.ports.forEach(function(p) {
         var i = p.portNum - 1;
         var spd = h("select", {
             class: "in",
             id: "pspd" + i
         });
+        if (rtl836x) spd.appendChild(h("option", {
+            value: "custom",
+            text: t("pt_custom"),
+            disabled: true
+        }));
         (p.isSFP ? SFPRATES : SPEEDS).forEach(function(o) {
+            if (rtl836x && o[0] === "2g5") return;
             spd.appendChild(h("option", {
                 value: o[0],
                 text: speedLabel(o[1])
@@ -2995,12 +3005,15 @@ function buildPorts() {
         }), h("i")]);
         sw.firstChild.checked = !!p.enabled;
         tr.insertCell().appendChild(sw);
-        tr.insertCell().appendChild(h("input", {
+        var mtuCell = tr.insertCell();
+        mtuCell.hidden = rtl836x;
+        mtuCell.appendChild(h("input", {
             class: "in sm",
             id: "pmtu" + i,
             type: "number",
             min: "64",
-            max: "16383"
+            max: "16383",
+            disabled: rtl836x
         }));
         tr.insertCell().appendChild(h("button", {
             class: "ctl",
@@ -3014,6 +3027,7 @@ function buildPorts() {
 }
 
 function loadMtu() {
+    if (S.info.mib_family === "rtl836x") return Promise.resolve();
     return getJSON("/mtu.json").then(function(s) {
         s.forEach(function(m) {
             S.mtu[m.portNum - 1] = parseInt(m.mtu, 16);
@@ -3034,6 +3048,7 @@ function portsStatus() {
         var sel = $("pspd" + i),
             v = p.isSFP ? 0 : ADVSEL[parseInt(p.adv, 2)];
         if (sel && v && document.activeElement !== sel) sel.value = v;
+        else if (sel && S.info.mib_family === "rtl836x" && document.activeElement !== sel) sel.value = "custom";
     });
 }
 
@@ -3055,7 +3070,8 @@ function applyPort(i) {
     else if (p.isSFP) {
         if (!p.enabled) cmds.push("port " + p.portNum + " on");
         cmds.push("sfp " + S.sfpSlot[i] + " " + spd);
-    } else cmds.push("port " + p.portNum + " " + spd);
+    } else if (spd !== "custom") cmds.push("port " + p.portNum + " " + spd);
+    else if (!p.enabled) cmds.push("port " + p.portNum + " on");
     if (mtu && mtu !== S.mtu[i]) {
         if (mtu < 64 || mtu > 16383) {
             toast(t("pt_mtu_err"), "err");
@@ -5178,6 +5194,11 @@ function mergeConf(base, texts) {
                 return;
             }
             if (!isConfCmd(line)) return;
+            if ((m = line.match(/^(port \d{1,2}) duplex (half|full)$/))) {
+                drop(new RegExp("^" + m[1] + " duplex "));
+                conf.push(line);
+                return;
+            }
             if ((m = line.match(/^ingress (.+)$/))) {
                 if (/^[tua]$/.test(m[1])) {
                     drop(/^ingress /);

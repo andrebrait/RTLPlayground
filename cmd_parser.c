@@ -908,11 +908,17 @@ err:
 void parse_port(void)
 {
 	if (cmd_words_len < 3) {
-		cmd_error("\nUsage:" \
-					 "\nport <port> [show|on|off]" \
-					 "\nport <port> [10m|100m|1g|2g5|duplex] [half|full]" \
-					 "\nport <port> lldp [block|permit]" \
-					 "\nport <port> cabletest [show]" \
+		cmd_error("\nUsage:"
+					 "\nport <port> [show|on|off|auto]"
+#if SOC_FAMILY == RTL836X
+					 "\nport <port> [10m|100m] [half|full]"
+					 "\nport <port> 1g"
+					 "\nport <port> duplex [half|full]"
+#else
+					 "\nport <port> [10m|100m|1g|2g5|duplex] [half|full]"
+					 "\nport <port> cabletest [show]"
+#endif
+					 "\nport <port> lldp [block|permit]"
 					 "\nport <port> name [custom port name]\n");
 		return;
 	}
@@ -926,7 +932,26 @@ void parse_port(void)
 	print_string("Logical Port: "); print_byte(phy_settings.port); write_char('\n');
 	phy_settings.duplex = PHY_DUPLEX_BOTH;
 
-#if SOC_FAMILY == RTL837X	/* RTL836x: no port show, cable test, speed or duplex yet */
+#if SOC_FAMILY == RTL836X
+	if (cmd_compare(2, "10m") || cmd_compare(2, "100m")) {
+		if (cmd_words_len != 3 && !(cmd_words_len == 4 &&
+				(cmd_compare(3, "half") || cmd_compare(3, "full")))) {
+			cmd_error("Expected speed [half|full]\n");
+			return;
+		}
+	} else if (cmd_compare(2, "duplex")) {
+		if (cmd_words_len != 4 || !(cmd_compare(3, "half") || cmd_compare(3, "full"))) {
+			cmd_error("Expected duplex half|full\n");
+			return;
+		}
+	} else if ((cmd_compare(2, "show") || cmd_compare(2, "on") ||
+			cmd_compare(2, "off") || cmd_compare(2, "auto") || cmd_compare(2, "1g")) &&
+			cmd_words_len != 3) {
+		cmd_error("Unexpected port argument\n");
+		return;
+	}
+#endif
+
 	if (cmd_compare(2, "show")) {
 		print_string("Name: ");
 		print_string_x(port_names[phy_settings.port]);
@@ -935,10 +960,10 @@ void parse_port(void)
 		} else {
 			write_char('\n');
 		}
+#if SOC_FAMILY == RTL837X
 		port_media_show(phy_settings.port);
-	} else
 #endif
-	if (cmd_compare(2, "name")) {
+	} else if (cmd_compare(2, "name")) {
 		uint8_t i = 0;
 		while ( cmd_words_len > 3 && (i < PORT_NAME_SIZE-1) && (cmd_buffer[cmd_words_b[3] + i] != NUL) ) {
 			port_names[phy_settings.port][i] = name_char(cmd_buffer[cmd_words_b[3] + i]);
@@ -966,6 +991,7 @@ void parse_port(void)
 			cabletest_show();
 		else
 			cabletest_run();
+#endif
 	} else if (cmd_compare(2, "10m")) {
 		print_string(" 10M\n");
 		phy_settings.speed = PHY_SPEED_10M;
@@ -982,6 +1008,7 @@ void parse_port(void)
 		else if (cmd_compare(3, "full"))
 			phy_settings.duplex = PHY_DUPLEX_FULL;
 		phy_set_speed();
+#if SOC_FAMILY == RTL837X
 	} else if (cmd_compare(2, "10g")) {
 		print_string(" 10G\n");
 		phy_settings.speed = PHY_SPEED_10G;
@@ -994,6 +1021,7 @@ void parse_port(void)
 		print_string(" 2.5G\n");
 		phy_settings.speed = PHY_SPEED_2G5;
 		phy_set_speed();
+#endif
 	} else if (cmd_compare(2, "1g")) {
 		print_string(" 1G\n");
 		phy_settings.speed = PHY_SPEED_1G;
@@ -1017,7 +1045,6 @@ void parse_port(void)
 		else
 			phy_settings.duplex = PHY_DUPLEX_HALF;
 		phy_set_duplex();
-#endif
 	} else {
 		cmd_error("Unknown port command\n");
 	}

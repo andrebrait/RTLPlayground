@@ -37,7 +37,8 @@ TESTS = $(BUILDDIR)/test_cmd_editor \
         $(BUILDDIR)/test_rtl8370n_console \
         $(BUILDDIR)/test_rtl836x_regs \
         $(BUILDDIR)/test_rtl836x_nic \
-        $(BUILDDIR)/test_page_json_836x
+        $(BUILDDIR)/test_page_json_836x \
+        $(BUILDDIR)/test_rtl836x_phy
 
 # The table tests link the register mock and one environment file; stub/
 # stands in for the two headers a firmware build generates.
@@ -81,6 +82,13 @@ $(BUILDDIR)/test_rtl836x_nic: CFLAGS += -DMACHINE_NAME=TPLINK_TL_SG108PE_V5
 $(BUILDDIR)/test_rtl836x_nic: test_rtl836x_nic.c $(SRCROOT)/rtl836x_nic.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS)
 
+# Port commands and their native Clause 22 PHY implementation.
+$(BUILDDIR)/test_rtl836x_phy: CFLAGS += -DMACHINE_NAME=TPLINK_TL_SG108PE_V5 \
+    -Wno-parentheses -Wno-incompatible-pointer-types -Wno-int-to-pointer-cast -Wno-pointer-to-int-cast \
+    -ffunction-sections -fdata-sections
+$(BUILDDIR)/test_rtl836x_phy: test_rtl836x_phy.c $(SRCROOT)/cmd_parser.c $(SRCROOT)/rtl836x_phy.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) -Wl,--gc-sections
+
 # Exercise the production RX ring reader; only the hardware DMA edge is mocked.
 # Discard unused TX functions so this RX fixture needs no TX register mocks.
 $(BUILDDIR)/test_nic_rx: test_nic_rx.c $(SRCROOT)/rtl837x_nic.c $(SRCROOT)/rtl837x_nic.h | $(BUILDDIR)
@@ -115,6 +123,7 @@ run: $(TESTS)
 	if [ $$fail -ne 0 ]; then echo "TESTS FAILED"; exit 1; fi
 	CC="$(CC)" python3 test_bringup_safety.py
 	node test_mib.js
+	node test_ports.js
 	@echo "ALL TESTS PASSED"
 
 clean:
