@@ -3,5 +3,6 @@
 
 void rtl8372_init(void) __banked;
 void rtl8373_init(void) __banked;
+void rtl8370_init(void) __banked;
 
 #endif

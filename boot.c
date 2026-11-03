@@ -27,6 +27,7 @@ extern __code const uint8_t * __code const hex;
 
 
 
+#if SOC_FAMILY == RTL837X	/* SerDes */
 void sds_config_mac(uint8_t sds, uint8_t mode) __banked
 {
 	reg_read_m(RTL837X_REG_SDS_MODES);
@@ -52,6 +53,7 @@ void sds_config_mac(uint8_t sds, uint8_t mode) __banked
 	print_reg(RTL837X_REG_SDS_MODES);
 	print_string("\n");
 }
+#endif
 
 
 
@@ -115,6 +117,7 @@ void early_boot_handle_button(void) __banked
 }
 
 
+#if SOC_FAMILY == RTL837X	/* SerDes, RTL8224, NIC, SMI and I2C of the RTL837x */
 /*
  * Configure the SerDes of the SoC for a particular mode
  * to connect to an SFP module or a PHY
@@ -453,6 +456,7 @@ void setup_i2c(void) __banked
 	}
 	reg_write_m(RTL837X_PIN_MUX_1);	
 }
+#endif
 
 
 /* Give the switch a name carrying the tail of its MAC, so several of them on
