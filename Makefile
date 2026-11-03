@@ -141,6 +141,7 @@ CHIPSET := $(shell sed -n 's/^.define[[:space:]]*MACHINE_CHIPSET[[:space:]]*\([A
 ifeq ($(CHIPSET),RTL8370)
 SRCS += \
 	rtl836x_regs.c \
+	rtl836x_mib.c \
 	rtl8370_init.c \
 	rtl836x_nic.c \
 	rtl836x_leds.c \

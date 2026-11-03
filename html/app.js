@@ -2189,6 +2189,12 @@ var rtlLang = (function() {
 })();
 
 function t(k, v) {
+    if (S && S.info.mib_family === "rtl836x") {
+        if (k === "st_txg") return "TX U/M/B packets";
+        if (k === "st_rxg") return "RX U/M/B packets";
+        if (k === "st_txb" || k === "d_txbad") return "TX excessive collisions";
+        if (k === "st_rxb" || k === "d_rxbad") return "RX FCS errors";
+    }
     var s = LANG[rtlLang][k] || LANG.en[k] || k;
     if (v)
         for (var x in v) s = s.split("{" + x + "}").join(v[x]);
@@ -2657,8 +2663,8 @@ function pollStatus() {
             if (dt > 0.2) s.forEach(function(p, i) {
                 var q = S.prev[i];
                 if (q) S.rates[p.portNum - 1] = {
-                    tx: Number(BigInt(p.txG) - BigInt(q.txG)) / dt,
-                    rx: Number(BigInt(p.rxG) - BigInt(q.rxG)) / dt,
+                    tx: counterRate(p.txG, q.txG, dt),
+                    rx: counterRate(p.rxG, q.rxG, dt),
                 };
             });
         }
@@ -2682,6 +2688,15 @@ function fmtPps(v) {
     if (v >= 1e6) return (v / 1e6).toFixed(1) + " M";
     if (v >= 1e3) return (v / 1e3).toFixed(1) + " k";
     return Math.round(v);
+}
+
+function counterText(v) {
+    return v == null ? "-" : BigInt(v).toString();
+}
+
+function counterRate(v, previous, dt) {
+    if (v == null || previous == null || BigInt(v) < BigInt(previous)) return null;
+    return Number(BigInt(v) - BigInt(previous)) / dt;
 }
 
 function portLabel(p) {
@@ -2778,10 +2793,10 @@ function portRows(p) {
     ];
     if (p.name) rows.push([t("c_name"), p.name]);
     rows.push([t("p_state"), !p.enabled ? t("p_disabled") : (p.link > 0 ? t("p_up") + " " + LINKS[p.link] : t("c_down"))]);
-    rows.push([t("st_txg"), BigInt(p.txG) + " " + t("p_pkts")]);
-    rows.push([t("st_txb"), BigInt(p.txB) + " " + t("p_pkts")]);
-    rows.push([t("st_rxg"), BigInt(p.rxG) + " " + t("p_pkts")]);
-    rows.push([t("st_rxb"), BigInt(p.rxB) + " " + t("p_pkts")]);
+    rows.push([t("st_txg"), counterText(p.txG) + " " + t("p_pkts")]);
+    rows.push([t("st_txb"), counterText(p.txB) + " " + t("p_pkts")]);
+    rows.push([t("st_rxg"), counterText(p.rxG) + " " + t("p_pkts")]);
+    rows.push([t("st_rxb"), counterText(p.rxB) + " " + t("p_pkts")]);
     if (p.isSFP) {
         if (p.sfp_vendor) rows.push([t("p_module"), [p.sfp_vendor, p.sfp_model, p.sfp_serial].filter(Boolean).join(" / ")]);
         var ext = p.sfp_options & 0x40;
@@ -2874,7 +2889,9 @@ function renderInfo() {
 
 function pollInfo() {
     return getJSON("/information.json").then(function(j) {
+        var familyChanged = S.info.mib_family !== j.mib_family;
         S.info = j;
+        if (familyChanged) i18nApply();
         renderInfo()
     });
 }
@@ -2896,8 +2913,8 @@ function dashStatus() {
         r.cells[1].innerHTML = linkBadge(p);
         r.cells[2].textContent = rt ? fmtPps(rt.tx) : "-";
         r.cells[3].textContent = rt ? fmtPps(rt.rx) : "-";
-        r.cells[4].textContent = BigInt(p.txB).toString();
-        r.cells[5].textContent = BigInt(p.rxB).toString();
+        r.cells[4].textContent = counterText(p.txB);
+        r.cells[5].textContent = counterText(p.rxB);
     });
 }
 tabHooks.dash = {
@@ -3012,7 +3029,7 @@ function portsStatus() {
         var i = p.portNum - 1,
             el = $("plink" + i);
         var mc = $("pmac" + i);
-        if (mc) mc.textContent = parseInt(p.macs, 16) & 0x1fff;
+        if (mc) mc.textContent = p.macs == null ? "-" : parseInt(p.macs, 16) & 0x1fff;
         if (el) el.innerHTML = linkBadge(p);
         var sel = $("pspd" + i),
             v = p.isSFP ? 0 : ADVSEL[parseInt(p.adv, 2)];
@@ -3420,8 +3437,46 @@ var MIB = [
     "TX Good Counter PHY", 8, "", 0, "RX Good Counter PHY", 8, "", 0,
     "RX Error Counter PHY", 4, "TX Error Counter PHY", 4,
 ];
+/* Native per-port SRAM order, one counter per JSON entry (width in bytes). */
+var MIB836X = [
+    "Interface in Octets", 8, "802.3 FCS errors", 4,
+    "802.3 Symbol errors", 4, "802.3 In Pause frames", 4,
+    "802.3 Control in unknown opcodes", 4, "Ether fragments", 4,
+    "Ether jabbers", 4, "Interface in Unicast Pkts", 4,
+    "Ether drop events", 4, "Interface in Multicast Pkts", 4,
+    "Interface in Broadcast Pkts", 4, "In MLD checksum errors", 4,
+    "In IGMP checksum errors", 4, "In MLD specific query", 4,
+    "In MLD general query", 4, "In IGMP specific query", 4,
+    "In IGMP general query", 4, "In MLD leaves", 4, "In IGMP leaves", 4,
+    "Ether RX/TX Octets", 8, "Ether RX/TX undersize Pkts", 4,
+    "Ether RX/TX oversize Pkts", 4, "Ether RX/TX Pkts 64 Octets", 4,
+    "Ether RX/TX Pkts 65-127 Octets", 4, "Ether RX/TX Pkts 128-255 Octets", 4,
+    "Ether RX/TX Pkts 256-511 Octets", 4, "Ether RX/TX Pkts 512-1023 Octets", 4,
+    "Ether RX/TX Pkts 1024-1518 Octets", 4, "Interface out Octets", 8,
+    "802.3 Single collision frames", 4, "802.3 Multi collision frames", 4,
+    "802.3 Deferred transmissions", 4, "802.3 Late collisions", 4,
+    "Ether collisions", 4, "802.3 Excessive collisions", 4,
+    "802.3 Out Pause frames", 4, "Interface out discards", 4,
+    "802.1d Tp Port in discards", 4, "Interface out Unicast Pkts", 4,
+    "Interface out Multicast Pkts", 4, "Interface out Broadcast Pkts", 4,
+    "Out OAMPDU Pkts", 4, "In OAMPDU Pkts", 4,
+    "In IGMP joins success", 4, "In IGMP joins fail", 4,
+    "In MLD joins success", 4, "In MLD joins fail", 4,
+    "In report suppression drops", 4, "In leave suppression drops", 4,
+    "Out IGMP reports", 4, "Out IGMP leaves", 4,
+    "Out IGMP general query", 4, "Out IGMP specific query", 4,
+    "Out MLD reports", 4, "Out MLD leaves", 4,
+    "Out MLD general query", 4, "Out MLD specific query", 4,
+    "In known multicast Pkts", 4
+];
 /* counters.json returns 64-bit hex words; two 32-bit counters share one word */
 function decodeCounters(s) {
+    if (S.info.mib_family === "rtl836x") {
+        if (s.length !== MIB836X.length / 2) throw new Error("Invalid native MIB array");
+        return s.map(function(v, i) {
+            return [MIB836X[2 * i], v == null ? null : BigInt(v)];
+        });
+    }
     var out = [];
     for (var i = 0; i < MIB.length; i += 4) {
         if (MIB[i] === "" && MIB[i + 1] === 8) continue;
@@ -3457,7 +3512,9 @@ function showCounters(i) {
     body.appendChild(wrap);
 
     function load() {
-        return getJSON("/counters.json?port=" + (i + 1)).then(function(s) {
+        return (S.info.hw_ver ? Promise.resolve() : pollInfo()).then(function() {
+            return getJSON("/counters.json?port=" + (i + 1));
+        }).then(function(s) {
             var rows = decodeCounters(s);
             var tb = h("table", {
                 class: "t"
@@ -3474,11 +3531,13 @@ function showCounters(i) {
                     text: r[0]
                 }), h("td", {
                     class: "num mono",
-                    text: r[1].toString()
+                    text: r[1] == null ? "-" : r[1].toString()
                 })]));
             });
             wrap.innerHTML = "";
             wrap.appendChild(tb);
+        }).catch(function() {
+            wrap.textContent = t("st_fail");
         });
     }
     nz.addEventListener("change", load);
@@ -3487,9 +3546,7 @@ function showCounters(i) {
         return auto.checked ? load() : Promise.resolve()
     }, 2500);
     ctrPoll.start();
-    load().catch(function() {
-        wrap.textContent = t("st_fail")
-    });
+    load();
     modal(t("c_port") + " " + (i + 1) + ": " + t("st_counters"), body,
         [h("button", {
                 class: "ctl",
@@ -3531,10 +3588,10 @@ function statsStatus() {
         r.cells[0].textContent = p.portNum;
         r.cells[1].textContent = p.name || "";
         r.cells[2].innerHTML = linkBadge(p);
-        r.cells[3].textContent = BigInt(p.txG).toString();
-        r.cells[4].textContent = BigInt(p.txB).toString();
-        r.cells[5].textContent = BigInt(p.rxG).toString();
-        r.cells[6].textContent = BigInt(p.rxB).toString();
+        r.cells[3].textContent = counterText(p.txG);
+        r.cells[4].textContent = counterText(p.txB);
+        r.cells[5].textContent = counterText(p.rxG);
+        r.cells[6].textContent = counterText(p.rxB);
     });
 }
 tabHooks.stats = {

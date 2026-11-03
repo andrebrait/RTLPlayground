@@ -25,6 +25,13 @@
 #define PORT_STATUS_LINK			0x0010
 #define PORT_STATUS_SPEED_MASK			0x0003	/* 0: 10M, 1: 100M, 2: 1000M */
 
+/* Read-only MIB data latch; only the address selector is written. */
+#define RTL836X_REG_MIB_COUNTER			0x1000
+#define RTL836X_REG_MIB_ADDRESS			0x1004
+#define RTL836X_REG_MIB_CTRL			0x1005
+#define RTL836X_MIB_BUSY				0x0001
+#define RTL836X_MIB_RESET			0x0002
+
 /* NIC */
 #define RTL836X_REG_NIC_RXRDRL			0x1a04
 #define RTL836X_REG_NIC_RXRDRH			0x1a05

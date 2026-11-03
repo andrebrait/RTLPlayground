@@ -19,6 +19,7 @@
 #include "syslog.h"
 #if SOC_FAMILY == RTL836X
 #include "rtl836x_regs.h"
+#include "rtl836x_mib.h"
 #endif
 
 // #define DEBUG
@@ -235,6 +236,22 @@ void counter_to_html(void)
 		reg_to_html(RTL837X_STAT_V_LOW);
 	}
 }
+#else
+static void mib_to_html(__xdata uint8_t *value, __xdata bool available)
+{
+	if (!available) {
+		string_to_html("null");
+		return;
+	}
+	string_to_html("\"0x");
+	uint8_t b = 0;
+	while (b < 7 && !value[b]) b++;
+	if (value[b] < 16)
+		charhex_to_html(value[b++]);
+	for (; b < 8; b++)
+		byte_to_html(value[b]);
+	char_to_html('"');
+}
 #endif
 
 
@@ -327,6 +344,9 @@ void send_basic_info(void)
 		}
 	}
 	char_to_html('"');
+#if SOC_FAMILY == RTL836X
+	string_to_html(",\"mib_family\":\"rtl836x\"");
+#endif
 
 	char_to_html('}');
 }
@@ -609,7 +629,7 @@ void send_lag(void)
 	char_to_html(']');
 }
 #else
-/* shortcut: VLAN, counters, L2 table, mirroring and LAG are not ported to the RTL836x, so
+/* shortcut: VLAN, L2 table, mirroring and LAG are not ported to the RTL836x, so
  * their pages get valid but empty JSON; port them with the features */
 static void send_json(__code const char *s)
 {
@@ -625,8 +645,19 @@ void send_vlan(uint16_t vlan)
 
 bool send_counters(uint8_t phys_port)
 {
-	(void)phys_port;
-	send_json("[]");
+	if (!phys_port || phys_port > MACHINE_MAX_PORT - MACHINE_MIN_PORT + 1)
+		return true;
+	uint8_t port = machine.phys_to_log_port[phys_port - 1];
+	__xdata uint8_t value[8];
+	slen = strtox(outbuf, HTTP_RESPONCE_JSON);
+	char_to_html('[');
+	for (uint8_t counter = 0; counter < RTL836X_MIB_COUNT; counter++) {
+		bool available = rtl836x_mib_read(port, counter, value);
+		mib_to_html(value, available);
+		if (counter + 1 < RTL836X_MIB_COUNT)
+			char_to_html(',');
+	}
+	char_to_html(']');
 	return false;
 }
 
@@ -1030,8 +1061,18 @@ void send_status(void)
 #if SOC_FAMILY == RTL836X
 		reg_read(RTL836X_REG_PORT0_STATUS + i);
 		char_to_html(SFR_DATA_0 & PORT_STATUS_LINK ? '1' + (SFR_DATA_0 & PORT_STATUS_SPEED_MASK) : '0');
-		/* shortcut: no MIB counters yet (0x1000-0x1005), the traffic columns read 0 */
-		slen += strtox(outbuf + slen, ",\"txG\":\"0x0\",\"txB\":\"0x0\",\"rxG\":\"0x0\",\"rxB\":\"0x0\",\"macs\":\"0x0\"}");
+		__xdata uint8_t value[8];
+		for (uint8_t metric = 0; metric < 4; metric++) {
+			switch (metric) {
+			case 0: string_to_html(",\"txG\":"); break;
+			case 1: string_to_html(",\"txB\":"); break;
+			case 2: string_to_html(",\"rxG\":"); break;
+			default: string_to_html(",\"rxB\":"); break;
+			}
+			bool available = rtl836x_mib_summary(i, metric, value);
+			mib_to_html(value, available);
+		}
+		string_to_html(",\"macs\":null}");
 #else
 		
 		uint8_t b = 0;

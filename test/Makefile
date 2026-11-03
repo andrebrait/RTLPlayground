@@ -49,7 +49,8 @@ all: run
 # The RTL836x web pages; the test carries its own 16-bit register file.
 $(BUILDDIR)/test_page_json_836x: CFLAGS += -DMACHINE_NAME=TPLINK_TL_SG108PE_V5
 $(BUILDDIR)/test_page_json_836x: test_page_json_836x.c support.c env_tables.c $(SRCROOT)/cmd_editor.c \
-                                 $(SRCROOT)/httpd/page_impl.c $(SRCROOT)/httpd/page_stp.c | $(BUILDDIR)
+                                 $(SRCROOT)/httpd/page_impl.c $(SRCROOT)/httpd/page_stp.c \
+                                 $(SRCROOT)/rtl836x_mib.c $(SRCROOT)/rtl836x_port.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
 
 $(BUILDDIR):
@@ -113,6 +114,7 @@ run: $(TESTS)
 	done; \
 	if [ $$fail -ne 0 ]; then echo "TESTS FAILED"; exit 1; fi
 	CC="$(CC)" python3 test_bringup_safety.py
+	node test_mib.js
 	@echo "ALL TESTS PASSED"
 
 clean:

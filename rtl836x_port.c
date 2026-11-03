@@ -1,6 +1,6 @@
 /*
- * The port interface of rtl837x_port.c for the RTL836x. Only the port status
- * is implemented; VLAN, L2, LAG and isolation stay at the hardware defaults,
+ * The port interface of rtl837x_port.c for the RTL836x. Port status and MIB
+ * counters are implemented; VLAN, L2, LAG and isolation stay at hardware defaults,
  * which forward between all ports and to the CPU port.
  */
 #include <stdint.h>
@@ -8,6 +8,7 @@
 #include "rtl837x_sfr.h"
 #include "rtl837x_regs.h"
 #include "rtl836x_regs.h"
+#include "rtl836x_mib.h"
 #include "rtl837x_port.h"
 #include "machine.h"
 
@@ -17,21 +18,31 @@
 
 void port_stats_print(void) __banked
 {
-	/* shortcut: link and speed only, add the MIB counters (0x1000-0x1005) for the traffic columns */
-	print_string("\nPort\tState\tLink\n");
+	__xdata uint8_t value[8];
+	print_string("\nPort\tState\tLink\tTX U/M/B\tTX excess\tRX U/M/B\tRX FCS\n");
 	for (uint8_t i = MACHINE_MIN_PORT; i <= MACHINE_MAX_PORT; i++) {
 		print_phys_port(i); write_char('\t');
 		phy_read(i, 0, 0);
 		print_string(SFR_DATA_8 & 0x08 ? "Off\t" : "On\t");	/* BMCR power down */
 		reg_read(RTL836X_REG_PORT0_STATUS + i);
 		if (!(SFR_DATA_0 & PORT_STATUS_LINK))
-			print_string("Down\n");
+			print_string("Down\t");
 		else if ((SFR_DATA_0 & PORT_STATUS_SPEED_MASK) == 2)
-			print_string("1000M\n");
+			print_string("1000M\t");
 		else if (SFR_DATA_0 & PORT_STATUS_SPEED_MASK)
-			print_string("100M\n");
+			print_string("100M\t");
 		else
-			print_string("10M\n");
+			print_string("10M\t");
+		for (uint8_t metric = 0; metric < 4; metric++) {
+			if (rtl836x_mib_summary(i, metric, value)) {
+				print_string("0x");
+				for (uint8_t b = 0; b < 8; b++)
+					print_byte(value[b]);
+			} else {
+				print_string("n/a");
+			}
+			write_char(metric == 3 ? '\n' : '\t');
+		}
 	}
 }
 

@@ -17,13 +17,19 @@
   - Experimental support for the TP-Link TL-SG108PE V5, an RTL8370N
     based 8-port gigabit switch with PoE on ports 1-4 (`MACHINE=TPLINK_TL_SG108PE_V5`,
     `RTL8370_DUMP=<flash dump>` for the PHY patch). The image sets up the switch,
-    PoE, the NIC and the web UI; the status page shows link and speed. VLAN, L2
-    table, LAG, STP, LLDP, IGMP, mirroring, EEE, bandwidth, storm control, MTU,
-    cable test, port speed/duplex and the packet counters are not ported: their
-    commands are refused and their pages are empty.
+    PoE, the NIC and the web UI. Native hardware MIB counters feed the dashboard,
+    Statistics details and CLI: packet totals sum unicast/multicast/broadcast
+    counters with 64-bit carry; error columns specifically count TX excessive
+    collisions and RX FCS errors, not all errors. Details expose all 58 native
+    per-port counters (64-bit octets, otherwise 32-bit) without fabricated queue
+    counters. Busy/reset/selector failures and unsupported MAC occupancy are
+    unavailable (`null` in JSON, `-` in the UI, `n/a` in the CLI).
+    VLAN, L2 table, LAG, STP, LLDP, IGMP, mirroring, EEE, bandwidth, storm control,
+    MTU, cable test and port speed/duplex are not ported: their commands are refused
+    and their pages are empty.
     Initial hardware checks passed for standalone boot, DHCP, ping, web login
-    and the live eight-port status dashboard. Configuration persistence and web
-    firmware updates have not yet been tested on this board.
+    and the live eight-port status dashboard; persistence was confirmed after a
+    reboot. Web firmware updates and the MIB counters still need hardware checks.
 
 - Web UI
   - Compress the embedded assets (minify + gzip) and switch to a single-page layout. #315
