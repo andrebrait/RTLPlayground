@@ -453,6 +453,7 @@ static uint8_t stp_first(uint16_t mask) __reentrant
 }
 
 
+#if SOC_FAMILY == RTL837X
 static void stp_state_set(uint8_t port, uint8_t state) __reentrant
 {
 	stp_ss_mask = stp_members(port);
@@ -475,6 +476,22 @@ static uint8_t stp_state_get(uint8_t port) __reentrant
 	reg_read_m(RTL837X_MSTP_STATES);
 	return (sfr_data[3 - (stp_ss_i >> 2)] >> ((stp_ss_i << 1) & 0x7)) & 0b11;
 }
+#else
+/* shortcut: no STP port states on the RTL836x yet (VLAN_MSTI0_CTRL 0x0a00), so "stp on"
+ * is refused there and every port forwards */
+static void stp_state_set(uint8_t port, uint8_t state) __reentrant
+{
+	(void)port;
+	(void)state;
+}
+
+
+static uint8_t stp_state_get(uint8_t port) __reentrant
+{
+	(void)port;
+	return 0b11;
+}
+#endif
 
 
 uint8_t stp_port_state(uint8_t port) __banked
@@ -1131,8 +1148,12 @@ void stp_lag_map(void) __banked
 
 static void stp_links_read(void) __reentrant
 {
+#if SOC_FAMILY == RTL837X
 	reg_read_m(RTL837X_REG_LINKS_STS);
 	stp_link_phys = (uint16_t)sfr_data[1] | ((uint16_t)sfr_data[2] << 8);
+#else
+	stp_link_phys = 0;	/* not reached: STP does not run on the RTL836x */
+#endif
 	stp_link_now = 0;
 	for (stp_k = 0; stp_k < STP_ENTITIES; stp_k++) {
 		if (!stp_ent_active(stp_k) || stp_first(stp_members(stp_k) & stp_link_phys) == 0xff)
@@ -1197,6 +1218,7 @@ void stp_timers(void) __banked
 		 * yet losing a link is the most ordinary topology change there is.
 		 * Once per second is soon enough, and it keeps register reads out
 		 * of the 50 Hz tick. */
+#if SOC_FAMILY == RTL837X
 		reg_read_m(RTL837X_REG_LINKS);
 		for (stp_i = MACHINE_MIN_PORT; stp_i <= MACHINE_MAX_PORT; stp_i++) {
 			if (stp_i == 8)
@@ -1205,6 +1227,7 @@ void stp_timers(void) __banked
 				? (sfr_data[3 - ((stp_i & 7) >> 1)] >> 4)
 				: (sfr_data[3 - ((stp_i & 7) >> 1)] & 0xf);
 		}
+#endif
 		stp_lag_map();
 		stp_links_read();
 		if (stp_map_changed) {
@@ -1396,6 +1419,7 @@ void stp_defaults(void) __banked
 }
 
 
+#if SOC_FAMILY == RTL837X
 /*
  * Restore BPDU flooding when STP stops.
  */
@@ -1420,6 +1444,7 @@ static void stp_fdb_update(__xdata uint16_t pmask)
 		port_l2mc_set(0x00, stp_fdb_vid, pmask);
 	}
 }
+#endif
 
 
 static void stp_times_check(void) __reentrant
@@ -1441,6 +1466,7 @@ void stp_counters_clear(void) __banked __reentrant
 }
 
 
+#if SOC_FAMILY == RTL837X
 void stp_setup(void) __banked
 {
 	stp_times_check();
@@ -1496,6 +1522,11 @@ void stp_off(void) __banked
 		trap_rma_set(RTL837X_RMA0_CONF, RTL837X_RMA_ACT_FORWARD);
 	}
 }
+#else
+void stp_off(void) __banked
+{
+}
+#endif
 
 
 void stp_port_admin(uint8_t port, uint8_t on) __banked

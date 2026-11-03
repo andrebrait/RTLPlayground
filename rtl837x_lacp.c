@@ -182,6 +182,7 @@ void lacp_mux_update(void) __banked
 
 void lacp_send(uint8_t port) __banked
 {
+#if SOC_FAMILY == RTL837X
 	uint16_t saved_mgmt_vlan;
 
 	memset((__xdata uint8_t *)LACP_O, 0, sizeof(struct lacpdu));
@@ -229,11 +230,15 @@ void lacp_send(uint8_t port) __banked
 	uip_len = sizeof(struct lacpdu);
 	tcpip_output();
 	management_vlan = saved_mgmt_vlan;
+#else
+	(void)port;
+#endif
 }
 
 
 void lacp_in(void) __banked
 {
+#if SOC_FAMILY == RTL837X
 	__xdata uint8_t port, lag;
 
 	lacp_rxbody = TRAP_RX_BODY();
@@ -292,10 +297,14 @@ void lacp_in(void) __banked
 		lacp_ntt[port] = 1;
 
 	lacp_mux_update();
+#else
+	uip_len = 0;
+#endif
 }
 
 
 
+#if SOC_FAMILY == RTL837X
 static void lacp_step(void)
 {
 	for (uint8_t i = MACHINE_MIN_PORT; i <= MACHINE_MAX_PORT; i++) {
@@ -351,6 +360,11 @@ void lacp_timers(void) __banked
 		lacp_step();
 	}
 }
+#else
+void lacp_timers(void) __banked
+{
+}
+#endif
 
 
 static void lacp_port_init(uint8_t port)
@@ -390,12 +404,16 @@ static void lacp_engine_on(void)
 {
 	lacp_tick_last = (uint8_t)ticks;
 	lacpEnabled = 1;
+#if SOC_FAMILY == RTL837X	/* RTL836x: no LAG, so the engine never starts */
 	trap_rma_set(RTL837X_RMA2_CONF, RTL837X_RMA_ACT_TRAP);
+#endif
 }
 
 static void lacp_engine_off(void)
 {
+#if SOC_FAMILY == RTL837X
 	trap_rma_set(RTL837X_RMA2_CONF, RTL837X_RMA_ACT_DROP);
+#endif
 	lacpEnabled = 0;
 }
 

@@ -52,3 +52,24 @@ void port_l2_static_mgmt(__xdata uint8_t *mac, __xdata uint16_t vlan, __xdata bo
 	(void)vlan;
 	(void)remove_entry;
 }
+
+
+/* No L2 table and no LAGs yet. Only "stp on" or a LACP group reach the setters, and the RTL836x CLI refuses both */
+void port_l2_forget_port(uint8_t port) __banked
+{
+	(void)port;
+}
+
+
+uint16_t port_lag_members_get(uint8_t lag) __banked
+{
+	(void)lag;
+	return 0;
+}
+
+
+void port_lag_members_set(__xdata uint8_t lag, __xdata uint16_t members) __banked
+{
+	(void)lag;
+	(void)members;
+}

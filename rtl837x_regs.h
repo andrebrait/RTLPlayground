@@ -31,6 +31,11 @@
 /* Flags in byte 1 of the RX frame descriptor */
 #define RX_TAG_L4_CSUM_BAD		0x04
 
+/* VLAN ingress filter modes, the vlan_ingress_mode_e values */
+#define INGR_ALLOW_TAGGED 1
+#define INGR_ALLOW_UNTAGGED 2
+#define INGR_ALLOW_ALL 0
+
 /* Register addresses: an RTL836x build that names one fails to compile */
 #if SOC_FAMILY == RTL837X
 #define RTL837X_REG_CHIP_ID		0x0004
@@ -243,9 +248,6 @@
  */
 // 2 bits per port: allow tagged (01) / untagged (10) and all (00)
 #define RTL837x_REG_INGRESS	0x4e10
-#define INGR_ALLOW_TAGGED 1
-#define INGR_ALLOW_UNTAGGED 2
-#define INGR_ALLOW_ALL 0
 
 /*
  * Mirroring

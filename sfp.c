@@ -188,7 +188,9 @@ static bool sfp_module_read(uint8_t sfp)
 		return false;
 
 	sfp_apply_quirks(sfp);
+#if SOC_FAMILY == RTL837X	/* no RTL836x SerDes code: the RTL836x boards have no SFP cage (n_sfp 0) */
 	sds_config(machine.sfp_port[sfp].sds, sfp_rate_to_sds_config(rate));
+#endif
 
 	return true;
 }

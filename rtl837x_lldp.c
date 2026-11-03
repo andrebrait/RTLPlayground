@@ -62,6 +62,7 @@ struct lldp_pkt {
 
 static void lldp_send_ports(uint16_t ttl, uint16_t ports) __reentrant
 {
+#if SOC_FAMILY == RTL837X
     __xdata uint8_t *p;
     __xdata uint8_t *tail;
     uint8_t port_position;
@@ -155,6 +156,10 @@ static void lldp_send_ports(uint16_t ttl, uint16_t ports) __reentrant
             tcpip_output();
         }
     }
+#else
+    (void)ttl;
+    (void)ports;
+#endif
 }
 
 void lldp_send(void) __banked __reentrant
@@ -174,6 +179,7 @@ void lldp_set_addresses(void) __banked {
 }
 
 void lldp_set_rtl_wrapper(void) __banked {
+#if SOC_FAMILY == RTL837X
     /*
      * This is the RTL CPU tag, not the Ethernet EtherType.
      *     port 0 -> 0x0001
@@ -186,6 +192,7 @@ void lldp_set_rtl_wrapper(void) __banked {
     LLDP_O->rtl_tag.flags = HTONS(RTL_TAG_LEARN_DIS);
 
     LLDP_O->ether_type = HTONS(LLDP_ETHERTYPE);
+#endif
 }
 
 uint8_t lldp_sysname(__xdata uint8_t *p) __banked

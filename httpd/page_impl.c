@@ -215,6 +215,7 @@ void reg_to_html_long(uint16_t reg)
 }
 
 
+#if SOC_FAMILY == RTL837X
 /* The 64-bit counter of the last STAT_GET as one number: the low word keeps
  * its leading zeros whenever the high word is set. */
 void counter_to_html(void)
@@ -227,6 +228,7 @@ void counter_to_html(void)
 		reg_to_html(RTL837X_STAT_V_LOW);
 	}
 }
+#endif
 
 
 void send_sfp_info(uint8_t sfp)
@@ -323,6 +325,7 @@ void send_basic_info(void)
 }
 
 
+#if SOC_FAMILY == RTL837X
 void send_vlan(uint16_t vlan)
 {
 	slen = strtox(outbuf, HTTP_RESPONCE_JSON);
@@ -598,6 +601,50 @@ void send_lag(void)
 	slen -=1; // remove comma
 	char_to_html(']');
 }
+#else
+/* shortcut: VLAN, counters, L2 table, mirroring and LAG are not ported to the RTL836x, so
+ * their pages get valid but empty JSON; port them with the features */
+static void send_json(__code const char *s)
+{
+	slen = strtox(outbuf, HTTP_RESPONCE_JSON);
+	slen += strtox(outbuf + slen, s);
+}
+
+void send_vlan(uint16_t vlan)
+{
+	(void)vlan;
+	send_json("{\"members\":\"0x0\",\"name\":\"\",\"pvid\":\"0x0\"}");
+}
+
+bool send_counters(uint8_t phys_port)
+{
+	(void)phys_port;
+	send_json("[]");
+	return false;
+}
+
+void send_l2(uint16_t idx)
+{
+	(void)idx;
+	send_json("[]");
+}
+
+void l2_delete(uint16_t idx)
+{
+	(void)idx;
+	send_json("{\"result\":0}");
+}
+
+void send_mirror(void)
+{
+	send_json("{\"enabled\":0,\"mPort\":1,\"mirror_rx\":\"0\",\"mirror_tx\":\"0\"}");
+}
+
+void send_lag(void)
+{
+	send_json("[]");
+}
+#endif
 
 
 void send_lacp(void)
@@ -679,6 +726,7 @@ void send_lldp(void)
 }
 
 
+#if SOC_FAMILY == RTL837X
 void send_eee(void)
 {
 	dbg_string("send_eee called\nsending EEE status\n");
@@ -845,6 +893,33 @@ void send_mtu(void)
 	}
 	char_to_html(']');
 }
+#else
+/* shortcut: EEE, bandwidth, storm control, isolation and MTU are not ported to the RTL836x */
+void send_eee(void)
+{
+	send_json("[]");
+}
+
+void send_bandwidth(void)
+{
+	send_json("[]");
+}
+
+void send_storm(void)
+{
+	send_json("[]");
+}
+
+void send_isolation(void)
+{
+	send_json("[]");
+}
+
+void send_mtu(void)
+{
+	send_json("[]");
+}
+#endif
 
 
 void send_status(void)
@@ -1048,15 +1123,18 @@ void send_vlanlist(void)
 	/* Worst case per entry: {"id":4094,"name":"<117-char name>"} = 138 bytes
 	 * (name bound: CMD_BUF_SIZE=128 minus command prefix); +1 for closing ']'.
 	 * At worst case ~18 VLANs fit; typical configs with short names fit many more. */
+#if SOC_FAMILY == RTL837X	/* RTL836x: no VLAN table yet, the list stays empty */
 	__xdata uint16_t i;
 	__xdata uint16_t n;
 	uint8_t first = 1;
+#endif
 
 	slen = strtox(outbuf, HTTP_RESPONCE_JSON);
 	slen += strtox(outbuf + slen, "{\"mgmt\":");
 	itoa16_html(management_vlan);
 	slen += strtox(outbuf + slen, ",\"vlan\":[");
 
+#if SOC_FAMILY == RTL837X
 	for (i = 1; i < 4095; i++) {
 		vlan_get(i);
 		if (!(sfr_data[0] & 0x02)) /* bit 1: VLAN table entry valid */
@@ -1082,6 +1160,7 @@ void send_vlanlist(void)
 		slen += strtox(outbuf + slen, "\"}");
 
 	}
+#endif
 
 	char_to_html(']');
 	char_to_html('}');

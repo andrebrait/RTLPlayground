@@ -926,6 +926,7 @@ void parse_port(void)
 	print_string("Logical Port: "); print_byte(phy_settings.port); write_char('\n');
 	phy_settings.duplex = PHY_DUPLEX_BOTH;
 
+#if SOC_FAMILY == RTL837X	/* RTL836x: no port show, cable test, speed or duplex yet */
 	if (cmd_compare(2, "show")) {
 		print_string("Name: ");
 		print_string_x(port_names[phy_settings.port]);
@@ -935,7 +936,9 @@ void parse_port(void)
 			write_char('\n');
 		}
 		port_media_show(phy_settings.port);
-	} else if (cmd_compare(2, "name")) {
+	} else
+#endif
+	if (cmd_compare(2, "name")) {
 		uint8_t i = 0;
 		while ( cmd_words_len > 3 && (i < PORT_NAME_SIZE-1) && (cmd_buffer[cmd_words_b[3] + i] != NUL) ) {
 			port_names[phy_settings.port][i] = name_char(cmd_buffer[cmd_words_b[3] + i]);
@@ -955,6 +958,7 @@ void parse_port(void)
 		} else {
 			print_string ("Unknown port <port> lldp [block|permit] command\n");
 		}
+#if SOC_FAMILY == RTL837X
 	} else if (machine.is_sfp[phy_settings.port]) {
 		print_string(" is SFP no PHY information available.\n");
 	} else if (cmd_compare(2, "cabletest")) {
@@ -1013,6 +1017,7 @@ void parse_port(void)
 		else
 			phy_settings.duplex = PHY_DUPLEX_HALF;
 		phy_set_duplex();
+#endif
 	} else {
 		cmd_error("Unknown port command\n");
 	}

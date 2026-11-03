@@ -32,9 +32,14 @@ void stp_parse(void) __banked __reentrant
 	uint8_t port;
 
 	if (cmd_compare(1, "on")) {
+#if SOC_FAMILY == RTL836X
+		print_string("Error: STP is not supported on this switch yet\n");
+		err_status = ERR_INVALID_ARGUMENT;
+#else
 		print_string("STP enabled\n");
 		stp_enabled = 1;
 		stp_setup();
+#endif
 		return;
 	}
 	if (cmd_compare(1, "off")) {
