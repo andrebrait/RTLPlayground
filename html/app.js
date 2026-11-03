@@ -97,7 +97,7 @@ var LANG = {
         pt_pause_tx: "Negotiated TX pause",
         pt_pause_rx: "Negotiated RX pause",
         pt_poe: "PoE",
-        poe_permitted: "PoE permitted",
+        poe_permitted: "\u26a1 PoE",
         poe_disabled: "PoE disabled",
         poe_delivery: "PoE power delivery",
         poe_unknown: "Unavailable (no telemetry)",
