@@ -183,6 +183,15 @@ static uint16_t switch_init(void)
 	reg_write(0x1b0a, 0);
 	reg_write(0x1b0c, 0);
 
+	/*
+	 * GPIO as the stock runtime leaves it (POE.md): 1, 5, 8, 9 = PoE enable ports 1-4 (high = on),
+	 * 7 = PoE MCU line, 2 = PoE LEDs. Output value before enable, so no line glitches low; without
+	 * the mode bits these pins are LED outputs and port 2's PoE enable followed a port LED.
+	 */
+	reg_write(0x1d1d, reg_read(0x1d1d) | 0x03a6);	/* GPIO_67C_O_X0 */
+	reg_write(0x1d21, reg_read(0x1d21) | 0x03a6);	/* GPIO_67C_OE_X0 */
+	reg_write(0x1d25, reg_read(0x1d25) | 0x03a6);	/* GPIO_MODE_67C_X0 */
+
 	log_str("switch init done\n");
 	return id;
 }
