@@ -55,7 +55,8 @@
 #define LLDP_NB_SYS_NAME_LENGTH 16
 #define LLDP_NB_SYS_DESC_LENGTH 32
 #define LLDP_NB_PORT_DESC_LENGTH 16
-#define LLDP_NB_JSON_LENGTH 229	/* separator + worst-case neighbour entry in /lldp.json */
+#define LLDP_NB_JSON_LENGTH 270	/* separator + worst-case neighbour entry in /lldp.json */
+#define LLDP_ORG_TLV_TYPE 127
 
 struct lldp_neighbor {
     uint8_t port;		/* logical ingress port */
@@ -69,6 +70,9 @@ struct lldp_neighbor {
     char port_desc[LLDP_NB_PORT_DESC_LENGTH + 1];	/* NUL terminated, printable ASCII */
     uint8_t mgmt_addr[4];	/* IPv4 management address, all zero = none */
     uint16_t caps;		/* enabled System Capabilities bits */
+    uint8_t poe_class;		/* 802.3 power class field 1..5 (class 0..4) from a PD, 0 = unknown */
+    uint8_t poe_type;		/* 802.3at power type of a PD: 1 = Type 1 (af), 2 = Type 2 (at), 0 = unknown */
+    uint16_t poe_req;		/* PD requested power in 0.1 W, from 802.3at or LLDP-MED, 0 = unknown */
     uint16_t ttl;		/* seconds until the entry expires, 0 = free slot */
 };
 

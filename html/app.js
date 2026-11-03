@@ -101,6 +101,8 @@ var LANG = {
         poe_disabled: "PoE disabled",
         poe_delivery: "PoE power delivery",
         poe_unknown: "Unavailable (no telemetry)",
+        poe_pd: "Powered device (LLDP)",
+        lldp_nb_poe: "PoE",
         pt_sfp_note: "SFP speed is set per slot and is not saved in the startup config.",
         pt_name_err: "Port name: 1-15 characters, no spaces",
         pt_mtu_err: "MTU must be 64-16383",
@@ -2841,6 +2843,9 @@ function portRows(p) {
         rows.push([t("pt_poe"), poeLabel(p)]);
         rows.push([t("poe_delivery"), t("poe_unknown")]);
     }
+    (S.lldpNb || []).forEach(function(n) {
+        if (n.port === p.portNum && n.poe) rows.push([t("poe_pd"), lldpPoe(n)]);
+    });
     if (p.isSFP) {
         if (p.sfp_vendor) rows.push([t("p_module"), [p.sfp_vendor, p.sfp_model, p.sfp_serial].filter(Boolean).join(" / ")]);
         var ext = p.sfp_options & 0x40;
@@ -2892,6 +2897,9 @@ function portDetail(i) {
     if (!S.ports[i]) return;
     modal(t("c_port") + " " + (i + 1), detailTable(S.ports[i]));
     S.detail = i;
+    getJSON("/lldp.json").then(function(s) {
+        S.lldpNb = s.neighbors || []
+    }).catch(function() {});
 }
 
 function renderInfo() {
@@ -4632,6 +4640,14 @@ function lldpCaps(c) {
     }).join(", ")
 }
 
+function lldpPoe(n) {
+    if (!n.poe) return "";
+    var parts = ["802.3" + n.poe];
+    if (n.poeClass != null) parts.push("class " + n.poeClass);
+    if (n.poeReq != null) parts.push((n.poeReq / 10).toFixed(1) + " W");
+    return parts.join(", ");
+}
+
 function lldpLoad() {
     return getJSON("/lldp.json").then(function(s) {
         $("lldp_en").checked = s.on;
@@ -4657,6 +4673,7 @@ function lldpLoad() {
             sw.firstChild.checked = p.permitted;
             tr.insertCell().appendChild(sw);
         });
+        S.lldpNb = s.neighbors || [];
         var nb = $("lldp_nb_table").tBodies[0];
         nb.innerHTML = "";
         (s.neighbors || []).sort(function(a, b) {
@@ -4677,6 +4694,7 @@ function lldpLoad() {
                 text: n.mgmtAddr
             }));
             tr.insertCell().textContent = lldpCaps(n.caps);
+            tr.insertCell().textContent = lldpPoe(n);
             tr.insertCell().textContent = n.ttl;
         });
     });

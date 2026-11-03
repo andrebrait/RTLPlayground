@@ -249,6 +249,63 @@ static void test_neighbor_fields(void)
 	      "N6 LLDP_NB_JSON_LENGTH holds a worst-case entry and its separator");
 }
 
+#define LLDP_ORG_TLV 127
+
+/* A PD on port 3 (index 2) sending the given organizational TLVs */
+static const char *pd_json(const uint8_t *a, uint16_t a_len, const uint8_t *b, uint16_t b_len)
+{
+	reset(true, 0x01ff);
+	rx_start(2, false);
+	ids(chassis_mac, sizeof(chassis_mac), port_text, sizeof(port_text));
+	if (a_len)
+		tlv(LLDP_ORG_TLV, a, a_len);
+	if (b_len)
+		tlv(LLDP_ORG_TLV, b, b_len);
+	tlv(LLDP_SYSNAME_TLV_TYPE, "cam", 3);
+	CHECK(rx_end() && nb_count() == 1 && !strcmp(lldp_nb[0].sys_name, "cam"),
+	      "P0 a frame with power TLVs is kept, and TLVs after them are still read");
+	return nb_json();
+}
+
+static void test_neighbor_power(void)
+{
+	/* 802.3 Power via MDI: OUI 00-12-0F subtype 2; MDI support (bit 0 clear: PD), pair, class + 1,
+	 * then the 802.3at fields: type/source/priority, requested and allocated power in 0.1 W */
+	static const uint8_t at_pd[] = {0x00, 0x12, 0x0f, 2, 0x0e, 1, 5, 0x50, 0x00, 0xff, 0x00, 0xff};
+	static const uint8_t af_type1[] = {0x00, 0x12, 0x0f, 2, 0x0e, 1, 4, 0xd0, 0x00, 0x82, 0x00, 0x82};
+	static const uint8_t class_only_4[] = {0x00, 0x12, 0x0f, 2, 0x0e, 1, 5};
+	static const uint8_t class_only_2[] = {0x00, 0x12, 0x0f, 2, 0x0e, 1, 3};
+	static const uint8_t pse[] = {0x00, 0x12, 0x0f, 2, 0x0f, 1, 5, 0x10, 0x00, 0xff, 0x00, 0xff};
+	static const uint8_t short_tlv[] = {0x00, 0x12, 0x0f, 2, 0x0e, 1};
+	/* LLDP-MED Extended Power-via-MDI: OUI 00-12-BB subtype 4; PD in bits 7:6, power in 0.1 W */
+	static const uint8_t med_6w[] = {0x00, 0x12, 0xbb, 4, 0x53, 0x00, 0x3c};
+	static const uint8_t med_15w[] = {0x00, 0x12, 0xbb, 4, 0x53, 0x00, 0x96};
+
+	CHECK(strstr(pd_json(at_pd, sizeof(at_pd), 0, 0), "\"poe\":\"at\",\"poeClass\":4,\"poeReq\":255"),
+	      "P1 an 802.3at Type 2 PD shows at, its class and the power it requests");
+	CHECK(strstr(pd_json(af_type1, sizeof(af_type1), 0, 0), "\"poe\":\"af\",\"poeClass\":3,\"poeReq\":130"),
+	      "P2 the Type 1 bit wins over the requested power");
+	CHECK(strstr(pd_json(class_only_4, sizeof(class_only_4), 0, 0), "\"poe\":\"at\",\"poeClass\":4,\"poeReq\":null"),
+	      "P3 without the 802.3at fields, class 4 needs at");
+	CHECK(strstr(pd_json(class_only_2, sizeof(class_only_2), 0, 0), "\"poe\":\"af\",\"poeClass\":2,\"poeReq\":null"),
+	      "P4 without the 802.3at fields, classes 0 to 3 fit af");
+	CHECK(strstr(pd_json(med_15w, sizeof(med_15w), 0, 0), "\"poe\":\"at\",\"poeClass\":null,\"poeReq\":150"),
+	      "P5 LLDP-MED alone: more than 12.95 W needs at");
+	CHECK(strstr(pd_json(med_6w, sizeof(med_6w), 0, 0), "\"poe\":\"af\",\"poeClass\":null,\"poeReq\":60"),
+	      "P6 LLDP-MED alone: up to 12.95 W fits af");
+	CHECK(strstr(pd_json(class_only_2, sizeof(class_only_2), med_15w, sizeof(med_15w)),
+		     "\"poe\":\"af\",\"poeClass\":2,\"poeReq\":150"),
+	      "P7 the class decides over LLDP-MED power, which is still reported");
+	CHECK(strstr(pd_json(pse, sizeof(pse), 0, 0), "\"poe\":null,\"poeClass\":null,\"poeReq\":null"),
+	      "P8 a neighbour announcing itself as PSE is not a PD");
+	CHECK(strstr(pd_json(short_tlv, sizeof(short_tlv), 0, 0), "\"poe\":null,\"poeClass\":null,\"poeReq\":null"),
+	      "P9 a Power via MDI TLV too short for the class is ignored");
+	CHECK(strstr(pd_json(0, 0, 0, 0), "\"poe\":null"), "P10 no power TLVs: unknown");
+	CHECK(strstr(nb_shown(), "cam"), "P11 lldp show still lists the neighbour");
+	pd_json(at_pd, sizeof(at_pd), 0, 0);
+	CHECK(strstr(nb_shown(), "PoE at class 4 25.5 W"), "P12 lldp show prints type, class and requested power");
+}
+
 int main(void)
 {
 	uint8_t i;
@@ -336,6 +393,7 @@ int main(void)
 	CHECK(!bad, "L15 a frame cut inside a TLV or inside the header publishes no neighbour");
 
 	test_neighbor_fields();
+	test_neighbor_power();
 
 	printf("\n%s (%d failure%s)\n", failures ? "SANDBOX: FAILURES" : "SANDBOX: ALL PASS",
 	       failures, failures == 1 ? "" : "s");

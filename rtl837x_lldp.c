@@ -401,6 +401,21 @@ bool lldp_in(void) __banked __reentrant
                 && p[1] == LLDP_MGMT_ADDR_SUBTYPE_IPV4)
                 memcpy(lldp_tmp.mgmt_addr, p + 2, sizeof(lldp_tmp.mgmt_addr));
             break;
+        case LLDP_ORG_TLV_TYPE:
+            if (len < 7 || p[0] || p[1] != 0x12)
+                break;
+            /* 802.3 Power via MDI from a PD (bit 0 clear), class field 1..5 = class 0..4 */
+            if (p[2] == 0x0f && p[3] == 2 && !(p[4] & 1) && p[6] >= 1 && p[6] <= 5) {
+                lldp_tmp.poe_class = p[6];
+                /* 802.3at: type/source/priority with bit 6 set for a PD, bit 7 set = Type 1 */
+                if (len >= 12 && (p[7] & 0x40)) {
+                    lldp_tmp.poe_type = p[7] & 0x80 ? 1 : 2;
+                    lldp_tmp.poe_req = ((uint16_t)p[8] << 8) | p[9];
+                }
+            /* LLDP-MED Extended Power-via-MDI from a PD (bits 7:6 = 01) */
+            } else if (p[2] == 0xbb && p[3] == 4 && (p[4] & 0xc0) == 0x40 && !lldp_tmp.poe_req)
+                lldp_tmp.poe_req = ((uint16_t)p[5] << 8) | p[6];
+            break;
         }
         p += len;
     }
@@ -501,6 +516,19 @@ static void lldp_put_port_id(uint8_t i, bool html) __reentrant
         lldp_put_string(lldp_nb[i].port_id, html);
 }
 
+/* 1 = fits 802.3af, 2 = needs 802.3at, 0 = unknown: the 802.3at type bit, else the
+ * class (class 4 needs at), else LLDP-MED power above the 12.95 W af gives a PD */
+static uint8_t lldp_poe_std(uint8_t i) __reentrant
+{
+    if (lldp_nb[i].poe_type)
+        return lldp_nb[i].poe_type;
+    if (lldp_nb[i].poe_class)
+        return lldp_nb[i].poe_class == 5 ? 2 : 1;
+    if (lldp_nb[i].poe_req)
+        return lldp_nb[i].poe_req > 129 ? 2 : 1;
+    return 0;
+}
+
 void lldp_neighbors_to_html(void) __banked __reentrant
 {
     uint8_t i;
@@ -531,6 +559,24 @@ void lldp_neighbors_to_html(void) __banked __reentrant
         lldp_put_addr(lldp_nb[i].mgmt_addr, true);
         slen += strtox(outbuf + slen, "\",\"caps\":");
         lldp_put_dec(lldp_nb[i].caps, true);
+        slen += strtox(outbuf + slen, ",\"poe\":");
+        if (lldp_poe_std(i)) {
+            lldp_put('"', true);
+            lldp_put('a', true);
+            lldp_put(lldp_poe_std(i) == 2 ? 't' : 'f', true);
+            lldp_put('"', true);
+        } else
+            slen += strtox(outbuf + slen, "null");
+        slen += strtox(outbuf + slen, ",\"poeClass\":");
+        if (lldp_nb[i].poe_class)
+            lldp_put_dec(lldp_nb[i].poe_class - 1, true);
+        else
+            slen += strtox(outbuf + slen, "null");
+        slen += strtox(outbuf + slen, ",\"poeReq\":");
+        if (lldp_nb[i].poe_req)
+            lldp_put_dec(lldp_nb[i].poe_req, true);
+        else
+            slen += strtox(outbuf + slen, "null");
         slen += strtox(outbuf + slen, ",\"ttl\":");
         lldp_put_dec(lldp_nb[i].ttl, true);
         lldp_put('}', true);
@@ -561,6 +607,21 @@ void lldp_show(void) __banked __reentrant
         lldp_put_addr(lldp_nb[i].mgmt_addr, false);
         print_string("  ");
         lldp_put_dec(lldp_nb[i].ttl, false);
-        print_string("s\n");
+        print_string("s");
+        if (lldp_poe_std(i)) {
+            print_string(lldp_poe_std(i) == 2 ? "  PoE at" : "  PoE af");
+            if (lldp_nb[i].poe_class) {
+                print_string(" class ");
+                lldp_put_dec(lldp_nb[i].poe_class - 1, false);
+            }
+            if (lldp_nb[i].poe_req) {
+                write_char(' ');
+                lldp_put_dec(lldp_nb[i].poe_req / 10, false);
+                write_char('.');
+                lldp_put_dec(lldp_nb[i].poe_req % 10, false);
+                print_string(" W");
+            }
+        }
+        write_char('\n');
     }
 }

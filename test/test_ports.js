@@ -31,3 +31,8 @@ assert.deepEqual(plain(saved), ['poe port 3 on', 'port 8 auto', 'poe port 2 off'
 saved = context.mergeConf(saved, ['poe port 2 on']);
 assert.deepEqual(plain(saved), ['poe port 3 on', 'port 8 auto', 'poe port 2 on']);
 console.log('Per-port PoE settings persist independently of Ethernet configuration');
+vm.runInContext(source.slice(source.indexOf('function lldpPoe('), source.indexOf('function lldpLoad(')), context);
+assert.equal(context.lldpPoe({poe: 'at', poeClass: 4, poeReq: 255}), '802.3at, class 4, 25.5 W');
+assert.equal(context.lldpPoe({poe: 'af', poeClass: null, poeReq: 60}), '802.3af, 6.0 W');
+assert.equal(context.lldpPoe({poe: null, poeClass: null, poeReq: null}), '');
+console.log('LLDP-reported PD power labels passed');
