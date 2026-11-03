@@ -135,24 +135,42 @@ SRCS = \
 	udp_apps.c \
 	crypto/chacha20.c
 
-# RTL837x
+# The SoC family, from MACHINE_CHIPSET in the board header: each family has its
+# own register-level modules
+CHIPSET := $(shell sed -n 's/^.define[[:space:]]*MACHINE_CHIPSET[[:space:]]*\([A-Z0-9]*\).*/\1/p' machine/$(MACHINE).h 2>/dev/null)
+ifeq ($(CHIPSET),RTL8370)
+SRCS += \
+	rtl836x_regs.c \
+	rtl8370_init.c \
+	rtl836x_nic.c \
+	rtl836x_leds.c \
+	rtl836x_stubs.c
+# The GPHY patch is Realtek data: gen_phy.py extracts it from the board's own
+# flash dump at build time, RTL8370_DUMP=<2 MiB dump>
+CC_FLAGS += -I$(BUILDDIR)
+ifeq ($(RTL8370_DUMP),)
+$(warning RTL8370_DUMP is not set: the image runs the GPHYs without the PHY patch)
+endif
+else
 SRCS += \
 	rtl837x_bandwidth.c \
 	rtl837x_cabletest.c \
-	rtl837x_flash.c \
 	rtl837x_igmp.c \
 	rtl837x_init.c \
 	rtl837x_nic.c \
 	rtl837x_leds.c \
 	rtl837x_leds_dump.c \
+	rtl837x_pins.c \
+	rtl837x_storm.c \
+	rtl837x_trap.c
+endif
+SRCS += \
+	rtl837x_flash.c \
 	rtl837x_phy.c \
-	rtl837x_pins.c\
 	rtl837x_port.c \
 	rtl837x_stp.c \
 	rtl837x_lldp.c \
-	rtl837x_storm.c \
 	rtl837x_lacp.c \
-	rtl837x_trap.c \
 	rtl837x_stp_cli.c
 SRCS += \
 	httpd/httpd.c \
@@ -242,6 +260,17 @@ $(CCFLAGS_STAMP): FORCE | create_build_dir
 # prerequisite covers edits to the selected file.
 $(CONFIG_STAMP): FORCE | create_build_dir
 	@echo '$(CONFIG)' | cmp -s - $@ 2>/dev/null || echo '$(CONFIG)' > $@
+
+# The path is stamped like $(CONFIG), so switching dumps regenerates the header
+RTL8370_DUMP_STAMP := $(BUILDDIR)/.rtl8370_dump
+$(RTL8370_DUMP_STAMP): FORCE | create_build_dir
+	@echo '$(RTL8370_DUMP)' | cmp -s - $@ 2>/dev/null || echo '$(RTL8370_DUMP)' > $@
+
+$(BUILDDIR)/phy_patch.h: $(RTL8370_DUMP_STAMP) $(RTL8370_DUMP) rtl8370n/gen_phy.py
+	$(if $(RTL8370_DUMP),python3 rtl8370n/gen_phy.py "$(RTL8370_DUMP)",echo '#define PHY_PATCH_LEN 0') > $@.tmp
+	mv $@.tmp $@
+
+$(BUILDDIR)/rtl8370_init.rel: $(BUILDDIR)/phy_patch.h
 
 $(BUILDDIR)/%.rel: %.c $(CCFLAGS_STAMP) | create_build_dir html_data.h
 	$(CC) -MMD $(CC_FLAGS) -o $@ -c $<

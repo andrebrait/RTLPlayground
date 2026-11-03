@@ -14,7 +14,7 @@ make MACHINE=<NAME>
 | File | Purpose |
 |------|---------|
 | `machine/<NAME>.c` | the `struct machine machine` board definition |
-| `machine/<NAME>.h` | `MACHINE_MODEL` (the model string shown in the UI and the CLI) and `MACHINE_CHIPSET` (`RTL8372` or `RTL8373`) |
+| `machine/<NAME>.h` | `MACHINE_MODEL` (the model string shown in the UI and the CLI) and `MACHINE_CHIPSET` (`RTL8370`, `RTL8372` or `RTL8373`) |
 | `machine/<NAME>_init.c` | optional `machine_custom_init()` boot hook, for registers the machine definition cannot express |
 | `doc/devices/<name>.md` + `doc/supported_devices.md` | (only if the board is verified and you want to support it publicly) user-facing documentation |
 
@@ -37,11 +37,13 @@ existing files as the template:
 #endif
 ```
 
-`MACHINE_CHIPSET` is `RTL8373` or `RTL8372`; a build without it will fail. It selects the default
-logical port range: `MACHINE_MIN_PORT` is `0` for RTL8373 and `3` for RTL8372, while
-`MACHINE_MAX_PORT` is `8`, the highest logical port index. A board with a different range defines
+`MACHINE_CHIPSET` is `RTL8373`, `RTL8372` or `RTL8370`; a build without it will fail. It selects the default
+logical port range: `MACHINE_MIN_PORT` is `0` for RTL8373 and RTL8370 and `3` for RTL8372, while
+`MACHINE_MAX_PORT` is `8` (`7` for RTL8370), the highest logical port index. A board with a different range defines
 `MACHINE_MIN_PORT` and/or `MACHINE_MAX_PORT` in its header to override the
-defaults.
+defaults. `RTL8370` selects the RTL836x register-level modules (`rtl836x_*.c`,
+`rtl8370_init.c`) instead of the RTL837x ones; its build takes the GPHY patch
+from the board's flash dump, `make MACHINE=<NAME> RTL8370_DUMP=<dump>`.
 
 The device product string is what the CLI or the Web-Interface will print to identify the device; `machine.h` includes it by name.
 

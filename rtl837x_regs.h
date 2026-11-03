@@ -1,6 +1,38 @@
 #ifndef _RTL837X_REGS_H_
 #define _RTL837X_REGS_H_
 
+/* SOC_FAMILY must be defined before the #if below: an undefined one reads as 0 */
+#include "machine.h"
+
+/* Field values that code shared by both SoC families uses */
+#define SYS_LED_OFF	   0
+#define SYS_LED_FAST   1
+#define SYS_LED_SLOW   2
+#define SYS_LED_ON     3
+
+/*
+ * 5 Bits each give the state of the 2 SerDes of the RTL8372
+ * Values are:
+ */
+#define SDS_SGMII		0x02
+#define SDS_1000BX_FIBER	0x04
+#define SDS_100FX		0x05
+#define SDS_QXGMII		0x0d
+#define SDS_HISGMII		0x12
+#define SDS_HSG			0x16
+#define SDS_10GR		0x1a
+#define SDS_OFF			0x1f
+
+#define RTL837X_REG_I2C_SCL_SHIFT 5
+#define RTL837X_REG_I2C_SDA_SHIFT 2
+#define RTL837X_REG_I2C_SCL_MASK  0x3
+#define RTL837X_REG_I2C_SDA_MASK  0x7
+
+/* Flags in byte 1 of the RX frame descriptor */
+#define RX_TAG_L4_CSUM_BAD		0x04
+
+/* Register addresses: an RTL836x build that names one fails to compile */
+#if SOC_FAMILY == RTL837X
 #define RTL837X_REG_CHIP_ID		0x0004
 #define RTL837X_REG_CHIP_INFO		0x000c
 #define RTL837X_REG_CHIP_UUID		0x0010
@@ -18,11 +50,6 @@
 
 #define RTL837X_REG_HW_CONF		0x6040
 // Bits 4 & 5: CLOCK DIVIDER from 125MHz for Timer
-
-#define SYS_LED_OFF	   0
-#define SYS_LED_FAST   1
-#define SYS_LED_SLOW   2
-#define SYS_LED_ON     3
 
 #define RTL837X_REG_LED_MODE		0x6520
 // Defines the LED Mode for steering the Port LEDS and the System LED
@@ -74,19 +101,6 @@
  #define RTL837X_CFG_PHY_TX_POLARITY_SWAP	0xA94
  #define RTL837X_CFG_PHY_MDI_REVERSE		0xA90
 
-/*
- * 5 Bits each give the state of the 2 SerDes of the RTL8372
- * Values are:
- */
-#define SDS_SGMII		0x02
-#define SDS_1000BX_FIBER	0x04
-#define SDS_100FX		0x05
-#define SDS_QXGMII		0x0d
-#define SDS_HISGMII		0x12
-#define SDS_HSG			0x16
-#define SDS_10GR		0x1a
-#define SDS_OFF			0x1f
-
 #define RTL837X_REG_LINKS	0x63f0
 #define RTL837X_REG_LINKS_89	0x63f4
 #define RTL837X_REG_LINKS_STS	0x63E8
@@ -137,10 +151,6 @@
 #define RTL837X_REG_I2C_CTRL2		0x041c
 #define RTL837X_REG_I2C_IN		0x0420
 #define RTL837X_REG_I2C_OUT		0x0424
-#define RTL837X_REG_I2C_SCL_SHIFT 5
-#define RTL837X_REG_I2C_SDA_SHIFT 2
-#define RTL837X_REG_I2C_SCL_MASK  0x3
-#define RTL837X_REG_I2C_SDA_MASK  0x7
 
 /*
  * NIC Related registers
@@ -165,9 +175,6 @@
 #define RTL837X_REG_CPU_TAG		0x6720
 #define RTL837X_REG_CPU_TAG_AWARE_PMASK	0x603C
 #define RTL837X_REG_MAC_FORCE_MODE	0x6344
-
-/* Flags in byte 1 of the RX frame descriptor */
-#define RX_TAG_L4_CSUM_BAD		0x04
 
 /*
  * Statistics related registers
@@ -346,6 +353,8 @@
 #define RTL837X_METER_MODE		0x5ef0
 #define EGBW_INC_IFG			0x02
 #define EGBW_CPUMODE			0x01
+#endif /* SOC_FAMILY == RTL837X */
+
 
 #ifdef REGDBG
 
