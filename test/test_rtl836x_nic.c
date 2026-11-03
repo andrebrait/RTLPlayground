@@ -62,10 +62,10 @@ static void ring_put(uint16_t at, const uint8_t *data, unsigned len)
 		ring[(at + i) % sizeof(ring)] = data[i];
 }
 
-/* Descriptor at at, frame behind it: DA SA type, then a counting payload */
+/* Descriptor at at, frame behind it: DA SA type, then a counting payload; byte 3 = ingress port */
 static void put_frame(uint16_t at, uint16_t len, uint8_t flags)
 {
-	uint8_t hdr[8] = { 0x10, flags, 0, 0, 0, 0, len >> 8, len };
+	uint8_t hdr[8] = { 0x10, flags, 0x60, 0x05, 0, 0, len >> 8, len };
 	uint8_t frame[1600];
 
 	for (unsigned i = 0; i < len; i++)
@@ -86,8 +86,10 @@ static void check_rx(uint16_t at, uint16_t len)
 	assert(!rx_headers[0] && !rx_headers[1] && !rx_headers[2] && !rx_headers[3]
 	       && !rx_headers[6] && !rx_headers[7]);
 	assert(nic_rx_packet(buf.data, at + 8));
+	/* An RTL837x-style RX tag naming ingress port 5, then a VID 0 802.1Q tag */
+	static const uint8_t tags[12] = { 0x88, 0x99, 0x04, 0, 0, 0, 0, 0x05, 0x81, 0x00, 0, 0 };
 	for (unsigned i = 0; i < 12; i++)
-		assert(buf.data[i] == i + 1 && buf.data[12 + i] == 0);
+		assert(buf.data[i] == i + 1 && buf.data[12 + i] == tags[i]);
 	assert(buf.data[24] == 0x08 && buf.data[25] == 0x00);
 	for (unsigned i = 14; i < len; i++)
 		assert(buf.data[12 + i] == (uint8_t)(i + 1));
@@ -97,7 +99,7 @@ static void check_rx(uint16_t at, uint16_t len)
 
 int main(void)
 {
-	printf("[test] RX: BE length, DA/SA at 0, empty tags, type at 24\n");
+	printf("[test] RX: BE length, DA/SA at 0, tags with the ingress port, type at 24\n");
 	check_rx(0x0100, 60);
 	check_rx(0x0100, 1514);
 

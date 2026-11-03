@@ -5,6 +5,9 @@
 #include "rtl837x_lldp.h"
 #include "rtl837x_sfr.h"
 #include "rtl837x_regs.h"
+#if SOC_FAMILY == RTL836X
+#include "rtl836x_regs.h"
+#endif
 #include "rtl837x_common.h"
 #include "dhcp.h"
 #include "uip.h"
@@ -48,11 +51,18 @@ void lldp_tick(void) __banked
     if (!lldp_enabled)
         return;
 
+#if SOC_FAMILY == RTL837X
     reg_read_m(RTL837X_REG_LINKS_STS);
+#endif
     for (i = 0; i < LLDP_NB_MAX; i++) {
         if (!lldp_nb[i].ttl)
             continue;
+#if SOC_FAMILY == RTL836X
+        reg_read(RTL836X_REG_PORT0_STATUS + lldp_nb[i].port);
+        if (SFR_DATA_0 & PORT_STATUS_LINK)
+#else
         if ((sfr_data[(lldp_nb[i].port >> 3) + 1] >> (lldp_nb[i].port & 7)) & 1)
+#endif
             lldp_nb[i].ttl--;
         else
             lldp_nb[i].ttl = 0;
@@ -86,7 +96,6 @@ struct lldp_pkt {
 
 static void lldp_send_ports(uint16_t ttl, uint16_t ports) __reentrant
 {
-#if SOC_FAMILY == RTL837X
     __xdata uint8_t *p;
     __xdata uint8_t *tail;
     uint8_t port_position;
@@ -180,10 +189,6 @@ static void lldp_send_ports(uint16_t ttl, uint16_t ports) __reentrant
             tcpip_output();
         }
     }
-#else
-    (void)ttl;
-    (void)ports;
-#endif
 }
 
 void lldp_send(void) __banked __reentrant
@@ -203,7 +208,6 @@ void lldp_set_addresses(void) __banked {
 }
 
 void lldp_set_rtl_wrapper(void) __banked {
-#if SOC_FAMILY == RTL837X
     /*
      * This is the RTL CPU tag, not the Ethernet EtherType.
      *     port 0 -> 0x0001
@@ -216,7 +220,6 @@ void lldp_set_rtl_wrapper(void) __banked {
     LLDP_O->rtl_tag.flags = HTONS(RTL_TAG_LEARN_DIS);
 
     LLDP_O->ether_type = HTONS(LLDP_ETHERTYPE);
-#endif
 }
 
 uint8_t lldp_sysname(__xdata uint8_t *p) __banked
@@ -490,7 +493,7 @@ static void lldp_put_chassis(__xdata struct lldp_neighbor *nb, bool html) __reen
         lldp_put(lldp_printable(nb->chassis[i]), html);
 }
 
-static void lldp_put_port_id(uint8_t i, bool html)
+static void lldp_put_port_id(uint8_t i, bool html) __reentrant
 {
     if (lldp_nb[i].port_id_mac)
         lldp_put_mac((__xdata uint8_t *)lldp_nb[i].port_id, html);

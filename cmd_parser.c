@@ -2215,25 +2215,33 @@ void cmd_parser(void) __banked
 #endif
 		} else if (cmd_compare(0, "session")) {
 			parse_session();
-#if SOC_FAMILY == RTL837X
 		} else if (cmd_compare(0, "lldp")) {
 			if (cmd_compare(1, "on")) {
 				print_string("LLDP enabled\n");
 				lldp_enabled = 1;
+#if SOC_FAMILY == RTL837X
 				trap_rma_set(RTL837X_RMA0E_CONF, RTL837X_RMA_ACT_TRAP);
+#else
+				/* shortcut: with RMA 0E (0x080e) set to trap, LLDP from front port 4
+				 * stopped reaching the NIC (port 8's still did), so trapped frames
+				 * probably go to CPU port 7 = front port 8. Untrapped LLDP reaches the
+				 * NIC flooded, so it is still forwarded between ports; trap once the
+				 * NIC's own port number is known. */
+#endif
 			} else if (cmd_compare(1, "off")) {
 				print_string("LLDP disabled\n");
 				if (lldp_enabled)
 					lldp_shutdown(lldp_logical_port_status);
 				lldp_enabled = 0;
+#if SOC_FAMILY == RTL837X
 				trap_rma_set(RTL837X_RMA0E_CONF, RTL837X_RMA_ACT_FORWARD);
+#endif
 				lldp_init();
 			} else if (cmd_compare(1, "show")) {
 				lldp_show();
 			} else {
 				cmd_error("Usage: lldp [on|off|show]\n");
 			}
-#endif
 		}
 		else {
 			cmd_error("Unknown command\n");

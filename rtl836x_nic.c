@@ -86,11 +86,17 @@ bool nic_rx_packet(__xdata uint8_t *buffer, uint16_t ring_ptr) __reentrant
 		ring_ptr -= RTL836X_NIC_RX_RING_BYTES;
 	if (!nic_rx_dma(buffer + RX_TAGS_SIZE, ring_ptr, (len + 7) >> 3))
 		return false;
-	/* DA and SA to the front, empty tags behind them: the type lands where the RTL837x has it */
+	/* DA and SA to the front, then the tags the RTL837x delivers: the type lands where it has it */
 	for (uint8_t i = 0; i < 12; i++) {
 		buffer[i] = buffer[RX_TAGS_SIZE + i];
 		buffer[RX_TAGS_SIZE + i] = 0;
 	}
+	buffer[12] = RTL_FRAME_TAG_ID >> 8;
+	buffer[13] = RTL_FRAME_TAG_ID & 0xff;
+	buffer[14] = RTL_FRAME_TAG_VERSION;
+	/* Descriptor byte 3 is the ingress port: measured per source MAC on a TL-SG108PE V5 */
+	buffer[19] = rx_hdr[3] & 0x0f;
+	buffer[20] = 0x81;	/* VID 0 802.1Q tag, so TRAP_RX_BODY() finds the type behind it */
 	return true;
 }
 
