@@ -8,8 +8,8 @@
     sudo ./console.py en7 xdata 0x2000 64      read XDATA
     sudo ./console.py en7 flash 0x1fc000 256 [-o out.bin]
     sudo ./console.py en7 log                  the switch's boot log
-    sudo ./console.py en7 reboot [--loader]    --loader: warm start into loader mode
-    sudo ./console.py en7 flash-write 0x1000 image.bin   firmware area only
+    sudo ./console.py en7 reboot
+    sudo ./console.py en7 flash-write 0x0 image.bin   below 0x1fc000 only
 
 Frames use EtherType 0x88B5: DA, SA, type, op, seq, status, data. Requests
 carry their arguments where the status byte would be. Replies set op bit 7.
@@ -30,7 +30,7 @@ OP = dict(reg_read=1, reg_write=2, phy_read=3, phy_write=4, xdata_read=5, xdata_
           flash_arm=8, flash_erase=9, flash_prog=10, log=11, reboot=14, info=15, beacon=0x7E)
 STATUS = {0: "ok", 1: "bad op", 2: "bad argument", 3: "denied", 4: "timeout"}
 CHUNK = 200
-FLASH_WRITABLE = ((0x1000, 0x4000), (0x1C000, 0x1FC000))   # same as flash_allowed() in console.c
+FLASH_WRITABLE = ((0x0, 0x1FC000),)   # same as flash_allowed() in console.c
 
 
 class Console:
@@ -110,7 +110,6 @@ def main():
     ap.add_argument("cmd")
     ap.add_argument("args", nargs="*")
     ap.add_argument("-o", "--out")
-    ap.add_argument("--loader", action="store_true")
     a = ap.parse_args()
     c = Console(a.iface)
     v = [num(x) for x in a.args] if a.cmd != "flash-write" else [num(a.args[0])]
@@ -178,8 +177,8 @@ def main():
             at += len(d)
         print(out.decode(errors="replace"), end="")
     elif a.cmd == "reboot":
-        c.call("reboot", bytes([a.loader]))
-        print("rebooting" + (" into loader mode" if a.loader else ""))
+        c.call("reboot")
+        print("rebooting")
     else:
         ap.error(f"unknown command {a.cmd}")
 

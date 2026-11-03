@@ -1,14 +1,15 @@
 /*
  * Ethernet console for the TP-Link TL-SG108PE V5 (RTL8370N).
  *
- * Runs under the TP-Link boot code at CODE 0x1000. Initializes the switch the
- * way the boot code's loader mode does, then answers EtherType 0x88B5 frames
- * (register, PHY, XDATA and SPI flash access, reboot) and broadcasts a beacon
- * with the port status every ~2 s. Everything is polled; interrupts stay off.
+ * A full-flash image that replaces the TP-Link boot code: it starts from cold
+ * reset at CODE 0x0000, does the boot code's chip setup itself, initializes the
+ * switch the way the boot code's loader mode does, then answers EtherType 0x88B5
+ * frames (register, PHY, XDATA and SPI flash access, reboot) and broadcasts a
+ * beacon with the port status every ~2 s. Everything is polled; interrupts stay off.
  *
  * Protocol: see console.py. Build:
  *   ./gen_phy.py flash_dump.bin > build/phy_patch.h
- *   sdcc -mmcs51 --code-loc 0x1000 -Ibuild -o build/console.ihx console.c
+ *   sdcc -mmcs51 -Ibuild -o build/console.ihx console.c
  *   ./mkimage.py build/console.ihx build/console_up.bin flash_dump.bin build/console_flash.bin
  */
 #include <stdint.h>
@@ -21,7 +22,7 @@
 #include "phy_patch.h"
 #endif
 
-#define VERSION 1
+#define VERSION 2
 
 /*
  * Bounded busy-wait: `timed_out` is set if cond still holds after ~65k polls.
@@ -376,9 +377,8 @@ static void beacon(void)
 }
 
 /*
- * SPI flash, as the boot code does it (common CODE 0x0b09-0x0c3a, FLASH.md).
- * Erase and program only reach the firmware area; the boot code, the identity
- * block and the settings stay out of reach.
+ * SPI flash, as the TP-Link boot code does it (common CODE 0x0b09-0x0c3a, FLASH.md).
+ * Erase and program cannot reach the identity block and the settings.
  */
 static __bit flash_armed;
 
@@ -462,14 +462,12 @@ static void flash_read(uint32_t addr, __xdata uint8_t *buf, uint8_t n)
 	}
 }
 
-/* Firmware area only: [0x1000, 0x4000) and [0x1c000, 0x1fc000). No addition, so nothing can wrap. */
+/* Everything below the identity block and settings: [0, 0x1fc000). No addition, so nothing can wrap. */
 static uint8_t flash_allowed(uint32_t addr, uint16_t n)
 {
 	if (!flash_armed)
 		return ST_DENIED;
-	if (addr >= 0x1000 && addr < 0x4000 && n <= 0x4000 - addr)
-		return ST_OK;
-	if (addr >= 0x1c000 && addr < 0x1fc000 && n <= 0x1fc000 - addr)
+	if (addr < 0x1fc000 && n <= 0x1fc000 - addr)
 		return ST_OK;
 	return ST_DENIED;
 }
@@ -527,15 +525,8 @@ static uint8_t flash_program(uint32_t addr, __xdata uint8_t *buf, uint8_t n)
 	return st;
 }
 
-static void reboot(uint8_t to_loader)
+static void reboot(void)
 {
-	if (to_loader) {
-		/* Warm-start marker checked by the boot code (FUN_CODE_dcf9); runtime bank 11 writes the same */
-		reg_write(0x172e, 0x5555);
-		reg_write(0x172f, 0x1234);
-		reg_write(0x1730, 0x5678);
-		reg_write(0x1731, 0xaaaa);
-	}
 	reg_write(0x1322, 0x0001);	/* CHIP_RESET.CHIP_RST */
 	while (1);
 }
@@ -614,7 +605,7 @@ static void handle(uint16_t len)
 	case OP_REBOOT:
 		nic_tx(F_DATA - 8);	/* acknowledge, and let it leave before the reset */
 		WAIT_WHILE(reg_read(0x1a56) == tx_last);
-		reboot(a[0]);
+		reboot();
 	case OP_INFO:
 		n = info();
 		break;
@@ -625,10 +616,11 @@ static void handle(uint16_t len)
 	nic_tx(F_DATA - 8 + n);
 }
 
-/* Runs before SDCC's RAM init: the boot code jumps here with EA and EX1 set */
+/* Runs before SDCC's RAM init */
 unsigned char __sdcc_external_startup(void)
 {
 	IE = 0;
+	MAP_FLASH_PAGE_TO_XDATA = 0;	/* reset leaves XDATA 0x4000-0xbfff mapped to flash */
 	return 0;
 }
 
@@ -637,6 +629,14 @@ void main(void)
 	uint16_t ticks = 0;
 
 	IE = 0;
+	/* Chip setup the TP-Link boot code did (b01_4140, 5056, 0e97); hlyi's setup_clock uses the same values */
+	reg_write(0x1336, 0x0041);	/* DW8051_RDY: DW8051_RATE 4 (62.5 MHz), READY */
+	reg_write(0x1d32, 0x0004);	/* IO_MISC_FUNC: UART_EN */
+	reg_write(0x130c, 0x1470);	/* MISCELLANEOUS_CONFIGURE0: FLASH, NIC, PON_LIGHT, DW8051, AUTOLOAD */
+	SFR_FLASH_CONFIG = 9;		/* flash controller, as rtl837x_flash.c and the boot code */
+	SFR_FLASH_CONF_RCMD = 0xbb;
+	SFR_FLASH_CONF_DIV = 4;
+
 	/* 5 ms Timer 2 tick at 62.5 MHz / 12, as hlyi's setup_timer2 (0:07a1); polled, ET2 stays off */
 	T2CON = 0;
 	CKCON &= ~0x20;
@@ -645,7 +645,7 @@ void main(void)
 	T2CON = 0x04;	/* TR2 */
 
 	log_str("rtl8370n console\n");
-	log_reg("nic_gcr", reg_read(0x1a17));	/* hlyi waits for bit 4 on cold boot (3:b221); shows NIC state left by the loader */
+	log_reg("nic_gcr", reg_read(0x1a17));	/* hlyi waits for bit 4 on cold boot (3:b221) */
 	nic_init();
 	chip_id = switch_init();
 	beacon();
