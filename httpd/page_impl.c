@@ -17,6 +17,9 @@
 #include "rtl837x_lacp.h"
 #include "page_impl.h"
 #include "syslog.h"
+#if SOC_FAMILY == RTL836X
+#include "rtl836x_regs.h"
+#endif
 
 // #define DEBUG
 #include "debug.h"
@@ -142,6 +145,9 @@ void string_to_html(__code const char *s)
 
 static void temp_to_html(void)
 {
+#if SOC_FAMILY == RTL836X
+	string_to_html("n/a");	/* shortcut: no temperature reading on the RTL836x yet */
+#else
 	int16_t v;
 
 	reg_read(RTL837X_TM_RESULT);
@@ -155,6 +161,7 @@ static void temp_to_html(void)
 	itoa_html(((v & 0x7f) * 10) >> 7);
 	char_to_html(' ');
 	char_to_html('C');
+#endif
 }
 
 uint16_t stat_content(void)
@@ -990,16 +997,27 @@ void send_status(void)
 			}
 		} else {
 			slen += strtox(outbuf + slen, ",\"isSFP\":0,\"enabled\":");
+#if SOC_FAMILY == RTL836X
+			phy_read(i, 0, 0);			// MII BMCR
+			bool_to_html(!(SFR_DATA_8 & 0x08));	// not powered down
+			slen += strtox(outbuf + slen, ",\"adv\":\"0");	// no 2500Base
+			uint16_t w;
+#else
 			phy_read(i, PHY_MMD31, 0xa610);
 			bool_to_html(SFR_DATA_8 == 0x20);
 			slen += strtox(outbuf + slen, ",\"adv\":\"");
 			phy_read(i, PHY_MMD_AN, PHY_ANEG_MGBASE_CTRL);
 			uint16_t w = SFR_DATA_U16;
 			bool_to_html(!!(w & 0x80));		// 2500BaseN-Full
+#endif
 			phy_read(i, PHY_MMD31, PHY_MMD31_GBCR);
 			w = SFR_DATA_U16;
 			bool_to_html(!!(w & 0x0200));		// 1000Base-Full
+#if SOC_FAMILY == RTL836X
+			phy_read(i, 0, 4);			// MII ANAR
+#else
 			phy_read(i, PHY_MMD_AN, PHY_ANEG_ADV);
+#endif
 			w = SFR_DATA_U16;
 			bool_to_html(!!(w & 0x0100));		// 100Base-Full
 			bool_to_html(!!(w & 0x80));		// 100Base-Half
@@ -1009,6 +1027,12 @@ void send_status(void)
 		}
 
 		slen += strtox(outbuf + slen, ",\"link\":");
+#if SOC_FAMILY == RTL836X
+		reg_read(RTL836X_REG_PORT0_STATUS + i);
+		char_to_html(SFR_DATA_0 & PORT_STATUS_LINK ? '1' + (SFR_DATA_0 & PORT_STATUS_SPEED_MASK) : '0');
+		/* shortcut: no MIB counters yet (0x1000-0x1005), the traffic columns read 0 */
+		slen += strtox(outbuf + slen, ",\"txG\":\"0x0\",\"txB\":\"0x0\",\"rxG\":\"0x0\",\"rxB\":\"0x0\",\"macs\":\"0x0\"}");
+#else
 		
 		uint8_t b = 0;
 		// Determine link state
@@ -1049,6 +1073,7 @@ void send_status(void)
 		slen += strtox(outbuf + slen, "\",\"macs\":\"0x");
 		reg_to_html(RTL837X_L2_LRN_PORT_CONSTRT_CNT + (i << 2));
 		slen += strtox(outbuf + slen, "\"}");
+#endif
 		if (i < MACHINE_MAX_PORT)
 			char_to_html(',');
 	}

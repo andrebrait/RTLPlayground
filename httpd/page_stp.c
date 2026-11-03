@@ -158,7 +158,8 @@ void send_stp(void) __banked
 		pi_u32 = dsg ? stp_dcost[i] : root_bridge_cost; u32hex_html();
 		slen += strtox(outbuf + slen, "\"},");
 	}
-	slen -= 1; // remove comma
+	if (outbuf[slen - 1] == ',')
+		slen--;
 	slen += strtox(outbuf + slen, "]}");
 }
 
@@ -190,6 +191,7 @@ void send_stp_counters(void) __banked
 		stp_byte_html(stp_bpdu_age[i]);
 		slen += strtox(outbuf + slen, "\"},");
 	}
-	slen -= 1;
+	if (outbuf[slen - 1] == ',')
+		slen--;
 	slen += strtox(outbuf + slen, "]}");
 }

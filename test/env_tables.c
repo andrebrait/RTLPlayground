@@ -98,7 +98,9 @@ void     flash_read_bulk(uint8_t *dst) { (void)dst; }
 const char *get_flash_size_str(void) { return "2M"; }
 uint8_t  sfp_read_reg(uint8_t slot, uint8_t reg) { (void)slot; (void)reg; return 0; }
 bool     gpio_pin_test(uint8_t pin) { (void)pin; return false; }
+#if SOC_FAMILY == RTL837X
 void     phy_read(uint8_t phy_id, uint8_t dev_id, uint16_t reg) { (void)phy_id; (void)dev_id; (void)reg; }
+#endif
 void     phy_write(uint8_t phy_id, uint8_t dev_id, uint16_t reg, uint16_t val) { (void)phy_id; (void)dev_id; (void)reg; (void)val; }
 void     phy_reset(uint8_t port) { (void)port; }
 uint8_t  stp_port_role(uint8_t port) { (void)port; return 0; }
@@ -126,7 +128,14 @@ uint16_t stp_legacy, stp_link_prev = 0x3ff;
 uint16_t stp_info_while[STP_ENTITIES];
 uint32_t stp_cnt[STP_CNT_N][STP_ENTITIES];
 uint32_t stp_tc_secs;
-uint8_t  stp_ent_id(uint8_t e) { return e >= STP_LAG_BASE ? e + 101 - STP_LAG_BASE : machine.log_to_phys_port[e]; }
+uint8_t stp_test_no_entities;
+uint8_t stp_ent_id(uint8_t e)
+{
+	if (stp_test_no_entities)
+		return 0;
+	return e >= STP_LAG_BASE ? e + 101 - STP_LAG_BASE
+		: MACHINE_PORT_VALID(e) ? machine.log_to_phys_port[e] : 0;
+}
 
 /* ---- SFP: no module present, reads fail ---- */
 uint8_t sfp_buf[16];

@@ -36,7 +36,8 @@ TESTS = $(BUILDDIR)/test_cmd_editor \
         $(BUILDDIR)/test_lacp \
         $(BUILDDIR)/test_rtl8370n_console \
         $(BUILDDIR)/test_rtl836x_regs \
-        $(BUILDDIR)/test_rtl836x_nic
+        $(BUILDDIR)/test_rtl836x_nic \
+        $(BUILDDIR)/test_page_json_836x
 
 # The table tests link the register mock and one environment file; stub/
 # stands in for the two headers a firmware build generates.
@@ -44,6 +45,12 @@ TABLE_ENV = support.c hw_mock.c env_tables.c $(SRCROOT)/cmd_editor.c \
             $(SRCROOT)/rtl837x_port.c $(SRCROOT)/httpd/page_impl.c
 
 all: run
+
+# The RTL836x web pages; the test carries its own 16-bit register file.
+$(BUILDDIR)/test_page_json_836x: CFLAGS += -DMACHINE_NAME=TPLINK_TL_SG108PE_V5
+$(BUILDDIR)/test_page_json_836x: test_page_json_836x.c support.c env_tables.c $(SRCROOT)/cmd_editor.c \
+                                 $(SRCROOT)/httpd/page_impl.c $(SRCROOT)/httpd/page_stp.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
 
 $(BUILDDIR):
 	mkdir -p $(BUILDDIR)
