@@ -156,7 +156,8 @@
     earlier line for that setting, so switching a setting back lets the default apply again. The
     defaults are build-time values in `machine_defaults.h`, which a machine header may override;
     the boot code sets them and `/defaults.json` reports them. Flow control, MTU, SFP ports, and
-    lines that speed, duplex or qualified `eee` lines depend on are always kept.
+    lines that speed, duplex or qualified `eee` lines depend on are always kept. EEE commands on
+    mixed-speed boards are also retained because boot and CLI advertisement defaults differ.
   - Reuse the JSON string appender to reduce BANK1 code usage without changing responses.
     The appender is shared in the common area, so the STP pages in BANK4 and the HTTP
     responses in `httpd.c` use it too.

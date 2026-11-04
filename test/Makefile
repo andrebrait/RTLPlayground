@@ -84,7 +84,7 @@ TESTS += $(BUILDDIR)/test_prometheus_status_json
 $(BUILDDIR)/test_prometheus_status_json: test_prometheus_status_json.c test_page_json.c $(TABLE_ENV) hw_mock.h | $(BUILDDIR)
 	$(CC) $(CFLAGS) -DPROMETHEUS test_prometheus_status_json.c $(filter %.c,$(TABLE_ENV)) -o $@ $(LDFLAGS)
 
-all: run lldp-conf prometheus-gui
+all: run lldp-conf prometheus-gui prune-defaults
 
 # The RTL836x web pages; the test carries its own 16-bit register file.
 $(BUILDDIR)/test_page_json_836x: CFLAGS += -DMACHINE_NAME=TPLINK_TL_SG108PE_V5 -ffunction-sections -fdata-sections
@@ -142,6 +142,10 @@ $(BUILDDIR)/test_nic_rx: test_nic_rx.c $(SRCROOT)/rtl837x_nic.c $(SRCROOT)/rtl83
 
 $(BUILDDIR)/test_page_json: test_page_json.c $(TABLE_ENV) hw_mock.h | $(BUILDDIR)
 	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@ $(LDFLAGS)
+
+TESTS += $(BUILDDIR)/test_page_json_mixed
+$(BUILDDIR)/test_page_json_mixed: test_page_json.c $(TABLE_ENV) hw_mock.h | $(BUILDDIR)
+	$(CC) $(CFLAGS) -DRTLP_TEST_N10G=1 $(filter %.c,$^) -o $@ $(LDFLAGS)
 
 # rtl837x_lacp.c is compiled UNMODIFIED from the firmware tree.
 $(BUILDDIR)/test_lacp: test_lacp.c $(SRCROOT)/rtl837x_lacp.c $(SRCROOT)/timer.c | $(BUILDDIR)
@@ -224,7 +228,7 @@ l2-load:
 clean:
 	rm -rf $(BUILDDIR)
 
-.PHONY: all run lldp-conf prometheus-gui clean test_mirror l2-delete
+.PHONY: all run lldp-conf prometheus-gui prune-defaults clean test_mirror l2-delete l2-load
 
 
 # SNMP host benches compile the same firmware sources; listener is opt-in here.

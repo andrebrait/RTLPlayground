@@ -63,6 +63,9 @@ uint8_t *hex = (uint8_t *)hex_chars;
 const struct machine machine = {
 	.machine_name = "HOSTTEST",
 	.n_sfp = 0,
+#ifdef RTLP_TEST_N10G
+	.n_10g = RTLP_TEST_N10G,
+#endif
 	.log_to_phys_port = { 1, 2, 3, 4, 5, 6, 7, 8, 9 },
 	.phys_to_log_port = { 0, 1, 2, 3, 4, 5, 6, 7, 8 },
 };
