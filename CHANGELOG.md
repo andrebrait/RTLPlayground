@@ -60,6 +60,9 @@
     `lag <group> d` or `lag <group> lacp off` without changing configuration.
   - Reject extra arguments to `lacp off` and `lacp show`. A malformed
     `lacp off 1` no longer silently disables every LACP group.
+  - Reject extra arguments to global `stp on`, `stp off`, `stp status` and
+    `stp clear` before changing state. Rejecting an invalid per-port `edge`
+    value now preserves the existing edge configuration.
 
 - Time
   - `rtl8372_init()` sets SDS 0 to SGMII as the stock firmware does. The masks were 0, so on RTL8372
