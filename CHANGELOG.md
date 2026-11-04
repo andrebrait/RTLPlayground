@@ -205,6 +205,8 @@
     value now preserves the existing edge configuration.
   - Reject extra arguments to `bw status` and bandwidth changes before altering
     limits or flow-control mode.
+  - Report invalid storm-control commands as errors instead of returning success
+    after printing usage.
 
 - Time
   - `rtl8372_init()` sets SDS 0 to SGMII as the stock firmware does. The masks were 0, so on RTL8372

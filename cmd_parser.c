@@ -1803,7 +1803,7 @@ void parse_storm(void)
 	return;
 
 err:
-	print_string("usage: storm [<port> bcast|mcast|ucast|umcast <rate> pps|kbps|off]\n");
+	cmd_error("usage: storm [<port> bcast|mcast|ucast|umcast <rate> pps|kbps|off]\n");
 }
 #endif
 
