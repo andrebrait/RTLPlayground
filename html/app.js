@@ -2391,6 +2391,7 @@ function getText(p) {
 
 var CONF_CMDS = [
     /^snmp\s+(on|off)$/, /^snmp\s+community\s+[!-~]{1,32}$/, /^snmp\s+manager\s+(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/, /^snmp\s+changed\s+(unknown|\d{1,10})$/,
+    /^prometheus\s+(on|off)$/,
     /^ip\s+(\d{1,3}\.){3}\d{1,3}$/,
     /^ip\s+dhcp$/,
     /^gw\s+(\d{1,3}\.){3}\d{1,3}$/,
@@ -2964,7 +2965,8 @@ function pollInfo() {
             S.logToPhys[l] = i + 1
         });
         renderInfo();
-        renderSnmp(j.snmp)
+        renderSnmp(j.snmp);
+        renderPrometheus(j.prometheus)
     });
 }
 
@@ -5263,6 +5265,26 @@ function snmpApply() {
         renderSnmp(S.info.snmp)
     });
 }
+/* Prometheus exporter card; information.json has no "prometheus" when it is not built. */
+var promPending = false;
+
+function renderPrometheus(v) {
+    $("sy-prom").style.display = v === undefined ? "none" : "";
+    if (v === undefined) return;
+    if (!promPending) $("sy-prom-toggle").checked = !!v;
+    $("sy-prom-toggle").disabled = promPending;
+    $("sy-prom-url").textContent = v ? "http://" + location.host + "/metrics" : "";
+}
+$("sy-prom-toggle").addEventListener("change", function() {
+    promPending = true;
+    renderPrometheus(S.info.prometheus);
+    postCmds(["prometheus " + (this.checked ? "on" : "off")]).catch(function() {}).then(pollInfo).catch(function() {
+        toast("Could not refresh the Prometheus exporter status.", "err");
+    }).then(function() {
+        promPending = false;
+        renderPrometheus(S.info.prometheus)
+    });
+});
 ["manager", "secret"].forEach(function(id) {
     $("sy-snmp-" + id).addEventListener("input", function() {
         snmpEdited = true
@@ -5647,7 +5669,7 @@ var CONF_OVERWRITE = [
     /^stp\s+(port\s+\d{1,2}|lag\s+[1-4])\s+(edge|cost|prio|guard|filter|p2p)\b/,
     /^igmp\b/, /^mtu\s+\d{1,2}\b/, /^storm\s+\d{1,2}\s+(bcast|mcast|ucast|umcast)\b/,
 ];
-var CONF_TOGGLE = [/^(snmp)\s+(on|off)$/, /^(syslog)\s+(on|off)$/, /^(ntp)\s+(on|off)$/, /^(stp)\s+(on|off)$/, /^(lldp)\s+(on|off)$/, /^(lldp\s+tlv\s+\w+)\s+(on|off)$/, /^(stp\s+(port\s+\d{1,2}|lag\s+[1-4]))\s+(on|off)$/];
+var CONF_TOGGLE = [/^(snmp)\s+(on|off)$/, /^(prometheus)\s+(on|off)$/, /^(syslog)\s+(on|off)$/, /^(ntp)\s+(on|off)$/, /^(stp)\s+(on|off)$/, /^(lldp)\s+(on|off)$/, /^(lldp\s+tlv\s+\w+)\s+(on|off)$/, /^(stp\s+(port\s+\d{1,2}|lag\s+[1-4]))\s+(on|off)$/];
 
 function mergeConf(base, texts) {
     var conf = base.slice();

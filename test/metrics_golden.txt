@@ -1,0 +1,168 @@
+# TYPE node_boot_time_seconds gauge
+node_boot_time_seconds 1793531414
+# TYPE node_time_seconds gauge
+node_time_seconds 1793532414
+# TYPE node_hwmon_chip_names gauge
+node_hwmon_chip_names{chip="thermal_thermal_zone0",chip_name="cpu_thermal"} 1
+node_hwmon_chip_names{chip="sfp_lan9",chip_name="sfp_lan9"} 1
+# TYPE node_hwmon_temp_celsius gauge
+node_hwmon_temp_celsius{chip="thermal_thermal_zone0",sensor="temp1"} 46.000
+node_hwmon_temp_celsius{chip="sfp_lan9",sensor="temp1"} -1.250
+# TYPE node_thermal_zone_temp gauge
+node_thermal_zone_temp{zone="0",type="cpu-thermal",policy="step_wise",mode="enabled"} 46.000
+# TYPE node_network_info gauge
+node_network_info{device="lan1",address="1c:2a:a3:00:00:01",broadcast="ff:ff:ff:ff:ff:ff",operstate="up",ifalias="uplink"} 1
+node_network_info{device="lan2",address="1c:2a:a3:00:00:01",broadcast="ff:ff:ff:ff:ff:ff",operstate="lowerlayerdown",ifalias=""} 1
+node_network_info{device="lan3",address="1c:2a:a3:00:00:01",broadcast="ff:ff:ff:ff:ff:ff",operstate="down",ifalias=""} 1
+node_network_info{device="lan4",address="1c:2a:a3:00:00:01",broadcast="ff:ff:ff:ff:ff:ff",operstate="lowerlayerdown",ifalias=""} 1
+node_network_info{device="lan5",address="1c:2a:a3:00:00:01",broadcast="ff:ff:ff:ff:ff:ff",operstate="lowerlayerdown",ifalias=""} 1
+node_network_info{device="lan6",address="1c:2a:a3:00:00:01",broadcast="ff:ff:ff:ff:ff:ff",operstate="lowerlayerdown",ifalias=""} 1
+node_network_info{device="lan7",address="1c:2a:a3:00:00:01",broadcast="ff:ff:ff:ff:ff:ff",operstate="lowerlayerdown",ifalias=""} 1
+node_network_info{device="lan8",address="1c:2a:a3:00:00:01",broadcast="ff:ff:ff:ff:ff:ff",operstate="lowerlayerdown",ifalias=""} 1
+node_network_info{device="lan9",address="1c:2a:a3:00:00:01",broadcast="ff:ff:ff:ff:ff:ff",operstate="lowerlayerdown",ifalias=""} 1
+# TYPE node_network_carrier gauge
+node_network_carrier{device="lan1"} 1
+node_network_carrier{device="lan2"} 0
+node_network_carrier{device="lan3"} 0
+node_network_carrier{device="lan4"} 0
+node_network_carrier{device="lan5"} 0
+node_network_carrier{device="lan6"} 0
+node_network_carrier{device="lan7"} 0
+node_network_carrier{device="lan8"} 0
+node_network_carrier{device="lan9"} 0
+# TYPE node_network_speed_bytes gauge
+node_network_speed_bytes{device="lan1"} 125000000
+# TYPE node_network_receive_bytes_total counter
+node_network_receive_bytes_total{device="lan1"} 1000
+node_network_receive_bytes_total{device="lan2"} 2000
+node_network_receive_bytes_total{device="lan3"} 3000
+node_network_receive_bytes_total{device="lan4"} 4000
+node_network_receive_bytes_total{device="lan5"} 5000
+node_network_receive_bytes_total{device="lan6"} 6000
+node_network_receive_bytes_total{device="lan7"} 7000
+node_network_receive_bytes_total{device="lan8"} 8000
+node_network_receive_bytes_total{device="lan9"} 9000
+# TYPE node_network_receive_packets_total counter
+node_network_receive_packets_total{device="lan1"} 3009
+node_network_receive_packets_total{device="lan2"} 6009
+node_network_receive_packets_total{device="lan3"} 9009
+node_network_receive_packets_total{device="lan4"} 12009
+node_network_receive_packets_total{device="lan5"} 15009
+node_network_receive_packets_total{device="lan6"} 18009
+node_network_receive_packets_total{device="lan7"} 21009
+node_network_receive_packets_total{device="lan8"} 24009
+node_network_receive_packets_total{device="lan9"} 27009
+# TYPE node_network_receive_errs_total counter
+node_network_receive_errs_total{device="lan1"} 25
+node_network_receive_errs_total{device="lan2"} 35
+node_network_receive_errs_total{device="lan3"} 45
+node_network_receive_errs_total{device="lan4"} 55
+node_network_receive_errs_total{device="lan5"} 65
+node_network_receive_errs_total{device="lan6"} 75
+node_network_receive_errs_total{device="lan7"} 85
+node_network_receive_errs_total{device="lan8"} 95
+node_network_receive_errs_total{device="lan9"} 105
+# TYPE node_network_receive_drop_total counter
+node_network_receive_drop_total{device="lan1"} 23
+node_network_receive_drop_total{device="lan2"} 33
+node_network_receive_drop_total{device="lan3"} 43
+node_network_receive_drop_total{device="lan4"} 53
+node_network_receive_drop_total{device="lan5"} 63
+node_network_receive_drop_total{device="lan6"} 73
+node_network_receive_drop_total{device="lan7"} 83
+node_network_receive_drop_total{device="lan8"} 93
+node_network_receive_drop_total{device="lan9"} 103
+# TYPE node_network_receive_frame_total counter
+node_network_receive_frame_total{device="lan1"} 25
+node_network_receive_frame_total{device="lan2"} 35
+node_network_receive_frame_total{device="lan3"} 45
+node_network_receive_frame_total{device="lan4"} 55
+node_network_receive_frame_total{device="lan5"} 65
+node_network_receive_frame_total{device="lan6"} 75
+node_network_receive_frame_total{device="lan7"} 85
+node_network_receive_frame_total{device="lan8"} 95
+node_network_receive_frame_total{device="lan9"} 105
+# TYPE node_network_receive_multicast_total counter
+node_network_receive_multicast_total{device="lan1"} 1003
+node_network_receive_multicast_total{device="lan2"} 2003
+node_network_receive_multicast_total{device="lan3"} 3003
+node_network_receive_multicast_total{device="lan4"} 4003
+node_network_receive_multicast_total{device="lan5"} 5003
+node_network_receive_multicast_total{device="lan6"} 6003
+node_network_receive_multicast_total{device="lan7"} 7003
+node_network_receive_multicast_total{device="lan8"} 8003
+node_network_receive_multicast_total{device="lan9"} 9003
+# TYPE node_network_transmit_bytes_total counter
+node_network_transmit_bytes_total{device="lan1"} 1001
+node_network_transmit_bytes_total{device="lan2"} 2001
+node_network_transmit_bytes_total{device="lan3"} 3001
+node_network_transmit_bytes_total{device="lan4"} 4001
+node_network_transmit_bytes_total{device="lan5"} 5001
+node_network_transmit_bytes_total{device="lan6"} 6001
+node_network_transmit_bytes_total{device="lan7"} 7001
+node_network_transmit_bytes_total{device="lan8"} 8001
+node_network_transmit_bytes_total{device="lan9"} 9001
+# TYPE node_network_transmit_packets_total counter
+node_network_transmit_packets_total{device="lan1"} 3018
+node_network_transmit_packets_total{device="lan2"} 6018
+node_network_transmit_packets_total{device="lan3"} 9018
+node_network_transmit_packets_total{device="lan4"} 12018
+node_network_transmit_packets_total{device="lan5"} 15018
+node_network_transmit_packets_total{device="lan6"} 18018
+node_network_transmit_packets_total{device="lan7"} 21018
+node_network_transmit_packets_total{device="lan8"} 24018
+node_network_transmit_packets_total{device="lan9"} 27018
+# TYPE node_network_transmit_errs_total counter
+node_network_transmit_errs_total{device="lan1"} 131
+node_network_transmit_errs_total{device="lan2"} 241
+node_network_transmit_errs_total{device="lan3"} 351
+node_network_transmit_errs_total{device="lan4"} 461
+node_network_transmit_errs_total{device="lan5"} 571
+node_network_transmit_errs_total{device="lan6"} 681
+node_network_transmit_errs_total{device="lan7"} 791
+node_network_transmit_errs_total{device="lan8"} 901
+node_network_transmit_errs_total{device="lan9"} 1011
+# TYPE node_network_transmit_drop_total counter
+node_network_transmit_drop_total{device="lan1"} 108
+node_network_transmit_drop_total{device="lan2"} 208
+node_network_transmit_drop_total{device="lan3"} 308
+node_network_transmit_drop_total{device="lan4"} 408
+node_network_transmit_drop_total{device="lan5"} 508
+node_network_transmit_drop_total{device="lan6"} 608
+node_network_transmit_drop_total{device="lan7"} 708
+node_network_transmit_drop_total{device="lan8"} 808
+node_network_transmit_drop_total{device="lan9"} 908
+# TYPE node_network_transmit_colls_total counter
+node_network_transmit_colls_total{device="lan1"} 120
+node_network_transmit_colls_total{device="lan2"} 220
+node_network_transmit_colls_total{device="lan3"} 320
+node_network_transmit_colls_total{device="lan4"} 420
+node_network_transmit_colls_total{device="lan5"} 520
+node_network_transmit_colls_total{device="lan6"} 620
+node_network_transmit_colls_total{device="lan7"} 720
+node_network_transmit_colls_total{device="lan8"} 820
+node_network_transmit_colls_total{device="lan9"} 920
+# TYPE node_network_transmit_carrier_total counter
+node_network_transmit_carrier_total{device="lan1"} 131
+node_network_transmit_carrier_total{device="lan2"} 241
+node_network_transmit_carrier_total{device="lan3"} 351
+node_network_transmit_carrier_total{device="lan4"} 461
+node_network_transmit_carrier_total{device="lan5"} 571
+node_network_transmit_carrier_total{device="lan6"} 681
+node_network_transmit_carrier_total{device="lan7"} 791
+node_network_transmit_carrier_total{device="lan8"} 901
+node_network_transmit_carrier_total{device="lan9"} 1011
+# TYPE rtlplayground_sfp_info gauge
+rtlplayground_sfp_info{device="lan9",vendor="FS",model="SFP-10GSR-85",serial="S123"} 1
+# TYPE rtlplayground_sfp_los gauge
+rtlplayground_sfp_los{device="lan9"} 0
+# TYPE rtlplayground_sfp_voltage_volts gauge
+rtlplayground_sfp_voltage_volts{device="lan9"} 3.3000
+# TYPE rtlplayground_sfp_tx_bias_amperes gauge
+rtlplayground_sfp_tx_bias_amperes{device="lan9"} 0.006000
+# TYPE rtlplayground_sfp_tx_power_watts gauge
+rtlplayground_sfp_tx_power_watts{device="lan9"} 0.0005000
+# TYPE rtlplayground_sfp_rx_power_watts gauge
+rtlplayground_sfp_rx_power_watts{device="lan9"} 0.0004000
+# TYPE rtlplayground_sfp_external_calibration gauge
+rtlplayground_sfp_external_calibration{device="lan9"} 0

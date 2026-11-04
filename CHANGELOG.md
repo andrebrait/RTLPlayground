@@ -46,6 +46,7 @@
   - Reuse the JSON string appender to reduce BANK1 code usage without changing responses.
     The appender is shared in the common area, so the STP pages in BANK4 and the HTTP
     responses in `httpd.c` use it too.
+  - Rename the Prometheus section to Metrics, keeping the toggle labelled Prometheus exporter.
 - HTTP
   - `/status.json` carries the flow control (`fc`) and EEE (`eee`) state of every port; `/eee.json` is gone.
   - The chip port of each front-panel port moved from `logPort` in every `/status.json` entry to one

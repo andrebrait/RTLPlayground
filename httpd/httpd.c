@@ -12,6 +12,9 @@
 #ifdef SNMP
 #include "snmp.h"
 #endif
+#ifdef PROMETHEUS
+#include "metrics.h"
+#endif
 
 // #define DEBUG
 #include "debug.h"
@@ -938,6 +941,16 @@ void httpd_appcall(void)
 			cont_len -= slen;
 			cont_addr += slen;
 			s->tstate = TSTATE_TX;
+#ifdef PROMETHEUS
+		} else if (metrics_more) {
+			slen = 0;
+			metrics_fill();
+			o_idx = 0;
+			if (slen) {
+				tx_send(slen > uip_mss() ? uip_mss() : slen);
+				s->tstate = TSTATE_TX;
+			}
+#endif
 		} else if (s->fw_reset_pending) {
 			// The upload verdict has been fully ACKed by the client;
 			// now it is safe to reset and apply the staged image
@@ -963,6 +976,9 @@ void httpd_appcall(void)
 		}
 	} else if (uip_newdata() && s->tstate != TSTATE_TX) {
 		cont_len = 0;
+#ifdef PROMETHEUS
+		metrics_more = false;	/* an unfinished scrape belongs to an earlier request */
+#endif
 		dbg_char('<'); dbg_short(uip_len); dbg_char('\n');
 		__xdata uint8_t *p = uip_appdata;
 		uint16_t body_off = 0;
@@ -1017,6 +1033,16 @@ void httpd_appcall(void)
 		entry = find_entry(q);
 		dbg_string("Entry is: "); dbg_byte(entry); dbg_char('\n');
 		if (entry == 0xff) {
+#ifdef PROMETHEUS
+			/* Scrapers carry no session; the on/off setting is the only gate. */
+			if (!strcmp(q, "/metrics")) {
+				if (prometheus_enabled)
+					metrics_start(is_word(q + 9, "mib=1"));
+				else
+					send_not_found();
+				goto do_send;
+			}
+#endif
 			if (!authenticated) {
 				dbg_string("Not authorized!\n");
 				send_unauthorized();
