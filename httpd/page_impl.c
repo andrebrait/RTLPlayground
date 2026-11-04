@@ -305,7 +305,7 @@ void send_basic_info(void)
     }
 #endif
 #ifdef PROMETHEUS
-	slen += strtox(outbuf + slen, ",\"prometheus\":");
+	string_to_html(",\"prometheus\":");
 	itoa_html(prometheus_enabled);
 #endif
 	char_to_html('}');

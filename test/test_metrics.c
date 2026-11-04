@@ -19,6 +19,16 @@
 __xdata uint8_t outbuf[TCP_OUTBUF_SIZE];
 __xdata uint16_t slen;
 
+/* copied verbatim from rtlplayground.c: html_out.c's string_to_html() calls it */
+uint16_t strtox(__xdata uint8_t *dst, __code const char *s)
+{
+	__xdata uint8_t *b = dst;
+	while (*s)
+		*dst++ = *s++;
+	*dst = 0;
+	return dst - b;
+}
+
 #include "../metrics.c"
 
 /* Switch fixture: lan1 up at 1 Gbit/s named "uplink", lan2 link down,
