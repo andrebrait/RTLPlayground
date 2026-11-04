@@ -9,6 +9,8 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
+#include "uip.h"
 
 /* Define the SFRs once here, as hw_mock.c does for the RTL837x tests */
 #undef __sfr
@@ -55,6 +57,77 @@ static unsigned busy_reads;
 static bool selector_stuck;
 static uint16_t vlan4k[4096][3];	/* the 4K VLAN table behind TABLE_ACCESS_CTRL */
 
+/* RTL8370B LUT: six words, with SRAM/CAM address bits split in status. */
+static struct {
+	uint16_t idx, words[6];
+	bool present;
+} lut[48];
+static bool lut_stuck, lut_write_miss;
+static uint16_t lut_timeout_command;
+static unsigned lut_commands, lut_status_reads;
+
+static void lut_exec(uint16_t command)
+{
+	int found = -1, first = -1;
+	uint16_t start = regfile[0x0501];
+	lut_commands++;
+	if (command == lut_timeout_command) {
+		regfile[0x0502] = 0x3000; /* stale HIT must not count while BUSY */
+		return;
+	}
+	if (command == 0x000c && lut_write_miss) {
+		regfile[0x0502] = 0;
+		return;
+	}
+	for (unsigned i = 0; i < 48; i++) {
+		if (!lut[i].present)
+			continue;
+		if (command == 0x000c) {
+			if (memcmp(lut[i].words, &regfile[0x0510], 6) ||
+			    (lut[i].words[3] & 0x3fff) != (regfile[0x0513] & 0x3fff) ||
+			    (lut[i].words[4] & 0x007f) != (regfile[0x0514] & 0x007f))
+				continue;
+			found = i;
+			memcpy(lut[i].words, &regfile[0x0510], 12);
+			lut[i].present = (lut[i].words[4] & 0x3800) || (lut[i].words[5] & 0x0020);
+			break;
+		}
+		if (command == 0x0014) {
+			if (lut[i].idx == start) { found = i; break; }
+		} else if (command == 0x0034) {
+			if ((lut[i].words[2] & 0x0100) || (lut[i].words[3] & 0x1000))
+				continue;
+			if (first < 0 || lut[i].idx < lut[first].idx)
+				first = i;
+			if (lut[i].idx >= start && (found < 0 || lut[i].idx < lut[found].idx))
+				found = i;
+		} else {
+			bad_table_cmds++;
+		}
+	}
+	if (command == 0x0034 && found < 0)
+		found = first;
+	regfile[0x0502] = 0;
+	if (found >= 0) {
+		uint16_t idx = lut[found].idx;
+		regfile[0x0502] = 0x1000 | (idx & 0x07ff) | ((idx & 0x0800) << 3) | ((idx & 0x1000) >> 1);
+		if (command != 0x000c)
+			memcpy(&regfile[0x0520], lut[found].words, 12);
+	}
+}
+
+static void lut_put(unsigned slot, uint16_t idx, const uint8_t *mac, uint16_t vid,
+		    uint8_t chip, bool is_static)
+{
+	lut[slot].present = true;
+	lut[slot].idx = idx;
+	for (unsigned i = 0; i < 3; i++)
+		lut[slot].words[2 - i] = (uint16_t)mac[2 * i] << 8 | mac[2 * i + 1];
+	lut[slot].words[3] = vid | ((uint16_t)(chip >> 3) << 15);
+	lut[slot].words[4] = (uint16_t)(chip & 7) << 8 | 0x0800;
+	lut[slot].words[5] = is_static ? 0x0020 : 0;
+}
+
 void reg_write(uint16_t addr)
 {
 	uint16_t v = (uint16_t)SFR_DATA_24 << 8 | SFR_DATA_16;
@@ -64,6 +137,10 @@ void reg_write(uint16_t addr)
 		regfile[addr] = v;
 		if (addr != RTL836X_REG_TABLE_ACCESS_CTRL)
 			return;
+		if ((v & 7) == 4) {
+			lut_exec(v);
+			return;
+		}
 		if (v != TABLE_ACCESS_CVLAN_READ && v != TABLE_ACCESS_CVLAN_WRITE)
 			bad_table_cmds++;
 		uint16_t vid = regfile[RTL836X_REG_TABLE_ACCESS_ADDR] & 0xfff;
@@ -121,6 +198,11 @@ void reg_read(uint16_t addr)
 		SFR_DATA_U16 = mib_window[addr - RTL836X_REG_MIB_COUNTER];
 	} else {
 		SFR_DATA_U16 = regfile[addr];
+	}
+	if (addr == 0x0502) {
+		lut_status_reads++;
+		if (lut_stuck)
+			SFR_DATA_U16 |= 0x2000;
 	}
 	if (addr == RTL836X_REG_MIB_CTRL) {
 		control_reads++;
@@ -578,11 +660,90 @@ static void t_lag(void)
 	      "/lacp.json: the chip's two groups with their candidates, aggregator and active members");
 }
 
+static void t_l2(void)
+{
+	const uint8_t a[6] = { 2, 0x11, 0x22, 0x33, 0x44, 1 };
+	const uint8_t b[6] = { 2, 0x11, 0x22, 0x33, 0x44, 2 };
+	printf("[test] native LUT walk, exact deletion, management protection and busy refusal\n");
+	memset(lut, 0, sizeof lut);
+	regfile[0x08d0] = 0;
+	lut_put(0, 0x0010, a, 0x123, 2, false);
+	lut_put(1, 0x0815, b, 2, 7, false);
+	lut[1].words[3] |= 0x2000; /* IVL */
+	lut[1].words[4] |= 0x004b; /* FID/EFID must survive the deletion write */
+	lut_put(2, 0x103f, uip_ethaddr.addr, 1, 10, true);
+	lut[2].words[4] &= ~0x3800; /* static entries need no dynamic age */
+	send_l2(0);
+	CHECK(has("\"vlan\":\"123\",\"mac\":\"02:11:22:33:44:01\",\"type\":\"l\",\"port\":2,\"lag\":0,\"idx\":\"0010\""),
+	      "native words decode to the shared row contract");
+	CHECK(has("\"idx\":\"0815\"") && has("\"type\":\"s\",\"port\":9,\"lag\":0,\"idx\":\"103f\""),
+	      "extended SRAM/CAM indices and CPU chip10 to logical9 are retained");
+	CHECK(balanced() && slen <= TCP_OUTBUF_SIZE, "native rows fit a valid JSON page");
+	regfile[0x08d0] = 4;
+	send_l2(0);
+	CHECK(has("\"port\":2,\"lag\":1,"), "the learned port is associated with its native LAG");
+	regfile[0x08d0] = 0;
+	l2_delete(0x0814);
+	CHECK(has("\"result\":0") && lut[1].present, "an absent exact index never deletes the following row");
+	l2_delete(0x2010);
+	CHECK(has("\"result\":0") && lut[0].present, "out-of-range requests do not alias an SRAM index");
+	l2_delete(0x103f);
+	CHECK(has("\"result\":0") && lut[2].present, "the switch's management address cannot be removed");
+	l2_delete(0x0815);
+	CHECK(has("\"result\":1") && !lut[1].present && lut[0].present && lut[2].present,
+	      "deleting a high index preserves its full key and removes only that entry");
+	lut_stuck = true; lut_commands = lut_status_reads = 0;
+	send_l2(0);
+	CHECK(!strcmp(body(), "null") && lut_status_reads <= 256, "busy lookup reports unavailable, not an empty table");
+	l2_delete(0x0010);
+	CHECK(has("\"result\":0") && lut[0].present && lut_commands == 0 && lut_status_reads <= 512,
+	      "busy deletion is bounded and leaves the table untouched");
+	lut_stuck = false;
+	lut[0].words[4] &= ~0x3800;
+	l2_delete(0x0010);
+	CHECK(has("\"result\":0") && lut[0].present,
+	      "an address HIT with neither age nor static is inactive, not deletable");
+	lut_put(0, 0x0010, a, 0x123, 2, false);
+	lut_timeout_command = 0x0034; lut_commands = lut_status_reads = 0;
+	send_l2(0);
+	CHECK(!strcmp(body(), "null") && lut_status_reads <= 257 && lut_commands == 1,
+	      "lookup completion timeout is bounded and never returns stale read data");
+	lut_timeout_command = 0; regfile[0x0502] = 0;
+	lut_timeout_command = 0x000c; lut_commands = lut_status_reads = 0;
+	l2_delete(0x0010);
+	CHECK(has("\"result\":0") && lut_status_reads <= 258 && lut_commands == 2 && lut[2].present,
+	      "write completion timeout is refused without retrying or touching management");
+	lut_timeout_command = 0; regfile[0x0502] = 0;
+	lut_write_miss = true;
+	l2_delete(0x0010);
+	CHECK(has("\"result\":0") && lut[0].present, "a completed write without HIT is not reported as success");
+	lut_write_miss = false;
+	memset(lut, 0, sizeof lut);
+	for (unsigned i = 0; i < 40; i++) {
+		uint8_t mac[6] = { 2, 1, 2, 3, 4, i };
+		lut_put(i, 1 + i * 65, mac, 1, i % 8, false);
+	}
+	uint8_t seen[4096] = { 0 };
+	unsigned idx = 0, unique = 0, pages = 0;
+	bool wrapped = false;
+	do {
+		send_l2(idx); pages++;
+		CHECK(balanced() && slen <= TCP_OUTBUF_SIZE, "every native pagination response fits");
+		for (const char *p = body(); (p = strstr(p, "\"idx\":\"")); p += 7) {
+			idx = strtoul(p + 7, NULL, 16);
+			if (idx >= sizeof seen || seen[idx]) { wrapped = true; break; }
+			seen[idx] = 1; unique++; idx++;
+		}
+	} while (!wrapped && pages < 10);
+	CHECK(wrapped && unique == 40, "client-style pagination finds every MAC once and terminates");
+	memset(lut, 0, sizeof lut);
+	send_l2(0);
+	CHECK(!strcmp(body(), "[]"), "an empty native table returns an empty array");
+}
+
 static void t_unported(void)
 {
 	printf("[test] pages of unported features answer with valid JSON\n");
-	send_l2(0);		CHECK(balanced(), "/l2.json");
-	l2_delete(0);		CHECK(balanced(), "/l2_del.json");
 	send_bandwidth();	CHECK(balanced(), "/bandwidth.json");
 	send_storm();		CHECK(balanced(), "/storm.json");
 	send_lldp();		CHECK(balanced(), "/lldp.json");
@@ -648,6 +809,7 @@ int main(void)
 	t_mirror();
 	t_mtu();
 	t_lag();
+	t_l2();
 	t_unported();
 	printf("\n%d checks, %d failed\n", tests_run, tests_failed);
 	return tests_failed ? 1 : 0;

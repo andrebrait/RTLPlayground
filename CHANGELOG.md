@@ -87,9 +87,15 @@
     The refreshed timer integration was also exercised on hardware: automatic
     edge recovery, clock progression, LLDP reception and the native port/LAG UI
     passed, with the saved configuration unchanged.
-    L2 table, IGMP, bandwidth, storm control and
-    cable test are not ported: their commands are refused and their pages are
-    empty. Temperature remains unavailable without a verified sensor mapping.
+    The MAC table uses the native LUT with the existing table page and paginated
+    `/l2.json` rows. Exact-index deletion preserves the full lookup key and
+    protects the switch's own MAC. Bounded busy failures report unavailable
+    data rather than a fabricated empty table; deletion failures leave the UI row.
+    Native host tests cover SRAM/CAM indices, CPU mapping, LAG association,
+    pagination, key-preserving deletion and busy refusal.
+    IGMP, bandwidth, storm control and cable test are not ported: their commands
+    are refused and their pages are empty. Temperature remains unavailable
+    without a verified sensor mapping.
     The SNMP agent and Prometheus exporter build with `SNMP=1` and `PROMETHEUS=1`:
     counters come from the native MIB, link, speed and admin state from the port
     status and PHY registers. Interface errors are summed from native counters as

@@ -573,8 +573,6 @@ void l2_delete(uint16_t idx)
 }
 
 #else
-/* shortcut: the L2 table is not ported to the RTL836x, so its
- * pages get valid but empty JSON; port it with the feature */
 static void send_json(__code const char *s)
 {
 	slen = strtox(outbuf, HTTP_RESPONCE_JSON);
@@ -599,16 +597,114 @@ bool send_counters(uint8_t phys_port)
 	return false;
 }
 
+/* SDK rtl8367c_getAsicL2LookupTb: status splits address bits 11 and 12. */
+static __xdata uint16_t lut_words[6], lut_entry;
+
+/* shortcut: 256 polls; use a timed wait if real LUT operations exceed this bound. */
+static bool lut_idle(void)
+{
+	__xdata uint8_t polls = 0;
+	do {
+		reg_read(RTL836X_REG_TABLE_LUT_ADDR);
+		if (!(SFR_DATA_U16 & TABLE_LUT_ADDR_BUSY))
+			return true;
+	} while (++polls);
+	return false;
+}
+
+/* -1 unavailable, 0 absent, 1 unicast entry. */
+static int8_t lut_read(__xdata uint16_t idx, __xdata uint8_t command)
+{
+	__xdata uint8_t i;
+	if (idx >= RTL836X_LUT_SIZE)
+		return 0;
+	if (!lut_idle())
+		return -1;
+	REG_SET(RTL836X_REG_TABLE_ACCESS_ADDR, idx);
+	REG_SET(RTL836X_REG_TABLE_ACCESS_CTRL, command);
+	if (!lut_idle())
+		return -1;
+	if (!(SFR_DATA_U16 & TABLE_LUT_HIT))
+		return 0;
+	lut_entry = (SFR_DATA_U16 & 0x07ff) | ((SFR_DATA_U16 & 0x4000) >> 3) |
+		    ((SFR_DATA_U16 & 0x0800) << 1);
+	for (i = 0; i < 6; i++) {
+		reg_read(RTL836X_REG_TABLE_READ_DATA0 + i);
+		lut_words[i] = SFR_DATA_U16;
+	}
+	if ((lut_words[2] & 0x0100) || (lut_words[3] & 0x1000) ||
+	    (!(lut_words[4] & 0x3800) && !(lut_words[5] & 0x0020)))
+		return 0;
+	return 1;
+}
+
 void send_l2(uint16_t idx)
 {
-	(void)idx;
-	send_json("[]");
+	__xdata uint8_t n, b, port, lag;
+	__xdata int8_t found;
+	if (idx >= RTL836X_LUT_SIZE)
+		idx = 0;
+	slen = strtox(outbuf, HTTP_RESPONCE_JSON);
+	char_to_html('[');
+	for (n = 0; n < L2_MAX_TRANSFER && slen + 96 <= TCP_OUTBUF_SIZE; n++) {
+		found = lut_read(idx, TABLE_ACCESS_LUT_NEXT_UC);
+		if (found < 0) {
+			send_json("null");
+			return;
+		}
+		if (!found || (n && lut_entry < idx))
+			break;
+		if (n)
+			char_to_html(',');
+		string_to_html("{\"vlan\":\"");
+		charhex_to_html((lut_words[3] >> 8) & 0x0f);
+		byte_to_html(lut_words[3]);
+		string_to_html("\",\"mac\":\"");
+		for (b = 0; b < 6; b++) {
+			if (b)
+				char_to_html(':');
+			byte_to_html(lut_words[2 - b / 2] >> (b & 1 ? 0 : 8));
+		}
+		string_to_html(lut_words[5] & 0x0020 ? "\",\"type\":\"s\",\"port\":" : "\",\"type\":\"l\",\"port\":");
+		port = ((lut_words[4] >> 8) & 7) | ((lut_words[3] >> 12) & 8);
+		if (port == RTL836X_CPU_PORT)
+			port = CPU_PORT;
+		itoa_html(port);
+		string_to_html(",\"lag\":");
+		lag = port_lag_of(port);
+		itoa_html(lag == PORT_LAG_NONE ? 0 : lag + 1);
+		string_to_html(",\"idx\":\"");
+		byte_to_html(lut_entry >> 8);
+		byte_to_html(lut_entry);
+		string_to_html("\"}");
+		idx = lut_entry + 1;
+		if (idx >= RTL836X_LUT_SIZE)
+			break;
+	}
+	char_to_html(']');
 }
 
 void l2_delete(uint16_t idx)
 {
-	(void)idx;
-	send_json("{\"result\":0}");
+	__xdata uint8_t i, result = 0;
+	if (lut_read(idx, TABLE_ACCESS_LUT_ADDR) != 1 || lut_entry != idx)
+		goto done;
+	for (i = 0; i < 6; i++)
+		if (uip_ethaddr.addr[i] != (uint8_t)(lut_words[2 - i / 2] >> (i & 1 ? 0 : 8)))
+			break;
+	if (i == 6)
+		goto done;
+	/* Delete by the full key; clear age/static/SPA and policy, keeping VID/FID/EFID. */
+	lut_words[3] &= 0x7fff;
+	lut_words[4] &= 0x007f;
+	lut_words[5] = 0;
+	for (i = 0; i < 6; i++)
+		REG_SET(RTL836X_REG_TABLE_WRITE_DATA0 + i, lut_words[i]);
+	REG_SET(RTL836X_REG_TABLE_ACCESS_CTRL, TABLE_ACCESS_LUT_WRITE);
+	if (lut_idle())
+		result = (SFR_DATA_U16 >> 12) & 1;
+done:
+	send_json(result ? "{\"result\":1}" : "{\"result\":0}");
 }
 #endif
 
