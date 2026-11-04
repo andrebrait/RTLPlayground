@@ -27,6 +27,12 @@
 #include "sessions.h"
 #include "dns.h"
 #include "ntp.h"
+#ifdef SNMP
+#include "snmp.h"
+#endif
+#ifdef PROMETHEUS
+#include "metrics.h"
+#endif
 #include "uip/uip.h"
 #include "version.h"
 
@@ -1776,7 +1782,9 @@ void cmd_tokenize(void) __banked
 {
 #ifdef DEBUG
 	print_string("Tokenizing command\n");
+#ifndef SNMP
 	print_string_x(&cmd_buffer[0]);
+#endif
 	write_char('<'); write_char('\n');
 #endif
 	err_status = ERR_OK;
@@ -1862,7 +1870,9 @@ void cmd_parser(void) __banked
 #ifdef DEBUG
 	print_long(ticks);
 	print_string("Parsing command\n");
+#ifndef SNMP
 	print_string_x(&cmd_buffer[0]);
+#endif
 	write_char('<'); write_char('\n');
 	print_string("CMD-words: ");
 	print_byte(cmd_words_len); write_char(' ');
@@ -1993,6 +2003,11 @@ void cmd_parser(void) __banked
 			}
 		} else if (cmd_compare(0, "mac")) {
 			parse_mac_cmd();
+#ifdef SNMP
+		} else if (cmd_compare(0, "snmp")) {
+			if (!snmp_command())
+				cmd_error("Invalid SNMP configuration\n");
+#endif
 		} else if (cmd_compare(0, "hostname")) {
 			/* "hostname" alone reports the current name; "hostname <text>"
 			 * sets it, sanitized to JSON-safe printable ASCII. A name with
@@ -2087,7 +2102,11 @@ void cmd_parser(void) __banked
 				if (!cmd_history[p] || cmd_history[p] == '\n')
 					found_begin = 1;
 				if (found_begin && cmd_history[p])
+					#ifdef SNMP
+					write_char_no_syslog(cmd_history[p]);
+#else
 					write_char(cmd_history[p]);
+#endif
 				p = (p + 1) & CMD_HISTORY_MASK;
 			}
 		} else if (cmd_compare(0, "ingress")) {
@@ -2107,6 +2126,11 @@ void cmd_parser(void) __banked
 				trap_rma_set(RTL837X_RMA0E_CONF, RTL837X_RMA_ACT_FORWARD);
 			}
 		}
+#ifdef PROMETHEUS
+		else if (cmd_compare(0, "prometheus")) {
+			prometheus_command();
+		}
+#endif
 		else {
 			cmd_error("Unknown command\n");
 		}
@@ -2169,7 +2193,11 @@ void execute_config(void) __banked
 			if (cmd_idx >= (CMD_BUF_SIZE - 1)) {
 				cmd_buffer[cmd_idx] = NUL;
 				print_string("ERROR: Command too long, skipped: ");
+#ifdef SNMP
+				print_string("[redacted]");
+#else
 				print_string_x(cmd_buffer);
+#endif
 				write_char('\n');
 				cmd_idx = 0;
 				skipping = 1;
@@ -2237,7 +2265,11 @@ void execute_commands(__xdata uint8_t *p) __banked {
 			} else {
 				cmd_buffer[CMD_BUF_SIZE - 1] = NUL;
 				print_string("ERROR: Command too long: ");
+#ifdef SNMP
+				print_string("[redacted]");
+#else
 				print_string_x(cmd_buffer);
+#endif
 				write_char('\n');
 				err_status = ERR_CMD_TOO_LONG;
 				return;

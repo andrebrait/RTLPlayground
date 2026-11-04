@@ -63,6 +63,12 @@ ifndef BUILDDIR
 	BUILDDIR = output/$(MACHINE)
 endif
 
+ifeq ($(SNMP),1)
+CC_FLAGS += -DSNMP
+endif
+ifeq ($(PROMETHEUS),1)
+CC_FLAGS += -DPROMETHEUS
+endif
 CONFIG_STAMP := $(BUILDDIR)/.config
 VERSION_HEADER := version.h
 
@@ -170,6 +176,17 @@ SRCS += \
 	uip/uip-fw.c \
 	uip/uip-neighbor.c \
 	uip/uip-split.c
+
+ifeq ($(SNMP),1)
+SRCS += snmp.c snmp_control.c
+endif
+ifeq ($(PROMETHEUS),1)
+SRCS += metrics.c metrics_cli.c
+endif
+# The bounded hardware readers serve both SNMP and the Prometheus exporter.
+ifneq ($(filter 1,$(SNMP) $(PROMETHEUS)),)
+SRCS += snmp_hw.c
+endif
 
 OBJS = ${SRCS:%.c=$(BUILDDIR)/%.rel}
 DEPS := ${SRCS:%.c=$(BUILDDIR)/%.d}
