@@ -30,6 +30,10 @@
 
 ## Fixed
 
+- Commands
+  - Reject extra arguments to `bw status` and bandwidth changes before altering
+    limits or flow-control mode.
+
 - Time
   - `rtl8372_init()` sets SDS 0 to SGMII as the stock firmware does. The masks were 0, so on RTL8372
     boards without 10G ports both SerDes stayed off, and with SDS 0 off `RTL837X_REG_SEC_COUNTER`
