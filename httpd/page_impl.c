@@ -636,6 +636,8 @@ void send_lldp(void)
 
 	string_to_html("{\"on\":");
 	bool_to_html(lldp_enabled);
+	string_to_html(",\"tlv\":");
+	itoa_html(lldp_tlv_mask);
 	string_to_html(",\"portStatus\":[");
 
 	for (uint8_t i = MACHINE_MIN_PORT; i <= MACHINE_MAX_PORT; i++) {

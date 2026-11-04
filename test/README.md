@@ -54,6 +54,7 @@ It runs the real `fileadder` executable against mixed raw and compressed files.
 | `test_httpd_tx` | `httpd/httpd.c` + `uip/uip.c` | a GET of a static file against a client that moves its receive window: ACK accounting, continuation chunks out of flash, retransmission |
 | `test_lacp` | `rtl837x_lacp.c` | state machines against a simulated 802.3ad partner: convergence, mis-cabling, expiry, re-election, two groups, delivery by trap |
 | `test_fileadder.py` | `tools/fileadder.c` | Mixed compressed/raw assets, empty files, equal-size compression, already-compressed files and the root alias |
+| `test_lldp_tx` | `rtl837x_lldp.c` | emitted Port ID subtype and physical mapping, TTL 120/0, selected-port/all-port shutdown, bridge capabilities, management IPv4 bytes and omission at 0.0.0.0, optional capabilities switch |
 
 The L2 frontend deletion regression runs separately with `make -C test l2-delete`.
 It requires Node.js, without additional packages, and checks rejected, successful

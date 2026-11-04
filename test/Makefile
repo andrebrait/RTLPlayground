@@ -44,7 +44,8 @@ TESTS = $(BUILDDIR)/test_cmd_editor \
         $(BUILDDIR)/test_cpu_vlan_8372 \
         $(BUILDDIR)/test_nic_rx \
         $(BUILDDIR)/test_lacp \
-        $(BUILDDIR)/test_lldp
+        $(BUILDDIR)/test_lldp \
+        $(BUILDDIR)/test_lldp_tx
 
 # The table tests link the register mock and one environment file; stub/
 # stands in for the two headers a firmware build generates.
@@ -57,7 +58,7 @@ TESTS += $(BUILDDIR)/test_rx_bounds
 $(BUILDDIR)/test_rx_bounds: test_rx_bounds.c $(SRCROOT)/uip/uip_rx.h | $(BUILDDIR)
 	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS)
 
-all: run
+all: run lldp-conf
 
 $(BUILDDIR):
 	mkdir -p $(BUILDDIR)
@@ -111,6 +112,9 @@ $(BUILDDIR)/fileadder: $(SRCROOT)/tools/fileadder.c | $(BUILDDIR)
 test_mirror:
 	CC="$(CC)" python3 test_mirror.py
 
+$(BUILDDIR)/test_lldp_tx: test_lldp_tx.c $(SRCROOT)/rtl837x_lldp.c $(SRCROOT)/rtl837x_lldp_tx_strings.c $(SRCROOT)/httpd/html_out.c $(SRCROOT)/timer.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) $(GC_CFLAGS) $^ -o $@ $(LDFLAGS) $(GC_LDFLAGS)
+
 run: $(TESTS) $(BUILDDIR)/fileadder snmp snmp-horaco-profile snmp-status snmp-cli snmp-replay config-replay test_mirror
 	@fail=0; for t in $(TESTS); do \
 		echo "=== $$t ==="; \
@@ -124,10 +128,15 @@ run: $(TESTS) $(BUILDDIR)/fileadder snmp snmp-horaco-profile snmp-status snmp-cl
 l2-delete:
 	node test_l2_delete.cjs
 
+# Save to flash keeps one "lldp tlv" line per TLV (html/app.js mergeConf)
+NODE ?= node
+lldp-conf:
+	cd $(SRCROOT) && $(NODE) test/test_lldp_conf.cjs
+
 clean:
 	rm -rf $(BUILDDIR)
 
-.PHONY: all run clean test_mirror l2-delete
+.PHONY: all run lldp-conf clean test_mirror l2-delete
 
 
 # SNMP host benches compile the same firmware sources; listener is opt-in here.

@@ -79,6 +79,7 @@
     `application/macbinary` sent by Chrome on macOS for `.bin` files.
   - Store embedded assets uncompressed when gzip would not make them smaller, with the
     compression flag set separately for each file. Empty files no longer hide later assets.
+  - Give the LLDP Name column the remaining table width and wrap long names.
 
 - Health
   - `HEALTH=1` builds no longer write past the phase timing arrays at the LLDP checkpoint, which
