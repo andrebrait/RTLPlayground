@@ -23,6 +23,7 @@ extern uint16_t slen;
 extern uint8_t  vlan_names[VLAN_NAMES_SIZE];
 extern uint16_t vlan_ptr;
 extern uint16_t management_vlan;
+extern const struct machine machine;
 
 /* The response body: what follows the blank line after the header. */
 static const char *body(void)
@@ -317,8 +318,12 @@ static void t_defaults(void)
 	printf("[test] /defaults.json reports the machine_defaults.h values\n");
 	out_reset();
 	send_defaults();
-	CHECK(has("{\"lldp\":0,\"ports\":[{\"portNum\":") && has(",\"lldp\":1,\"en\":1,\"eee\":1}"),
-	      "LLDP off, every port permitted, copper ports up with EEE");
+	CHECK(has("{\"lldp\":0,\"ports\":[{\"portNum\":") && has(",\"lldp\":1,\"en\":1"),
+	      "LLDP off, every port permitted, copper ports up");
+	if (machine.n_10g)
+		CHECK(!has("\"eee\":"), "mixed-speed EEE defaults stay unknown: CLI and boot use different advertisements");
+	else
+		CHECK(has("\"eee\":1"), "EEE-on default may be pruned when CLI and boot advertise the same speeds");
 	CHECK(slen <= TCP_OUTBUF_SIZE && balanced(), "valid JSON that fits the buffer");
 }
 
