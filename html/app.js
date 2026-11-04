@@ -5218,6 +5218,43 @@ function mergeConf(base, texts) {
     return conf;
 }
 
+// Leaves out every line of a setting whose last line sets what the board starts with (/defaults.json),
+// so the board default applies again. Defaults it does not report (SFP ports, flow control, MTU) and
+// lines that other lines depend on (qualified eee, speed and duplex) stay.
+function pruneDefaults(conf, d) {
+    if (!d) return conf;
+    var P = {},
+        isDefault = {};
+    d.ports.forEach(function(p) {
+        P[p.portNum] = p
+    });
+    var eeeQualified = conf.some(function(l) {
+        return /^eee /.test(l) && !/^eee (on|off) \d{1,2}$/.test(l)
+    });
+
+    function setting(l) {
+        var m, p;
+        if ((m = l.match(/^lldp (on|off)$/))) return {id: "lldp", is: (m[1] === "on") === !!d.lldp};
+        if ((m = l.match(/^port (\d{1,2}) lldp (permit|block)$/)) && (p = P[m[1]]) && p.lldp != null)
+            return {id: "lldp " + m[1], is: (m[2] === "permit") === !!p.lldp};
+        if (!eeeQualified && (m = l.match(/^eee (on|off) (\d{1,2})$/)) && (p = P[m[2]]) && p.eee != null)
+            return {id: "eee " + m[2], is: (m[1] === "on") === !!p.eee};
+        if ((m = l.match(/^port (\d{1,2}) (on|off)$/)) && (p = P[m[1]]) && p.en != null && !conf.some(function(c) {
+                return c.indexOf("port " + m[1] + " ") === 0 && !/^port \d{1,2} (name|lldp|fc|on|off)( |$)/.test(c)
+            }))
+            return {id: "port " + m[1], is: (m[2] === "on") === !!p.en};
+        return null;
+    }
+    conf.forEach(function(l) {
+        var s = setting(l);
+        if (s) isDefault[s.id] = s.is;
+    });
+    return conf.filter(function(l) {
+        var s = setting(l);
+        return !s || !isDefault[s.id];
+    });
+}
+
 function writeConfig(txt, title, fromLog) {
     var info = h("p", {
             class: "small mut"
@@ -5311,12 +5348,15 @@ $("saveBtn").addEventListener("click", function() {
         getText("/cmd_log").catch(function() {
             return ""
         }),
+        getJSON("/defaults.json").catch(function() {
+            return null
+        }),
     ]).then(function(r) {
         var cur = r[0].replace(/\0[\s\S]*$/, "").split(/\r?\n/).map(function(l) {
             return l.trim().replace(/\s+/g, " ")
         }).filter(Boolean);
         var merged = mergeConf(cur, [r[1].replace(/\0[\s\S]*$/, "")]);
-        writeConfig(merged.join("\n"), t("cw_save_title"), true);
+        writeConfig(pruneDefaults(merged, r[2]).join("\n"), t("cw_save_title"), true);
     });
 });
 

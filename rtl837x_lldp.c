@@ -16,7 +16,7 @@ extern __xdata bool lldp_enabled;
 extern __code const struct machine machine;
 
 static __xdata struct timer lldp_timer;
-__xdata uint16_t lldp_logical_port_status = 0xffff;
+__xdata uint16_t lldp_logical_port_status = MACHINE_DEFAULT_LLDP_PORTS;
 
 void lldp_init(void) __banked
 {

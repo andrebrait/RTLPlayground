@@ -42,6 +42,11 @@ TABLE_ENV = support.c hw_mock.c env_tables.c $(SRCROOT)/cmd_editor.c \
             $(SRCROOT)/rtl837x_port.c $(SRCROOT)/httpd/page_impl.c \
             $(SRCROOT)/httpd/html_out.c
 
+# trap_init() with LLDP off and on by default
+TESTS += $(BUILDDIR)/test_trap_lldp0 $(BUILDDIR)/test_trap_lldp1
+$(BUILDDIR)/test_trap_lldp%: test_trap_defaults.c $(SRCROOT)/rtl837x_trap.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) -DMACHINE_DEFAULT_LLDP=$* $< -o $@ $(LDFLAGS)
+
 all: run
 
 $(BUILDDIR):
@@ -95,7 +100,11 @@ run: $(TESTS)
 	done; \
 	if [ $$fail -ne 0 ]; then echo "TESTS FAILED"; exit 1; else echo "ALL TESTS PASSED"; fi
 
+NODE ?= node
+prune-defaults:
+	cd $(SRCROOT) && $(NODE) test/test_prune_defaults.cjs
+
 clean:
 	rm -rf $(BUILDDIR)
 
-.PHONY: all run clean
+.PHONY: all run clean prune-defaults

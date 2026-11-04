@@ -202,6 +202,7 @@ static void t_status_macs(void)
 	CHECK(balanced(), "valid JSON");
 }
 
+
 static void t_status_counters(void)
 {
 	printf("[test] /status.json prints 64-bit packet counters in full\n");
@@ -229,6 +230,7 @@ int main(void)
 	t_l2_page();
 	t_status_counters();
 	t_status_macs();
+
 	printf("\n%d checks, %d failed\n", tests_run, tests_failed);
 	return tests_failed ? 1 : 0;
 }
