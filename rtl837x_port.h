@@ -61,15 +61,32 @@ void port_l2_forget_port(uint8_t port) __banked;
 void vlan_create(void) __banked;
 void vlan_delete(uint16_t vlan) __banked;
 void vlan_dump(void) __banked;
-void port_mirror_set(uint8_t port, __xdata uint16_t rx_pmask, __xdata uint16_t tx_pmask) __banked;
+struct port_mirror {
+	uint8_t enabled;
+	uint8_t port;
+	uint16_t rx_pmask;
+	uint16_t tx_pmask;
+};
+bool port_mirror_set(__xdata uint8_t port, __xdata uint16_t rx_pmask, __xdata uint16_t tx_pmask) __banked;
+void port_mirror_get(__xdata struct port_mirror * __xdata m) __banked;
 void port_mirror_del(void) __banked;
 bool port_ingress_filter(__xdata uint8_t port, __xdata vlan_ingress_mode_t type) __banked;
 void port_l2_setup(void) __banked;
+/* The RTL8370N has 2 fixed groups (group 0 on ports 0-3, group 1 on 4-7) and one hash for both */
+#if SOC_FAMILY == RTL836X
+#define PORT_LAG_COUNT 2
+#else
+#define PORT_LAG_COUNT 4
+#endif
 uint16_t port_lag_members_get(uint8_t lag) __banked;
 #define PORT_LAG_NONE 0xff
 uint8_t port_lag_of(uint8_t port) __banked;
-void port_lag_members_set(__xdata uint8_t lag, __xdata uint16_t members) __banked;
-void port_lag_hash_set(__xdata uint8_t lag, __xdata uint8_t hash) __banked;
+/* Whether the group exists and the hardware can take these members; writes nothing, so a caller can refuse before it changes any state */
+bool port_lag_members_valid(__xdata uint8_t lag, __xdata uint16_t members) __banked;
+/* false, with nothing written, for a members mask the hardware cannot take */
+bool port_lag_members_set(__xdata uint8_t lag, __xdata uint16_t members) __banked;
+bool port_lag_hash_set(__xdata uint8_t lag, __xdata uint8_t hash) __banked;
+uint8_t port_lag_hash_get(__xdata uint8_t lag) __banked;
 void port_eee_enable_all(__xdata uint8_t speed) __banked;
 void port_eee_disable_all(void) __banked;
 void port_eee_status_all(void) __banked;
@@ -82,6 +99,8 @@ bool port_ingress_vlan_filter_get(uint8_t port) __banked;
 vlan_ingress_mode_t port_ingress_filter_get(__xdata uint8_t port) __banked;
 void port_isolate(uint8_t port, __xdata uint16_t pmask) __banked;
 uint16_t port_isolation_get(uint8_t port) __banked;
+uint16_t port_mtu_get(uint8_t port) __banked;
+bool port_mtu_set(uint8_t port, __xdata uint16_t len) __banked;
 void port_l2_static_mgmt(__xdata uint8_t *mac, __xdata uint16_t vlan, __xdata bool remove_entry) __banked;
 
 #endif

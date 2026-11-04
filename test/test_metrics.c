@@ -74,9 +74,10 @@ bool sfp_read_block(uint8_t slot, uint8_t reg, uint8_t len)
 }
 void reg_read_m(uint16_t reg)
 {
-	uint32_t v = reg == RTL837X_REG_SEC_COUNTER ? 1000 : reg == RTL837X_TM_RESULT ? 0x1700 : 0;
+	uint32_t v = reg == RTL837X_TM_RESULT ? 0x1700 : 0;
 	sfr_data[0] = v >> 24; sfr_data[1] = v >> 16; sfr_data[2] = v >> 8; sfr_data[3] = v;
 }
+void read_reg_timer(uint32_t *tmr) { *tmr = 1000; }	/* uptime seconds, as ntp_uptime() reads it */
 
 static void fixture(void)
 {

@@ -247,7 +247,9 @@ static void interleave(void)
 	ntp[43] = 0x85;
 	raw_payload(ntp, sizeof(ntp), 123, lport, service_ip);
 	load(packet, packet_len);
+	fake_now = mock_seconds;	/* ntp.c takes the uptime from read_reg_timer() */
 	input();
+	fake_now = 0;
 	CHECK(!uip_len && ntp_state.synced && ntp_state.utc == 5 && ntp_state.at == 123,
 	      "real NTP response updates time between SNMP requests");
 

@@ -1,6 +1,52 @@
 #ifndef _RTL837X_REGS_H_
 #define _RTL837X_REGS_H_
 
+/* SOC_FAMILY must be defined before the #if below: an undefined one reads as 0 */
+#include "machine.h"
+
+/* Field values that code shared by both SoC families uses */
+#define SYS_LED_OFF	   0
+#define SYS_LED_FAST   1
+#define SYS_LED_SLOW   2
+#define SYS_LED_ON     3
+
+/*
+ * 5 Bits each give the state of the 2 SerDes of the RTL8372
+ * Values are:
+ */
+#define SDS_SGMII		0x02
+#define SDS_1000BX_FIBER	0x04
+#define SDS_100FX		0x05
+#define SDS_QXGMII		0x0d
+#define SDS_HISGMII		0x12
+#define SDS_HSG			0x16
+#define SDS_10GR		0x1a
+#define SDS_OFF			0x1f
+
+#define RTL837X_REG_I2C_SCL_SHIFT 5
+#define RTL837X_REG_I2C_SDA_SHIFT 2
+#define RTL837X_REG_I2C_SCL_MASK  0x3
+#define RTL837X_REG_I2C_SDA_MASK  0x7
+
+/* Flags in byte 1 of the RX frame descriptor */
+#define RX_TAG_L4_CSUM_BAD		0x04
+
+/* VLAN ingress filter modes, the vlan_ingress_mode_e values */
+#define INGR_ALLOW_TAGGED 1
+#define INGR_ALLOW_UNTAGGED 2
+#define INGR_ALLOW_ALL 0
+
+/* LAG hash fields, the same bit layout on both families (rtl8367c_setAsicTrunkingHashSelect) */
+#define LAG_HASH_SOURCE_PORT_NUMBER	0x01
+#define LAG_HASH_L2_SMAC		0x02
+#define LAG_HASH_L2_DMAC		0x04
+#define LAG_HASH_L3_SIP			0x08
+#define LAG_HASH_L3_DIP			0x10
+#define LAG_HASH_L4_SPORT		0x20
+#define LAG_HASH_L4_DPORT		0x40
+
+/* Register addresses: an RTL836x build that names one fails to compile */
+#if SOC_FAMILY == RTL837X
 #define RTL837X_REG_CHIP_ID		0x0004
 #define RTL837X_REG_CHIP_INFO		0x000c
 #define RTL837X_REG_CHIP_UUID		0x0010
@@ -18,11 +64,6 @@
 
 #define RTL837X_REG_HW_CONF		0x6040
 // Bits 4 & 5: CLOCK DIVIDER from 125MHz for Timer
-
-#define SYS_LED_OFF	   0
-#define SYS_LED_FAST   1
-#define SYS_LED_SLOW   2
-#define SYS_LED_ON     3
 
 #define RTL837X_REG_LED_MODE		0x6520
 // Defines the LED Mode for steering the Port LEDS and the System LED
@@ -74,19 +115,6 @@
  #define RTL837X_CFG_PHY_TX_POLARITY_SWAP	0xA94
  #define RTL837X_CFG_PHY_MDI_REVERSE		0xA90
 
-/*
- * 5 Bits each give the state of the 2 SerDes of the RTL8372
- * Values are:
- */
-#define SDS_SGMII		0x02
-#define SDS_1000BX_FIBER	0x04
-#define SDS_100FX		0x05
-#define SDS_QXGMII		0x0d
-#define SDS_HISGMII		0x12
-#define SDS_HSG			0x16
-#define SDS_10GR		0x1a
-#define SDS_OFF			0x1f
-
 #define RTL837X_REG_LINKS	0x63f0
 #define RTL837X_REG_LINKS_89	0x63f4
 #define RTL837X_REG_LINKS_STS	0x63E8
@@ -137,10 +165,6 @@
 #define RTL837X_REG_I2C_CTRL2		0x041c
 #define RTL837X_REG_I2C_IN		0x0420
 #define RTL837X_REG_I2C_OUT		0x0424
-#define RTL837X_REG_I2C_SCL_SHIFT 5
-#define RTL837X_REG_I2C_SDA_SHIFT 2
-#define RTL837X_REG_I2C_SCL_MASK  0x3
-#define RTL837X_REG_I2C_SDA_MASK  0x7
 
 /*
  * NIC Related registers
@@ -165,9 +189,6 @@
 #define RTL837X_REG_CPU_TAG		0x6720
 #define RTL837X_REG_CPU_TAG_AWARE_PMASK	0x603C
 #define RTL837X_REG_MAC_FORCE_MODE	0x6344
-
-/* Flags in byte 1 of the RX frame descriptor */
-#define RX_TAG_L4_CSUM_BAD		0x04
 
 /*
  * Statistics related registers
@@ -236,9 +257,6 @@
  */
 // 2 bits per port: allow tagged (01) / untagged (10) and all (00)
 #define RTL837x_REG_INGRESS	0x4e10
-#define INGR_ALLOW_TAGGED 1
-#define INGR_ALLOW_UNTAGGED 2
-#define INGR_ALLOW_ALL 0
 
 /*
  * Mirroring
@@ -251,13 +269,6 @@
  */
 #define RTL837X_TRK_MBR_CTRL_BASE	0x4f38
 #define RTL837X_TRK_HASH_CTRL_BASE	0x4f48
-#define LAG_HASH_SOURCE_PORT_NUMBER	0x01
-#define LAG_HASH_L2_SMAC		0x02
-#define LAG_HASH_L2_DMAC		0x04
-#define LAG_HASH_L3_SIP			0x08
-#define LAG_HASH_L3_DIP			0x10
-#define LAG_HASH_L4_SPORT		0x20
-#define LAG_HASH_L4_DPORT		0x40
 #define LAG_HASH_DEFAULT (LAG_HASH_L2_SMAC | LAG_HASH_L2_DMAC | LAG_HASH_L3_SIP | LAG_HASH_L3_DIP | LAG_HASH_L4_SPORT | LAG_HASH_L4_DPORT)
 #define LAG_HASH_RESET (LAG_HASH_SOURCE_PORT_NUMBER | LAG_HASH_L2_SMAC | LAG_HASH_L2_DMAC \
 			| LAG_HASH_L3_SIP | LAG_HASH_L3_DIP | LAG_HASH_L4_SPORT)
@@ -293,9 +304,6 @@
 #define RTL837X_RMA0E_CONF		0x4ee8
 #define RTL837X_RMA2_CONF		0x4ed4
 #define RTL837X_RMA_ACT_MASK		0x30
-#define RTL837X_RMA_ACT_FORWARD		0x00
-#define RTL837X_RMA_ACT_TRAP		0x10
-#define RTL837X_RMA_ACT_DROP		0x20
 #define RTL837X_EXT_CPU_CTRL		0x6724
 #define RTL837X_IMR_INT_PORT_LINK_STS_CHG	0x5f34
 #define RTL837X_ISR_SW_INT_MODE		0x5f84
@@ -346,8 +354,19 @@
 #define RTL837X_METER_MODE		0x5ef0
 #define EGBW_INC_IFG			0x02
 #define EGBW_CPUMODE			0x01
+#endif /* SOC_FAMILY == RTL837X */
 
-#ifdef REGDBG
+
+#if SOC_FAMILY == RTL836X
+/* 16-bit registers: write data in SFR a4 (high byte) and a5. No REG_WRITE: its users are RTL837x code */
+#define REG_SET(r, v) do { \
+	SFR_DATA_24 = ((uint16_t)(v)) >> 8; \
+	SFR_DATA_16 = (v) & 0xff; \
+	SFR_DATA_8 = 0; \
+	SFR_DATA_0 = 0; \
+	reg_write(r); \
+} while (0)
+#elif defined(REGDBG)
 
 #define REG_SET(r, v) do { \
 	SFR_DATA_24 = (((uint32_t)v) >> 24) & 0xff; \

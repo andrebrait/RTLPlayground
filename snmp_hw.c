@@ -1,6 +1,10 @@
 #include "rtl837x_common.h"
 #include "rtl837x_sfr.h"
 #include "rtl837x_regs.h"
+#if SOC_FAMILY == RTL836X
+#include "rtl836x_regs.h"
+#include "rtl836x_mib.h"
+#endif
 #include "machine.h"
 #include "snmp_hw.h"
 
@@ -9,6 +13,101 @@
 #pragma constseg BANK4
 
 extern __code const struct machine machine;
+
+#if SOC_FAMILY == RTL836X
+/* The RTL836x has no STAT_GET engine to recover from: the native MIB latch,
+ * PORTn_STATUS and the Clause 22 PHY registers are read directly. */
+void snmp_hw_init(void) __banked
+{
+}
+
+#define NONE 0xff
+/* RTL837x selector to the RTL836x counter with the same meaning: [0] is the
+ * 64-bit counter or the high word, [1] the low word. Native counters that sum
+ * RX and TX (19..27) have no RTL837x equivalent and are not mapped. */
+static __code const uint8_t native[21][2] = {
+	{0, NONE}, {28, NONE}, {7, NONE}, {9, NONE}, {10, NONE},
+	{38, NONE}, {39, NONE}, {40, NONE},
+	{36, 37},	/* out discards, 802.1d Tp port in discards */
+	{29, 30},	/* single, multi collision frames */
+	{31, 32},	/* deferred transmissions, late collisions */
+	{34, 2},	/* excessive collisions, symbol errors */
+	{4, 3},		/* control in unknown opcodes, in pause frames */
+	{35, 8},	/* out pause frames, drop events */
+	{NONE, NONE},	/* TX broadcast, TX multicast */
+	{NONE, 1},	/* RX CRC align errors: dot3StatsFCSErrors */
+	{NONE, NONE}, {NONE, NONE},
+	{NONE, 5},	/* RX fragments */
+	{NONE, 6},	/* RX jabbers */
+	{33, NONE},	/* TX collisions */
+};
+
+bool snmp_hw_stat(uint8_t port, __xdata uint8_t selector, __xdata bool high, __xdata bool low,
+		  __xdata struct snmp_counter *__xdata value) __banked
+{
+	__xdata uint8_t id;
+
+	if (!MACHINE_PORT_VALID(port) || selector >= sizeof(native) / sizeof(native[0]) || !(high || low))
+		return false;
+	if (high && low)
+		id = selector <= 7 ? native[selector][0] : NONE;
+	else
+		id = native[selector][high ? 0 : 1];
+	/* rtl836x_mib_read() fails before it touches the value, and zero-extends 32-bit counters */
+	return id != NONE && rtl836x_mib_read(port, id, value->bytes);
+}
+
+bool snmp_hw_counter(uint8_t port, __xdata uint8_t selector,
+		     __xdata struct snmp_counter *__xdata value) __banked
+{
+	return selector <= 7 && snmp_hw_stat(port, selector, true, true, value);
+}
+
+/* Selector 48: high is the RX error sum, else the TX error sum (rtl836x_mib_summary 4/5),
+ * reduced to the 32-bit word the RTL837x reports */
+bool snmp_hw_counter32(uint8_t port, __xdata uint8_t selector, __xdata bool high,
+		       __xdata struct snmp_counter *__xdata value) __banked
+{
+	__xdata struct snmp_counter sum;
+	__xdata uint8_t i;
+
+	if (selector != 48 || !MACHINE_PORT_VALID(port) || !rtl836x_mib_summary(port, high ? 4 : 5, sum.bytes))
+		return false;
+	for (i = 0; i < 8; i++)
+		value->bytes[i] = i < 4 ? 0 : sum.bytes[i];
+	return true;
+}
+
+bool snmp_hw_admin(uint8_t port, __xdata uint8_t *__xdata state) __banked
+{
+	if (!MACHINE_PORT_VALID(port))
+		return false;
+	phy_read(port, 0, 0);	/* MII BMCR bit 11: power down */
+	*state = (SFR_DATA_U16 & 0x0800) ? 2 : 1;
+	return true;
+}
+
+/* Both callers test only the requested port's bit, so only that bit is read */
+bool snmp_hw_link(uint8_t port, __xdata uint32_t *__xdata value) __banked
+{
+	if (!MACHINE_PORT_VALID(port))
+		return false;
+	reg_read(RTL836X_REG_PORT0_STATUS + port);
+	*value = (SFR_DATA_U16 & PORT_STATUS_LINK) ? (uint16_t)1 << port : 0;
+	return true;
+}
+
+bool snmp_hw_speed(uint8_t port, __xdata uint16_t *__xdata mbps) __banked
+{
+	static __code const uint16_t speeds[4] = {10, 100, 1000, 0};
+
+	if (!MACHINE_PORT_VALID(port))
+		return false;
+	reg_read(RTL836X_REG_PORT0_STATUS + port);
+	*mbps = (SFR_DATA_U16 & PORT_STATUS_LINK) ? speeds[SFR_DATA_U16 & PORT_STATUS_SPEED_MASK] : 0;
+	return true;
+}
+#else
 /* Set when a statistics request timed out: its selector may still be pending.
  * Cleared only after the SFR engine and STAT_GET are observed idle. */
 static __xdata uint8_t fault;
@@ -225,3 +324,4 @@ bool snmp_hw_speed(uint8_t port, __xdata uint16_t *__xdata mbps) __banked
 	}
 	return true;
 }
+#endif

@@ -99,3 +99,9 @@ ingress [p]<t|u|a>...
   `ingress 1t 2a` -> Set port 1 as tagged input only, set port 2 accepting any frames.
   `ingress a` -> Set all ports to accept both tagged and untagged frames (default behaviour).
 ```
+
+On the RTL836x (TP-Link TL-SG108PE V5) the same commands program the
+RTL8367C 4K VLAN table and the per-port member configurations that hold the
+PVID. The CPU port is an untagged member of every VLAN and the switch answers
+in VLAN 1, its PVID, so management stays untagged and `vlan <VLAN-ID> mgmt` is
+refused.

@@ -5,6 +5,9 @@
 #include "rtl837x_lldp.h"
 #include "rtl837x_sfr.h"
 #include "rtl837x_regs.h"
+#if SOC_FAMILY == RTL836X
+#include "rtl836x_regs.h"
+#endif
 #include "rtl837x_common.h"
 #include "dhcp.h"
 #include "uip.h"
@@ -41,19 +44,13 @@ static bool lldp_oui_is(__xdata uint8_t *p, __code const uint8_t *oui) __reentra
     return p[0] == oui[0] && p[1] == oui[1] && p[2] == oui[2];
 }
 
-static uint16_t lldp_port_mtu(uint8_t port) __reentrant
-{
-    reg_read_m(RTL8373_REG_MAC_L2_PORT_MAX_LEN + ((uint16_t)port << 8));
-    return SFR_DATA_U16 & PORT_MAX_LEN_MASK;
-}
-
 static uint8_t lldp_warnings(__xdata struct lldp_neighbor *nb) __reentrant
 {
     uint8_t i;
     uint8_t lag;
     uint8_t w = 0;
 
-    if (nb->mtu && nb->mtu > lldp_port_mtu(nb->port))
+    if (nb->mtu && nb->mtu > port_mtu_get(nb->port))
         w |= LLDP_WARN_MTU;
     lag = port_lag_of(nb->port);
     if ((nb->agg & LLDP_AGG_ANNOUNCED) && ((nb->agg & LLDP_AGG_ACTIVE) != 0) != (lag != PORT_LAG_NONE))
@@ -104,11 +101,18 @@ void lldp_tick(void) __banked
     if (!lldp_enabled)
         return;
 
+#if SOC_FAMILY == RTL837X
     reg_read_m(RTL837X_REG_LINKS_STS);
+#endif
     for (i = 0; i < LLDP_NB_MAX; i++) {
         if (!lldp_nb[i].ttl)
             continue;
+#if SOC_FAMILY == RTL836X
+        reg_read(RTL836X_REG_PORT0_STATUS + lldp_nb[i].port);
+        if (SFR_DATA_0 & PORT_STATUS_LINK)
+#else
         if ((sfr_data[(lldp_nb[i].port >> 3) + 1] >> (lldp_nb[i].port & 7)) & 1)
+#endif
             lldp_nb[i].ttl--;
         else
             lldp_nb[i].ttl = 0;
@@ -436,6 +440,18 @@ bool lldp_in(void) __banked __reentrant
                 lldp_tmp.mtu = ((uint16_t)p[4] << 8) | p[5];
             else if (lldp_oui_is(p, lldp_oui_8023) && p[3] == LLDP_8023_SUBTYPE_LINK_AGG && len > LLDP_ORG_TLV_HEADER_LENGTH)
                 lldp_tmp.agg = (p[4] & (LLDP_AGG_CAPABLE | LLDP_AGG_ACTIVE)) | LLDP_AGG_ANNOUNCED;
+            /* 802.3 Power via MDI from a PD (bit 0 clear), class field 1..5 = class 0..4 */
+            else if (lldp_oui_is(p, lldp_oui_8023) && p[3] == 2 && len >= 7 && !(p[4] & 1) && p[6] >= 1 && p[6] <= 5) {
+                lldp_tmp.poe_class = p[6];
+                /* 802.3at: type/source/priority with bit 6 set for a PD, bit 7 set = Type 1 */
+                if (len >= 12 && (p[7] & 0x40)) {
+                    lldp_tmp.poe_type = p[7] & 0x80 ? 1 : 2;
+                    lldp_tmp.poe_req = ((uint16_t)p[8] << 8) | p[9];
+                }
+            /* LLDP-MED Extended Power-via-MDI from a PD (bits 7:6 = 01) */
+            } else if (!p[0] && p[1] == 0x12 && p[2] == 0xbb && p[3] == 4 && len >= 7
+                       && (p[4] & 0xc0) == 0x40 && !lldp_tmp.poe_req)
+                lldp_tmp.poe_req = ((uint16_t)p[5] << 8) | p[6];
             else if (lldp_oui_is(p, lldp_oui_8023) && p[3] == LLDP_8023_SUBTYPE_MAC_PHY && len == LLDP_ORG_TLV_HEADER_LENGTH + 5) {
                 lldp_tmp.aneg = (p[4] & LLDP_AUTONEG_ENABLED) | LLDP_ANEG_ANNOUNCED;
                 lldp_tmp.mau = ((uint16_t)p[7] << 8) | p[8];
@@ -540,7 +556,7 @@ static void lldp_put_chassis(__xdata struct lldp_neighbor *nb, bool html) __reen
         lldp_put(lldp_printable(nb->chassis[i]), html);
 }
 
-static void lldp_put_port_id(uint8_t i, bool html)
+static void lldp_put_port_id(uint8_t i, bool html) __reentrant
 {
     if (lldp_nb[i].port_id_mac)
         lldp_put_mac((__xdata uint8_t *)lldp_nb[i].port_id, html);
@@ -548,6 +564,18 @@ static void lldp_put_port_id(uint8_t i, bool html)
         lldp_put_string(lldp_nb[i].port_id, html);
 }
 
+/* 1 = fits 802.3af, 2 = needs 802.3at, 0 = unknown: the 802.3at type bit, else the
+ * class (class 4 needs at), else LLDP-MED power above the 12.95 W af gives a PD */
+static uint8_t lldp_poe_std(uint8_t i) __reentrant
+{
+    if (lldp_nb[i].poe_type)
+        return lldp_nb[i].poe_type;
+    if (lldp_nb[i].poe_class)
+        return lldp_nb[i].poe_class == 5 ? 2 : 1;
+    if (lldp_nb[i].poe_req)
+        return lldp_nb[i].poe_req > 129 ? 2 : 1;
+    return 0;
+}
 void lldp_neighbors_to_html(void) __banked __reentrant
 {
     uint8_t i;
@@ -590,6 +618,24 @@ void lldp_neighbors_to_html(void) __banked __reentrant
         lldp_put_dec((lldp_nb[i].aneg & LLDP_ANEG_ANNOUNCED) ? ((lldp_nb[i].aneg & LLDP_AUTONEG_ENABLED) ? 2 : 1) : 0, true);
         string_to_html(",\"warn\":");
         lldp_put_dec(lldp_warnings(&lldp_nb[i]), true);
+        string_to_html(",\"poe\":");
+        if (lldp_poe_std(i)) {
+            lldp_put('"', true);
+            lldp_put('a', true);
+            lldp_put(lldp_poe_std(i) == 2 ? 't' : 'f', true);
+            lldp_put('"', true);
+        } else
+            string_to_html("null");
+        string_to_html(",\"poeClass\":");
+        if (lldp_nb[i].poe_class)
+            lldp_put_dec(lldp_nb[i].poe_class - 1, true);
+        else
+            string_to_html("null");
+        string_to_html(",\"poeReq\":");
+        if (lldp_nb[i].poe_req)
+            lldp_put_dec(lldp_nb[i].poe_req, true);
+        else
+            string_to_html("null");
         string_to_html(",\"ttl\":");
         lldp_put_dec(lldp_nb[i].ttl, true);
         lldp_put('}', true);
@@ -629,6 +675,20 @@ void lldp_show(void) __banked __reentrant
         print_string("  ");
         lldp_put_dec(lldp_nb[i].ttl, false);
         print_string("s");
+        if (lldp_poe_std(i)) {
+            print_string(lldp_poe_std(i) == 2 ? "  PoE at" : "  PoE af");
+            if (lldp_nb[i].poe_class) {
+                print_string(" class ");
+                lldp_put_dec(lldp_nb[i].poe_class - 1, false);
+            }
+            if (lldp_nb[i].poe_req) {
+                write_char(' ');
+                lldp_put_dec(lldp_nb[i].poe_req / 10, false);
+                write_char('.');
+                lldp_put_dec(lldp_nb[i].poe_req % 10, false);
+                print_string(" W");
+            }
+        }
         print_string(lldp_warnings(&lldp_nb[i]) ? "  MISMATCH\n" : "\n");
     }
 }
@@ -643,6 +703,23 @@ static __xdata uint8_t *lldp_org_header(__xdata uint8_t *p, __code const uint8_t
     return p;
 }
 
+/* The PHY bits match: MII registers on the RTL836x, MMD registers on the RTL837x */
+#if SOC_FAMILY == RTL836X
+#define LLDP_PHY_CTRL 0, 0
+#define LLDP_PHY_ADV 0, 4
+#define LLDP_PHY_GBCR 0, 9
+/* PORTn_STATUS speed codes are the PHYSR_SPEED_* values */
+#define LLDP_READ_STATUS(port) reg_read(RTL836X_REG_PORT0_STATUS + (port))
+#define LLDP_SPEED(v) (((v) & PORT_STATUS_LINK) ? (v) & PORT_STATUS_SPEED_MASK : PHYSR_SPEED_DOWN)
+#define LLDP_FULL_DUPLEX PORT_STATUS_DUPLEX
+#else
+#define LLDP_PHY_CTRL PHY_MMD_AN, PHY_ANEG_CTRL
+#define LLDP_PHY_ADV PHY_MMD_AN, PHY_ANEG_ADV
+#define LLDP_PHY_GBCR PHY_MMD31, PHY_MMD31_GBCR
+#define LLDP_READ_STATUS(port) phy_read((port), PHY_MMD31, PHY_MMD31_PHYSR)
+#define LLDP_SPEED(v) PHYSR_SPEED(v)
+#define LLDP_FULL_DUPLEX PHYSR_FULL_DUPLEX
+
 static uint8_t lldp_link_code(uint8_t port) __reentrant
 {
     uint8_t b;
@@ -651,6 +728,7 @@ static uint8_t lldp_link_code(uint8_t port) __reentrant
     b = sfr_data[3 - ((port & 7) >> 1)];
     return (port & 1) ? b >> 4 : b & 0xf;
 }
+#endif
 
 static __xdata uint8_t *lldp_mac_phy(__xdata uint8_t *p, uint8_t port) __reentrant
 {
@@ -660,15 +738,18 @@ static __xdata uint8_t *lldp_mac_phy(__xdata uint8_t *p, uint8_t port) __reentra
     uint16_t v;
 
     p = lldp_org_header(p, lldp_oui_8023, LLDP_8023_SUBTYPE_MAC_PHY, 5);
+#if SOC_FAMILY == RTL837X
     if (machine.is_sfp[port]) {
         if (lldp_link_code(port) == LINKS_CODE_1000M)
             mau = LLDP_MAU_1000BASE_X_FD;
-    } else {
+    } else
+#endif
+    {
         autoneg = LLDP_AUTONEG_SUPPORTED;
-        phy_read(port, PHY_MMD_AN, PHY_ANEG_CTRL);
+        phy_read(port, LLDP_PHY_CTRL);
         if (SFR_DATA_U16 & PHY_ANEG_CTRL_ENABLE)
             autoneg |= LLDP_AUTONEG_ENABLED;
-        phy_read(port, PHY_MMD_AN, PHY_ANEG_ADV);
+        phy_read(port, LLDP_PHY_ADV);
         v = SFR_DATA_U16;
         if (v & PHY_ANEG_ADV_10BASE_T_HD)
             cap |= LLDP_AUTONEG_CAP_10BASE_T;
@@ -678,20 +759,20 @@ static __xdata uint8_t *lldp_mac_phy(__xdata uint8_t *p, uint8_t port) __reentra
             cap |= LLDP_AUTONEG_CAP_100BASE_TX;
         if (v & PHY_ANEG_ADV_100BASE_TX_FD)
             cap |= LLDP_AUTONEG_CAP_100BASE_TX_FD;
-        phy_read(port, PHY_MMD31, PHY_MMD31_GBCR);
+        phy_read(port, LLDP_PHY_GBCR);
         if (SFR_DATA_U16 & PHY_GBCR_1000BASE_T_FD)
             cap |= LLDP_AUTONEG_CAP_1000BASE_T_FD;
-        phy_read(port, PHY_MMD31, PHY_MMD31_PHYSR);
+        LLDP_READ_STATUS(port);
         v = SFR_DATA_U16;
-        switch (PHYSR_SPEED(v)) {
+        switch (LLDP_SPEED(v)) {
         case PHYSR_SPEED_10M:
-            mau = (v & PHYSR_FULL_DUPLEX) ? LLDP_MAU_10BASE_T_FD : LLDP_MAU_10BASE_T_HD;
+            mau = (v & LLDP_FULL_DUPLEX) ? LLDP_MAU_10BASE_T_FD : LLDP_MAU_10BASE_T_HD;
             break;
         case PHYSR_SPEED_100M:
-            mau = (v & PHYSR_FULL_DUPLEX) ? LLDP_MAU_100BASE_TX_FD : LLDP_MAU_100BASE_TX_HD;
+            mau = (v & LLDP_FULL_DUPLEX) ? LLDP_MAU_100BASE_TX_FD : LLDP_MAU_100BASE_TX_HD;
             break;
         case PHYSR_SPEED_1000M:
-            mau = (v & PHYSR_FULL_DUPLEX) ? LLDP_MAU_1000BASE_T_FD : LLDP_MAU_1000BASE_T_HD;
+            mau = (v & LLDP_FULL_DUPLEX) ? LLDP_MAU_1000BASE_T_FD : LLDP_MAU_1000BASE_T_HD;
             break;
         }
     }
@@ -730,8 +811,7 @@ uint8_t lldp_port_org_tlvs(__xdata uint8_t *p, uint8_t port) __banked __reentran
     }
 
     if (lldp_tlv_mask & LLDP_TX_MFS) {
-        reg_read_m(RTL8373_REG_MAC_L2_PORT_MAX_LEN + ((uint16_t)port << 8));
-        v = SFR_DATA_U16 & PORT_MAX_LEN_MASK;
+        v = port_mtu_get(port);
         p = lldp_org_header(p, lldp_oui_8023, LLDP_8023_SUBTYPE_MAX_FRAME, 2);
         *p++ = v >> 8;
         *p++ = v & 0xff;

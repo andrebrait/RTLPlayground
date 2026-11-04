@@ -350,12 +350,14 @@ static bool dom_word(uint8_t slot, __xdata uint8_t offset, __xdata uint16_t *__x
 	return true;
 }
 
+#if SOC_FAMILY == RTL837X	/* the RTL836x has no verified SoC temperature sensor */
 /* SoC sensor, signed 1/128 degrees as temp_to_html() reads it. */
 static void soc_temp(void)
 {
 	reg_read_m(RTL837X_TM_RESULT);
 	end_sample_int((int32_t)(int16_t)(((uint16_t)sfr_data[2] << 8) | sfr_data[3]) * 1000 / 128, 3);
 }
+#endif
 
 static void add64(__xdata uint8_t *__xdata acc, __xdata const uint8_t *__xdata b)
 {
@@ -400,10 +402,8 @@ static void emit_row(void)
 		add_le32(sum.bytes, (__xdata uint8_t *)&ntp_state.at, true);
 		if (f->kind == K_TIME) {
 			/* Uptime seconds, read as ntp_uptime() does. */
-			reg_read_m(RTL837X_REG_SEC_COUNTER);
-			for (s = 0; s < 4; s++)
-				c.bytes[s] = sfr_data[3 - s];
-			add_le32(sum.bytes, c.bytes, false);
+			read_reg_timer(&v);
+			add_le32(sum.bytes, (__xdata uint8_t *)&v, false);
 		}
 		begin_sample();
 		put_char(' ');
@@ -429,6 +429,7 @@ static void emit_row(void)
 			end_sample_int((int32_t)(int16_t)w * 1000 / 256, 3);
 			return;
 		}
+#if SOC_FAMILY == RTL837X
 		begin_sample();
 		if (f->kind == K_CHIP) {
 			string_to_html("{chip=\"thermal_thermal_zone0\",chip_name=\"cpu_thermal\"} 1\n");
@@ -436,13 +437,16 @@ static void emit_row(void)
 		}
 		string_to_html("{chip=\"thermal_thermal_zone0\",sensor=\"temp1\"}");
 		soc_temp();
+#endif
 		return;
 	case K_ZONE:
+#if SOC_FAMILY == RTL837X
 		if (row)
 			return;
 		begin_sample();
 		string_to_html("{zone=\"0\",type=\"cpu-thermal\",policy=\"step_wise\",mode=\"enabled\"}");
 		soc_temp();
+#endif
 		return;
 	}
 

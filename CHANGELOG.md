@@ -14,6 +14,98 @@
     work, and the fitted T25S40 cannot be read in DIO mode on this board, so the
     target selects single-IO flash reads (`flash_sio`). New machine target
     `MACHINE_2G5F4_10G2_V1_01`, see `doc/devices/2G5F4_10G2_V1.01.md`.
+  - Experimental support for the TP-Link TL-SG108PE V5, an RTL8370N
+    based 8-port gigabit switch with PoE on ports 1-4 (`MACHINE=TPLINK_TL_SG108PE_V5`,
+    `RTL8370_DUMP=<flash dump>` for the PHY patch). The image sets up the switch,
+    PoE, the NIC and the web UI. Native hardware MIB counters feed the dashboard,
+    Statistics details and CLI: packet totals sum unicast/multicast/broadcast
+    counters with 64-bit carry; error columns specifically count TX excessive
+    collisions and RX FCS errors, not all errors. Details expose all 58 native
+    per-port counters (64-bit octets, otherwise 32-bit) without fabricated queue
+    counters. Busy/reset/selector failures and unsupported MAC occupancy are
+    unavailable (`null` in JSON, `-` in the UI, `n/a` in the CLI).
+    Native port controls support PHY enable/disable, auto-negotiation, advertised
+    10/100 Mbps modes and duplex, gigabit full duplex, and read-only `port show`.
+    Speed selection retains auto-negotiation and preserves pause/master settings.
+    The UI hides unsupported 2.5G controls; custom advertisements are
+    displayed without silently replacing them. Saved duplex changes retain the
+    speed command they modify.
+    EEE and flow control use the shared Ports page and `/status.json` fields:
+    EEE sets native PHY advertisement and MAC capability for 100M/1G, and
+    `port <port> fc on|off` sets symmetric pause, both reporting negotiated state;
+    the link partner's EEE abilities remain unavailable. EEE is on by default for
+    100M and 1G; a saved `eee off <port>` turns it off. The PoE switch sits in
+    the same row, shows n/a on ports without PoE and is sent only when it changes.
+    GPIO-backed PoE administration is available for physical ports 1-4 through
+    `poe port <port> on|off`, the Ports page, dashboard indicators and port details.
+    The UI distinguishes permission to supply PoE from actual power delivery,
+    which the switch cannot measure. PoE-only changes do not restart the
+    Ethernet PHY or touch the controller reset.
+    LLDP sends and receives on the RTL836x: the NIC is the switch's port 10, so
+    it is now the CPU port and per-port LLDP frames leave only their own port, and
+    the RX descriptor's ingress port tells which port a neighbour is on. A PD that
+    announces 802.3 Power via MDI or LLDP-MED power shows af or at, its class and
+    requested power on the LLDP page and in the port details. The optional
+    802.1 Port VLAN ID and 802.3 MAC/PHY Status, Link Aggregation and Maximum
+    Frame Size TLVs are sent; Link Aggregation reports whether the port is in a
+    static LAG. The maximum frame size warning on the LLDP page
+    works as on the RTL837x. LLDP is trapped to the NIC on chip port 10 while
+    enabled; `lldp off` restores forwarding between the front ports.
+    802.1Q VLANs work as on the RTL837x: the `vlan`, `pvid` and `ingress`
+    commands, `/vlan.json`, `/vlanlist` and the VLANs page. At boot every port is
+    an untagged member of VLAN 1 with PVID 1. The CPU port is an untagged member
+    of every VLAN, so management stays untagged in VLAN 1 and there is no
+    management VLAN setting. On the switch, moving front port 3 alone into
+    VLAN 10 stopped all VLAN 1 traffic to it while management stayed reachable
+    on port 8, and restoring VLAN 1 brought the traffic back.
+    Port isolation works as on the RTL837x: the `isolate` command,
+    `/isolation.json` and the Port isolation page.
+    The maximum frame size works with the `mtu` command, `/mtu.json` and the
+    Ports page, but the chip holds only two lengths (MAX_LEN_CFG0 and CFG1) for
+    all ports, so a third different length is refused.
+    Port mirroring works with the `mirror` command, `/mirror.json` and the
+    Mirroring page, but the chip has one source set for both directions, so the
+    mirrored ports must all be mirrored RX and TX, or all RX only, or all TX only.
+    Static link aggregation works with the `lag` and `laghash` commands,
+    `/lag.json` and the Link aggregation page, but the chip has two fixed groups,
+    ports 1-4 and ports 5-8, that share one hash, so `lag 1` and `lag 2` take
+    ports from their own range only and `laghash` sets the hash for both. A
+    member's PVID goes to the whole group.
+    LACP runs on the same two groups with `lag <n> lacp <port>...`, `lacp show`,
+    `lacp off`, `/lacp.json` and the LACP mode of the Link aggregation page.
+    The candidates must be ports of the group's own range, otherwise the
+    command is refused without changing the group's LACP or static settings. Only
+    ports that negotiated with one partner system become members in the chip, so
+    until a partner answers, they stay ordinary links; `/lag.json` shows the
+    members the chip holds, not the candidates. The LACPDUs reach the CPU by the
+    reserved multicast trap for `01:80:c2:00:00:02`.
+    STP/RSTP uses the native MSTI0 state fields, port status and dynamic-only FDB
+    flush. Per-port STP off keeps ordinary forwarding, including during startup.
+    A hardware test verified blocking, learning and timed forwarding on port 3
+    while excluded ports stayed forwarding; blocked-port BPDU delivery and
+    multi-bridge interoperability remain unverified.
+    L2 table, IGMP, bandwidth, storm control and
+    cable test are not ported: their commands are refused and their pages are
+    empty. Temperature remains unavailable without a verified sensor mapping.
+    The SNMP agent and Prometheus exporter build with `SNMP=1` and `PROMETHEUS=1`:
+    counters come from the native MIB, link, speed and admin state from the port
+    status and PHY registers. Interface errors are summed from native counters as
+    the Linux rtl8365mb driver does; there is no SoC temperature metric. A full
+    SNMP walk and repeated scrapes ran on the switch without a reset.
+    Hardware checks passed for standalone boot, DHCP, ping, web login, settings
+    persistence, web firmware updates and increasing native packet/byte counters
+    on the live network. Port 1 negotiated 10M full, 100M half/full and returned
+    to Auto after disable/enable; the uplink stayed at 1G. Pause advertisement
+    and negotiated off/symmetric/TX-only states were checked on hardware.
+    Build `32a33d74` also passed live PoE UI checks: toggling physical port 2
+    changed only GPIO 5, its link dropped, and 100M link plus incoming camera
+    traffic resumed after re-enabling it. Other PoE ports and the uplink were
+    unchanged; saved configuration and GPIO state were preserved.
+    EEE configuration readback passed on ports 1 and 2; neither negotiated LPI
+    with its peer. A later manual check showed EEE active on two ports, so
+    negotiation works with capable peers. One HTTP status request
+    timed out during pause renegotiation; the instrumented follow-up completed
+    normally. Browser DOM and action checks passed; screenshot capture timed out.
 
 - Web UI
   - Compress the embedded assets (minify + gzip) and switch to a single-page layout. #315
@@ -61,8 +153,23 @@
   - The chip port of each front-panel port moved from `logPort` in every `/status.json` entry to one
     `logPort` array in `/information.json`.
 
+- Time
+  - The uptime in seconds (sessions, NTP, the reset button) is counted in XDATA instead of
+    `RTL837X_REG_SEC_COUNTER`, so it no longer depends on SerDes 0 being on.
+
+- HTTP
+  - `/cmd_log_clear` answers with an empty 200 instead of the MTU table.
+
+- Serial
+  - Waiting for the UART to take a character gives up after a bounded time, and a
+    UART that timed out once is no longer written to, so a UART that does not run
+    cannot hang the firmware.
+
 ## Fixed
 
+- Experimental TL-SG108PE V5 console
+  - Execute the vendor settling delays before polling switch-register commands. Stop further
+    register and NIC DMA commands after a controller timeout, rather than using stale data.
 - Commands
   - Reject malformed mirror port tokens, invalid source suffixes, and extra arguments
     after `mirror status` or `mirror off` without changing the mirroring configuration.

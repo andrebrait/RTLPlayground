@@ -10,6 +10,9 @@
 #include "rtl837x_common.h"
 #include "rtl837x_sfr.h"
 #include "rtl837x_regs.h"
+#if SOC_FAMILY == RTL836X
+#include "rtl836x_regs.h"
+#endif
 #include "rtl837x_stp.h"
 #include "rtl837x_port.h"
 #include "rtl837x_trap.h"
@@ -455,6 +458,8 @@ static uint8_t stp_first(uint16_t mask) __reentrant
 }
 
 
+#if SOC_FAMILY == RTL837X
+#define STP_STATES_REG	RTL837X_MSTP_STATES
 static void stp_state_set(uint8_t port, uint8_t state) __reentrant
 {
 	stp_ss_mask = stp_members(port);
@@ -477,6 +482,48 @@ static uint8_t stp_state_get(uint8_t port) __reentrant
 	reg_read_m(RTL837X_MSTP_STATES);
 	return (sfr_data[3 - (stp_ss_i >> 2)] >> ((stp_ss_i << 1) & 0x7)) & 0b11;
 }
+#else
+/* MSTI 0, rtl8367c_setAsicSpanningTreeStatus: two bits per chip port, 0 disabled, 1 blocking,
+ * 2 learning, 3 forwarding. Chip ports 0-7, which are the logical ports 0-7, are in CTRL0;
+ * CTRL1 holds chip ports 8-10, and the NIC, the logical CPU_PORT, is chip port 10. The ports of
+ * an entity are changed in one write, and what is not theirs keeps its value. */
+#define STP_STATES_REG	RTL836X_REG_VLAN_MSTI0_CTRL0
+#define STP_MSTI_NIC	0x0030
+
+static __xdata uint16_t stp_msti;
+
+
+static void stp_state_set(uint8_t port, uint8_t state) __reentrant
+{
+	if (port >= STP_ENTITIES)
+		return;
+	stp_ss_mask = stp_members(port);
+	if (stp_ss_mask & PMASK_CPU)
+		reg_bits(RTL836X_REG_VLAN_MSTI0_CTRL1, STP_MSTI_NIC, state);
+	if (!(stp_ss_mask & 0x00ff))
+		return;
+	reg_read(RTL836X_REG_VLAN_MSTI0_CTRL0);
+	stp_msti = SFR_DATA_U16;
+	for (stp_ss_i = 0; stp_ss_i < 8; stp_ss_i++)
+		if ((stp_ss_mask >> stp_ss_i) & 1)
+			stp_msti = (stp_msti & ~((uint16_t)3 << (stp_ss_i << 1))) | ((uint16_t)state << (stp_ss_i << 1));
+	REG_SET(RTL836X_REG_VLAN_MSTI0_CTRL0, stp_msti);
+}
+
+
+static uint8_t stp_state_get(uint8_t port) __reentrant
+{
+	if (port >= STP_ENTITIES || stp_first(stp_members(port)) == 0xff)
+		return 0;
+	/* stp_first() left the entity's first port in stp_ss_i */
+	if (stp_ss_i == CPU_PORT) {
+		reg_read(RTL836X_REG_VLAN_MSTI0_CTRL1);
+		return (SFR_DATA_U16 >> 4) & 0b11;
+	}
+	reg_read(RTL836X_REG_VLAN_MSTI0_CTRL0);
+	return (SFR_DATA_U16 >> (stp_ss_i << 1)) & 0b11;
+}
+#endif
 
 
 uint8_t stp_port_state(uint8_t port) __banked
@@ -683,7 +730,10 @@ static void stp_reselect(void)
 			continue;
 		if (cmpBytes((__xdata uint8_t *)&stp_droot[stp_j], (__xdata uint8_t *)&stp_self, 8) >= 0)
 			continue;
-		stp_rpcost[stp_j] = stp_dcost[stp_j] + PCOST(stp_j);
+		/* Stage the sum in XRAM: combining both indexed operands spills four bytes to scarce IRAM. */
+		stp_cost_scratch = PCOST(stp_j);
+		stp_cost_scratch += stp_dcost[stp_j];
+		stp_rpcost[stp_j] = stp_cost_scratch;
 		if (stp_best == 0xff || stp_cmp_root_path(stp_j, stp_best) < 0)
 			stp_best = stp_j;
 	}
@@ -976,7 +1026,7 @@ static void stp_rapid_rx(uint8_t port) __reentrant
 
 void stp_in(void) __banked
 {
-	uint8_t port;
+	__xdata uint8_t port;
 
 	stp_rxbody = TRAP_RX_BODY();
 	if (uip_len < stp_rxbody + BPDU_LEN_MIN_BODY) {
@@ -1133,8 +1183,22 @@ void stp_lag_map(void) __banked
 
 static void stp_links_read(void) __reentrant
 {
+#if SOC_FAMILY == RTL837X
 	reg_read_m(RTL837X_REG_LINKS_STS);
 	stp_link_phys = (uint16_t)sfr_data[1] | ((uint16_t)sfr_data[2] << 8);
+#else
+	/* PORTn_STATUS: link bit 4, speed bits 1:0 (0 10M, 1 100M, 2 1G), full duplex bit 2. The
+	 * speed goes in the RTL837x's nibble, duplex as its bit 3, so PCOST() reads both alike. */
+	stp_link_phys = 0;
+	for (stp_k = MACHINE_MIN_PORT; stp_k <= MACHINE_MAX_PORT; stp_k++) {
+		reg_read(RTL836X_REG_PORT0_STATUS + stp_k);
+		if (!(SFR_DATA_U16 & PORT_STATUS_LINK))
+			continue;
+		stp_link_phys |= (uint16_t)1 << stp_k;
+		stp_pspeed[stp_k] = (uint8_t)(SFR_DATA_U16 & PORT_STATUS_SPEED_MASK)
+				  | ((SFR_DATA_U16 & PORT_STATUS_DUPLEX) ? 0x08 : 0);
+	}
+#endif
 	stp_link_now = 0;
 	for (stp_k = 0; stp_k < STP_ENTITIES; stp_k++) {
 		if (!stp_ent_active(stp_k) || stp_first(stp_members(stp_k) & stp_link_phys) == 0xff)
@@ -1199,6 +1263,7 @@ void stp_timers(void) __banked
 		 * yet losing a link is the most ordinary topology change there is.
 		 * Once per second is soon enough, and it keeps register reads out
 		 * of the 50 Hz tick. */
+#if SOC_FAMILY == RTL837X
 		reg_read_m(RTL837X_REG_LINKS);
 		for (stp_i = MACHINE_MIN_PORT; stp_i <= MACHINE_MAX_PORT; stp_i++) {
 			if (stp_i == 8)
@@ -1207,6 +1272,7 @@ void stp_timers(void) __banked
 				? (sfr_data[3 - ((stp_i & 7) >> 1)] >> 4)
 				: (sfr_data[3 - ((stp_i & 7) >> 1)] & 0xf);
 		}
+#endif
 		stp_lag_map();
 		stp_links_read();
 		if (stp_map_changed) {
@@ -1398,6 +1464,7 @@ void stp_defaults(void) __banked
 }
 
 
+#if SOC_FAMILY == RTL837X
 /*
  * Restore BPDU flooding when STP stops.
  */
@@ -1422,6 +1489,7 @@ static void stp_fdb_update(__xdata uint16_t pmask)
 		port_l2mc_set(0x00, stp_fdb_vid, pmask);
 	}
 }
+#endif
 
 
 static void stp_times_check(void) __reentrant
@@ -1461,9 +1529,16 @@ void stp_setup(void) __banked
 	stp_synced_root = 0xff;
 	stp_backup = 0;
 	stp_alt_agreed = 0;
+#if SOC_FAMILY == RTL837X
 	sfr_data[0] = sfr_data[1] = sfr_data[2] = sfr_data[3] = 0;
 	sfr_data[1] |= 0x0c; // Do not block the CPU port (bits 3:2 of byte 1 = port 9)
 	reg_write_m(RTL837X_MSTP_STATES);
+#else
+	/* The NIC stays forwarding. The front ports are not cleared first: stp_ent_reset() sets
+	 * each one once, a port that is off or admin edge straight to forwarding, so only a port
+	 * that takes part in the tree is ever blocked. */
+	stp_state_set(CPU_PORT, 0b11);
+#endif
 	stp_lag_map();
 	stp_links_read();
 	stp_link_prev = stp_link_now;
@@ -1471,37 +1546,47 @@ void stp_setup(void) __banked
 	for (stp_i = 0; stp_i < STP_ENTITIES; stp_i++)
 		stp_ent_reset(stp_i);
 
-	print_reg(RTL837X_MSTP_STATES); write_char('\n');
+	print_reg(STP_STATES_REG); write_char('\n');
 
-	trap_rma_set(RTL837X_RMA0_CONF, RTL837X_RMA_ACT_TRAP);
+	trap_rma_set(TRAP_RMA_STP, TRAP_ACT_TRAP);
 }
 
 
 void stp_off(void) __banked
 {
+#if SOC_FAMILY == RTL837X
 	sfr_data[0] = sfr_data[1] = sfr_data[2] = sfr_data[3] = 0;
 	for (stp_i = MACHINE_MIN_PORT; stp_i <= MACHINE_MAX_PORT; stp_i++)
 		sfr_data[3 - (stp_i >> 2)] |= (uint8_t)(0b11 << ((stp_i << 1) & 0x7));
+#endif
 	for (stp_i = 0; stp_i < STP_ENTITIES; stp_i++) {
 		stp_pflags[stp_i] &= ~(STP_PF_OPEREDGE | STP_PF_TRIPPED);
 		stp_loop_held[stp_i] = 0;
 		port_timers[stp_i] = 0;
 	}
+#if SOC_FAMILY == RTL837X
 	sfr_data[1] |= 0x0c; // Do not block the CPU port (bits 3:2 of byte 1 = port 9)
 	reg_write_m(RTL837X_MSTP_STATES);
 
 	if (stp_bpdu_filter) {
 		stp_fdb_update(PMASK_CPU);
-		trap_rma_set(RTL837X_RMA0_CONF, RTL837X_RMA_ACT_DROP);
+		trap_rma_set(TRAP_RMA_STP, TRAP_ACT_DROP);
 	} else {
 		/* Restore BPDU transparency: flood them again like an unmanaged switch. */
 		stp_fdb_update(PMASK_CPU | (machine_detected.isRTL8373 ? PMASK_9 : PMASK_6));
-		trap_rma_set(RTL837X_RMA0_CONF, RTL837X_RMA_ACT_FORWARD);
+		trap_rma_set(TRAP_RMA_STP, TRAP_ACT_FORWARD);
 	}
+#else
+	/* CTRL0 is chip ports 0-7, all the front ports: forwarding again, and the NIC with them.
+	 * The RMA action is matched on the destination address, so no L2 entry is needed. */
+	REG_SET(RTL836X_REG_VLAN_MSTI0_CTRL0, 0xffff);
+	stp_state_set(CPU_PORT, 0b11);
+	trap_rma_set(TRAP_RMA_STP, stp_bpdu_filter ? TRAP_ACT_DROP : TRAP_ACT_FORWARD);
+#endif
 }
 
 
-void stp_port_admin(uint8_t port, uint8_t on) __banked
+void stp_port_admin(uint8_t port, __xdata uint8_t on) __banked
 {
 	if (on) {
 		stp_state_set(port, 0b01);

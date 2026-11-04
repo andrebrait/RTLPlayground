@@ -40,6 +40,9 @@
 #include "machine.h"
 #include "rtl837x_leds.h"
 #include "phy.h"
+#ifdef MACHINE_POE_PORTS
+#include "poe.h"
+#endif
 
 #pragma codeseg BANK2
 #pragma constseg BANK2
@@ -507,16 +510,28 @@ void parse_mac_cmd(void)
 }
 
 
+/* LAG commands. The RTL836x has 2 fixed groups (ports 1-4 and 5-8) with one hash for both */
+#if SOC_FAMILY == RTL836X
+#define LAG_USAGE "lag (show | <1-2> (d | [lacp] <port>...))\n"
+#define LAG_PORTS_ERROR "LAG 1 takes ports 1-4, LAG 2 ports 5-8\n"
+#define LAGHASH_USAGE "laghash <1-2> [spa|smac|dmac|sip|dip|sport|dport]; one hash for both groups\n"
+#else
+#define LAG_USAGE "lag (show | <1-4> (d | [lacp] <port>...))\n"
+#define LAG_PORTS_ERROR "LAG ports not accepted\n"
+#define LAGHASH_USAGE "laghash <1-4> [smac|dmac|sip|dip|sport|dport]\n"
+#endif
+
 void parse_lag(void)
 {
-	__xdata uint8_t group;
+	/* xdata: internal RAM is full in RTL836x SNMP builds */
+	__xdata uint8_t group, i, j;
 	__xdata uint16_t members = 0;
 
 	if (cmd_compare(1, "show")) {
 		if (cmd_words_len != 2)
 			goto err;
 		print_string("LAG status:\n");
-		for (uint8_t i = 0; i < 4; i++) {
+		for (i = 0; i < PORT_LAG_COUNT; i++) {
 			write_char(' '); write_char('1' + i);
 			members = port_lag_members_get(i);
 			if (!members) {
@@ -524,16 +539,15 @@ void parse_lag(void)
 				continue;
 			}
 			print_string(" member ports: ");
-			for (uint8_t j = 0; j < 10; j++) {
+			for (j = 0; j < 10; j++) {
 				if (members & 1) {
 					print_phys_port(j);
 					write_char(' ');
 				}
 				members >>= 1;
 			}
-			print_string(" (hash: 0x"); 
-			reg_read_m(RTL837X_TRK_HASH_CTRL_BASE + (i << 2));
-			print_byte(sfr_data[3]);
+			print_string(" (hash: 0x");
+			print_byte(port_lag_hash_get(i));
 			print_string(")\n");
 		}
 		return;
@@ -547,7 +561,7 @@ void parse_lag(void)
 		goto err;
 
 	group = atoi_results_u8 - 1;
-	if (group > 3)
+	if (group >= PORT_LAG_COUNT)
 		goto err;
 
 	if (cmd_compare(2, "d")) {
@@ -558,7 +572,7 @@ void parse_lag(void)
 		return;
 	}
 
-	uint8_t w = 2;
+	__xdata uint8_t w = 2;
 	__xdata uint8_t lacp_mode = 0;
 	if (cmd_words_len > 2 && cmd_compare(2, "lacp")) {
 		lacp_mode = 1;
@@ -577,6 +591,10 @@ void parse_lag(void)
 
 		members |= ((uint16_t)1) << atoi_results_u8;
 	}
+	if (!port_lag_members_valid(group, members)) {
+		cmd_error(LAG_PORTS_ERROR);
+		return;
+	}
 	if (lacp_mode) {
 		lacp_lag_set(group, members);
 	} else {
@@ -585,23 +603,23 @@ void parse_lag(void)
 	}
 	return;
 err:
-	cmd_error("lag (show | <1-4> (d | [lacp] <port>...))\n");
+	cmd_error(LAG_USAGE);
 }
 
 
 void parse_lag_hash(void)
 {
+	__xdata uint8_t group, hash = 0, w = 2;
+
 	// Parse group, expect only one number 0-9.
 	if (cmd_words_len < 3 || atoi_byte(cmd_words_b[1]) != 1
 	    || !cmd_is_space_or_nul(cmd_words_b[1] + 1))
 		goto err;
 
-	uint8_t group = atoi_results_u8 - 1;
-	if (group > 3)
+	group = atoi_results_u8 - 1;
+	if (group >= PORT_LAG_COUNT)
 		goto err;
 
-	uint8_t hash = 0;
-	uint8_t w = 2;
 	while (w < cmd_words_len) {
 		if (cmd_compare(w, "spa"))
 			hash |= LAG_HASH_SOURCE_PORT_NUMBER;
@@ -625,10 +643,11 @@ void parse_lag_hash(void)
 		}
 		w++;
 	}
-	port_lag_hash_set(group, hash);
+	if (!port_lag_hash_set(group, hash))
+		goto err;
 	return;
 err:
-	cmd_error("laghash <1-4> [smac|dmac|sip|dip|sport|dport]\n");
+	cmd_error(LAGHASH_USAGE);
 }
 
 
@@ -648,6 +667,11 @@ void parse_vlan(void)
 		vlan_settings.vlan = atoi_results_short;
 
 		if (cmd_compare(2, "mgmt")) {
+#if SOC_FAMILY == RTL836X
+			/* shortcut: management stays untagged in VLAN 1, the CPU port's PVID; a tagged
+			 * management VLAN needs rtl836x_nic.c to keep and add the tag on RX and TX */
+			cmd_error("no management VLAN on the RTL836x\n");
+#else
 			if (management_vlan == vlan_settings.vlan) {
 				print_string("Management VLAN unchanged\n");
 				return;
@@ -661,6 +685,7 @@ void parse_vlan(void)
 				print_string("Management VLAN disabled\n");
 			else
 				print_string("Management VLAN set to "); print_short(management_vlan); write_char('\n');
+#endif
 			return;
 		}
 
@@ -738,7 +763,7 @@ err:
 
 void parse_isolate(void)
 {
-	uint16_t members = 0;
+	__xdata uint16_t members = 0;	/* xdata: internal RAM is full in RTL836x SNMP builds */
 
 	if (cmd_words_len < 3)
 		goto err;
@@ -747,13 +772,13 @@ void parse_isolate(void)
 
 	if (cmd_parse_port_separator(cmd_words_b[1]) == 0)
 		goto err;
-	uint8_t port_configured = atoi_results_u8;
+	__xdata uint8_t port_configured = atoi_results_u8;
 
 	print_byte(port_configured); write_char('\n');
 
 	if (cmd_compare(2, "show")) {
 		members = port_isolation_get(port_configured);
-		for (uint8_t i = 0; i < 10; i++) {
+		for (__xdata uint8_t i = 0; i < 10; i++) {
 			if (members & 1) {
 				print_phys_port(i);
 				write_char(' ');
@@ -764,18 +789,18 @@ void parse_isolate(void)
     }
 
 	if (cmd_compare(2, "off")) {
-		for (uint8_t i = MACHINE_MIN_PORT; i <= MACHINE_MAX_PORT; i++)
+		for (__xdata uint8_t i = MACHINE_MIN_PORT; i <= MACHINE_MAX_PORT; i++)
 			members |= ((uint16_t)1) << i;
 		members |= PMASK_CPU; // CPU-port
 		port_isolate(port_configured, members);
 		return;
 	}
 
-	uint8_t w = 2;
+	__xdata uint8_t w = 2;
 	while (w < cmd_words_len) {
 		if (cmd_parse_port_cpu_separator(cmd_words_b[w++]) == 0)
 			goto err;
-		uint8_t port = atoi_results_u8;
+		__xdata uint8_t port = atoi_results_u8;
 		members |= ((uint16_t)1) << port;
 	}
 
@@ -857,31 +882,28 @@ err:
 
 void parse_mirror(void)
 {
+	/* xdata: internal RAM is full in RTL836x SNMP builds */
 	__xdata uint8_t mirroring_port = 0;
 	__xdata uint16_t rx_pmask = 0;
 	__xdata uint16_t tx_pmask = 0;
 
 	if (cmd_compare(1, "status")) {
+		__xdata struct port_mirror m;
+
 		if (cmd_words_len != 2)
 			goto err;
-		reg_read_m(RTL837x_MIRROR_CTRL);
-		uint8_t mPort = sfr_data[3];
-		if (mPort & 1) {
+		port_mirror_get(&m);
+		if (m.enabled) {
 			print_string("Enabled: ");
 		} else {
 			print_string("NOT Enabled: ");
 		}
 		print_string("Mirroring port: ");
-		print_phys_port(mPort >> 1);
-		reg_read_m(RTL837x_MIRROR_CONF);
-		uint16_t m = sfr_data[0];
-		m = (m << 8) | sfr_data[1];
+		print_phys_port(m.port);
 		print_string(", Port mask RX: ");
-		print_short(m);
-		m = sfr_data[2];
-		m = (m << 8) | sfr_data[3];
+		print_short(m.rx_pmask);
 		print_string(", Port mask TX: ");
-		print_short(m);
+		print_short(m.tx_pmask);
 		write_char('\n');
 		return;
 	} else if (cmd_compare(1, "off")) {
@@ -891,19 +913,20 @@ void parse_mirror(void)
 		return;
 	}
 
-	if (cmd_words_len < 2)
+	if (cmd_words_len < 2) {
 		goto err;
+	}
 
 	// The first argument is the mirroring (monitor) port
-	uint8_t ret = cmd_parse_port_separator(cmd_words_b[1]);
+	__xdata uint8_t ret = cmd_parse_port_separator(cmd_words_b[1]);
 	if (ret == 0)
 		goto err;
 	mirroring_port = atoi_results_u8;
 
-	uint8_t w = 2;
-	uint8_t port;
+	__xdata uint8_t w = 2;
+	__xdata uint8_t port;
 	while (w < cmd_words_len) {
-		uint8_t idx = cmd_words_b[w++];
+		__xdata uint8_t idx = cmd_words_b[w++];
 		ret = cmd_parse_port(idx);
 		if (ret == 0)
 			goto err;
@@ -914,15 +937,17 @@ void parse_mirror(void)
 		ret = cmd_buffer[idx];
 		if (ret == 'r' || ret == 't')
 			idx++;
-		if (!cmd_is_space_or_nul(idx))
+		if (!cmd_is_space_or_nul(idx)) {
 			goto err;
-		uint16_t pmask = ((uint16_t)1) << port;
+		}
+		__xdata uint16_t pmask = ((uint16_t)1) << port;
 		if (ret != 't')
 			rx_pmask |= pmask;
 		if (ret != 'r')
 			tx_pmask |= pmask;
 	}
-	port_mirror_set(mirroring_port, rx_pmask, tx_pmask);
+	if (!port_mirror_set(mirroring_port, rx_pmask, tx_pmask))
+		cmd_error("Mirrored ports must share one direction and exclude the mirroring port\n");
 	return;
 
 err:
@@ -934,12 +959,18 @@ err:
 void parse_port(void)
 {
 	if (cmd_words_len < 3) {
-		cmd_error("\nUsage:" \
-					 "\nport <port> [show|on|off]" \
-					 "\nport <port> [10m|100m|1g|2g5|duplex] [half|full]" \
-					 "\nport <port> lldp [block|permit]" \
-					 "\nport <port> fc [on|off]" \
-					 "\nport <port> cabletest [show]" \
+		cmd_error("\nUsage:"
+					 "\nport <port> [show|on|off|auto]"
+#if SOC_FAMILY == RTL836X
+					 "\nport <port> [10m|100m] [half|full]"
+					 "\nport <port> 1g"
+					 "\nport <port> duplex [half|full]"
+#else
+					 "\nport <port> [10m|100m|1g|2g5|duplex] [half|full]"
+					 "\nport <port> cabletest [show]"
+#endif
+					 "\nport <port> lldp [block|permit]"
+					 "\nport <port> fc [on|off]"
 					 "\nport <port> name [custom port name]\n");
 		return;
 	}
@@ -953,6 +984,26 @@ void parse_port(void)
 	print_string("Logical Port: "); print_byte(phy_settings.port); write_char('\n');
 	phy_settings.duplex = PHY_DUPLEX_BOTH;
 
+#if SOC_FAMILY == RTL836X
+	if (cmd_compare(2, "10m") || cmd_compare(2, "100m")) {
+		if (cmd_words_len != 3 && !(cmd_words_len == 4 &&
+				(cmd_compare(3, "half") || cmd_compare(3, "full")))) {
+			cmd_error("Expected speed [half|full]\n");
+			return;
+		}
+	} else if (cmd_compare(2, "duplex")) {
+		if (cmd_words_len != 4 || !(cmd_compare(3, "half") || cmd_compare(3, "full"))) {
+			cmd_error("Expected duplex half|full\n");
+			return;
+		}
+	} else if ((cmd_compare(2, "show") || cmd_compare(2, "on") ||
+			cmd_compare(2, "off") || cmd_compare(2, "auto") || cmd_compare(2, "1g")) &&
+			cmd_words_len != 3) {
+		cmd_error("Unexpected port argument\n");
+		return;
+	}
+#endif
+
 	if (cmd_compare(2, "show")) {
 		print_string("Name: ");
 		print_string_x(port_names[phy_settings.port]);
@@ -961,7 +1012,9 @@ void parse_port(void)
 		} else {
 			write_char('\n');
 		}
+#if SOC_FAMILY == RTL837X
 		port_media_show(phy_settings.port);
+#endif
 	} else if (cmd_compare(2, "name")) {
 		uint8_t i = 0;
 		while ( cmd_words_len > 3 && (i < PORT_NAME_SIZE-1) && (cmd_buffer[cmd_words_b[3] + i] != NUL) ) {
@@ -989,6 +1042,7 @@ void parse_port(void)
 			port_pause_set(phy_settings.port, false);
 		else
 			cmd_error("port <port> fc on|off\n");
+#if SOC_FAMILY == RTL837X
 	} else if (machine.is_sfp[phy_settings.port]) {
 		print_string(" is SFP no PHY information available.\n");
 	} else if (cmd_compare(2, "cabletest")) {
@@ -996,6 +1050,7 @@ void parse_port(void)
 			cabletest_show();
 		else
 			cabletest_run();
+#endif
 	} else if (cmd_compare(2, "10m")) {
 		print_string(" 10M\n");
 		phy_settings.speed = PHY_SPEED_10M;
@@ -1012,6 +1067,7 @@ void parse_port(void)
 		else if (cmd_compare(3, "full"))
 			phy_settings.duplex = PHY_DUPLEX_FULL;
 		phy_set_speed();
+#if SOC_FAMILY == RTL837X
 	} else if (cmd_compare(2, "10g")) {
 		print_string(" 10G\n");
 		phy_settings.speed = PHY_SPEED_10G;
@@ -1024,6 +1080,7 @@ void parse_port(void)
 		print_string(" 2.5G\n");
 		phy_settings.speed = PHY_SPEED_2G5;
 		phy_set_speed();
+#endif
 	} else if (cmd_compare(2, "1g")) {
 		print_string(" 1G\n");
 		phy_settings.speed = PHY_SPEED_1G;
@@ -1055,12 +1112,11 @@ void parse_port(void)
 
 void parse_mtu(void)
 {
-	uint8_t p;
+	__xdata uint8_t p;
 
 	if (cmd_compare(1, "show")) {
 		for (p = MACHINE_MIN_PORT; p <= MACHINE_MAX_PORT; p++) {
-			reg_read_m(RTL8373_REG_MAC_L2_PORT_MAX_LEN + ((uint16_t) p << 8));
-			uint16_t mtu = SFR_DATA_U16 & 0x3fff;
+			__xdata uint16_t mtu = port_mtu_get(p);
 			print_string("Port "); print_phys_port(p);
 			write_char(' '); print_short(mtu); write_char('\n');
 		}
@@ -1079,8 +1135,10 @@ void parse_mtu(void)
 		cmd_error("MTU must be 64..16383\n");
 		return;
 	}
-	REG_WRITE(RTL8373_REG_MAC_L2_PORT_MAX_LEN + ((uint16_t) p << 8), (atoi_results_short >> 10) & 0xf, (atoi_results_short >> 2) & 0xff,
-		  ((atoi_results_short & 0x3) << 6) | ((atoi_results_short >> 8) & 0x3f), atoi_results_short & 0xff);
+	if (!port_mtu_set(p, atoi_results_short)) {
+		cmd_error("Only two different MTUs on this switch\n");
+		return;
+	}
 	write_char('\n');
 	return;
 
@@ -1089,6 +1147,8 @@ err:
 	return;
 }
 
+
+#if SOC_FAMILY == RTL837X	/* SFP commands */
 bool sfp_print_measurements(uint8_t sfp)
 {
 	if (!sfp_read_block(sfp, 92, 1))
@@ -1174,6 +1234,7 @@ void parse_sfp(void)
 err:
 	cmd_error("\nUsage:\n\tsfp\n\tsfp [1|2] [1g|2g5|10g]\n");
 }
+#endif
 
 
 void parse_regget(void)
@@ -1209,6 +1270,12 @@ err:
 }
 
 
+#if SOC_FAMILY == RTL836X
+#define REG_VALUE_BYTES 2	/* 16-bit registers */
+#else
+#define REG_VALUE_BYTES 4
+#endif
+
 void parse_regset(void)
 {
 	if (cmd_words_len != 3) {
@@ -1227,7 +1294,7 @@ void parse_regset(void)
 	}
 
 	hex_size = atoi_hex(cmd_words_b[2]);
-	if (hex_size == 0 || hex_size > 4) {
+	if (hex_size == 0 || hex_size > REG_VALUE_BYTES) {
 		goto err;
 	}
 
@@ -1255,6 +1322,7 @@ err:
 }
 
 
+#if SOC_FAMILY == RTL837X	/* temperature and SerDes commands */
 static void print_temperature(uint16_t reg)
 {
 	int16_t v;
@@ -1379,6 +1447,7 @@ err:
 	cmd_error("sdsset <sds-id> <hex:page> <hex:reg> <hex:val>\n");
 	return;
 }
+#endif
 
 
 void parse_phyget(void)
@@ -1492,12 +1561,16 @@ err:
 
 void parse_rnd(void)
 {
+#if SOC_FAMILY == RTL836X
+	get_random_32();
+#else
 	// In order to get a new random numner, this bit has to be set each time!
 	reg_bit_set(RTL837X_RLDP_RLPP, RLDP_RND_EN);
 	reg_read_m(RTL837X_RAND_NUM1);
 	print_byte(sfr_data[2]);
 	print_byte(sfr_data[3]);
 	reg_read_m(RTL837X_RAND_NUM0);
+#endif
 	print_byte(sfr_data[0]);
 	print_byte(sfr_data[1]);
 	print_byte(sfr_data[2]);
@@ -1530,7 +1603,15 @@ void parse_passwd(void)
 void parse_eee(void)
 {
 	__xdata int8_t port = -1;
+#if SOC_FAMILY == RTL836X
+	__xdata uint8_t speed = EEE_1000;
+	if (cmd_words_len < 2 || cmd_words_len > 4) {
+		cmd_error("eee [on|off|status] [port] [100m|1g]\n");
+		return;
+	}
+#else
 	__xdata uint8_t speed = EEE_2G5;
+#endif
 	__xdata uint8_t speed_word = 0;
 
 	if (machine.n_10g)
@@ -1554,16 +1635,29 @@ void parse_eee(void)
 			// Check if word 3 is a speed
 			if (cmd_words_len >= 4)
 				speed_word = 3;
+#if SOC_FAMILY == RTL836X
+		} else {
+			cmd_error("Invalid EEE port or speed\n");
+			return;
+#endif
 		}
 	}
+#if SOC_FAMILY == RTL836X
+	if (cmd_words_len == 4 && speed_word != 3) {
+		cmd_error("Unexpected EEE argument\n");
+		return;
+	}
+#endif
 	// Parse speed if found
 	if (speed_word > 0) {
 		if (cmd_compare(speed_word, "100m"))
 			speed = EEE_100;
 		else if (cmd_compare(speed_word, "1g"))
 			speed = EEE_1000;
+#if SOC_FAMILY == RTL837X
 		else if (cmd_compare(speed_word, "2g5"))
 			speed = EEE_2G5;
+#endif
 		else 
 		{
 			cmd_error("Speed word invalid, use: [100m|1g|2g5]\n");
@@ -1590,6 +1684,8 @@ void parse_eee(void)
 	}
 }
 
+
+#if SOC_FAMILY == RTL837X	/* bandwidth and storm commands */
 void parse_bw(void)
 {
 	if (cmd_words_len < 3) // Check for at least 3 arguments
@@ -1709,6 +1805,7 @@ void parse_storm(void)
 err:
 	print_string("usage: storm [<port> bcast|mcast|ucast|umcast <rate> pps|kbps|off]\n");
 }
+#endif
 
 static __code const char * __code const lldp_tlv_names[LLDP_TX_N] = { "portdesc", "syscap", "mgmt", "pvid", "macphy", "lag", "mfs" };
 
@@ -1873,6 +1970,7 @@ void cmd_tokenize(void) __banked
 	}
 }
 
+#if SOC_FAMILY == RTL837X
 // Print GPIO status
 void print_gpio_status(void) {
 	for (uint8_t idx = 0; idx < 2; idx++) {
@@ -1899,6 +1997,7 @@ void print_gpio_status(void) {
 		write_char('\n');
 	}
 }
+#endif
 
 // Show software version
 void print_sw_version(void) __banked {
@@ -1913,6 +2012,27 @@ void print_sw_version(void) __banked {
 
 
 // Identify command
+#ifdef MACHINE_POE_PORTS
+void parse_poe(void)
+{
+	if (cmd_words_len == 2 && cmd_compare(1, "status")) {
+		uint8_t enabled = poe_admin_mask();
+		for (uint8_t port = 1; port <= MACHINE_POE_PORTS; port++) {
+			print_string("PoE port "); itoa(port);
+			print_string(enabled & 1 ? ": permitted; power delivery unknown\n" : ": disabled\n");
+			enabled >>= 1;
+		}
+		return;
+	}
+	if (cmd_words_len == 4 && cmd_compare(1, "port") &&
+			cmd_parse_port_separator(cmd_words_b[2]) &&
+			(cmd_compare(3, "on") || cmd_compare(3, "off")) &&
+			poe_port_set(machine.log_to_phys_port[atoi_results_u8], cmd_compare(3, "on")))
+		return;
+	cmd_error("poe status | poe port <PoE port> on|off\n");
+}
+#endif
+
 void cmd_parser(void) __banked
 {
 #ifdef DEBUG
@@ -1940,10 +2060,16 @@ void cmd_parser(void) __banked
 			print_string("\nFACTORY RESET\n\n");
 			flash_default_config();
 			reset_chip();
+#if SOC_FAMILY == RTL837X	/* RTL836x: commands not ported yet are unknown */
 		} else if (cmd_compare(0, "sfp")) {
 			parse_sfp();
+#endif
 		} else if (cmd_compare(0, "stat")) {
 			port_stats_print();
+#ifdef MACHINE_POE_PORTS
+		} else if (cmd_compare(0, "poe")) {
+			parse_poe();
+#endif
 		} else if (cmd_compare(0, "flash") && cmd_words_len == 2) {
 			uint8_t c = cmd_buffer[cmd_words_b[1]];
 			if (c == 's') {
@@ -2034,6 +2160,7 @@ void cmd_parser(void) __banked
 				}
 			}
 			write_char('\n');
+#if SOC_FAMILY == RTL837X
 		} else if (cmd_compare(0, "l2")) {
 			if (cmd_compare(1, "forget"))
 				port_l2_forget();
@@ -2049,6 +2176,7 @@ void cmd_parser(void) __banked
 			else {
 				cmd_error("igmp on|off|show\n");
 			}
+#endif
 		} else if (cmd_compare(0, "mac")) {
 			parse_mac_cmd();
 #ifdef SNMP
@@ -2107,21 +2235,25 @@ void cmd_parser(void) __banked
 			parse_lag();
 		} else if (cmd_compare(0, "laghash")) {
 			parse_lag_hash();
+#if SOC_FAMILY == RTL837X
 		} else if (cmd_compare(0, "sds")) {
 			print_reg(RTL837X_REG_SDS_MODES);
 			write_char('\n');
 		} else if (cmd_compare(0, "gpio")) {
 			print_gpio_status();
+#endif
 		} else if (cmd_compare(0, "leds")) {
 			leds_dump();
 		} else if (cmd_compare(0, "regget")) {
 			parse_regget();
 		} else if (cmd_compare(0, "regset")) {
 			parse_regset();
+#if SOC_FAMILY == RTL837X
 		} else if (cmd_compare(0, "sdsget")) {
 			parse_sdsget();
 		} else if (cmd_compare(0, "sdsset")) {
 			parse_sdsset();
+#endif
 		} else if (cmd_compare(0, "phyget")) {
 			parse_phyget();
 		} else if (cmd_compare(0, "physet")) {
@@ -2132,12 +2264,14 @@ void cmd_parser(void) __banked
 			parse_passwd();
 		} else if (cmd_compare(0, "eee")) {
 			parse_eee();
+#if SOC_FAMILY == RTL837X
 		} else if (cmd_compare(0, "bw")) {
 			parse_bw();
 		} else if (cmd_compare(0, "temp")) {
 			parse_temp();
 		} else if (cmd_compare(0, "storm")) {
 			parse_storm();
+#endif
 		} else if (cmd_compare(0, "version")) {
 			print_sw_version();
 		} else if (cmd_compare(0, "history")) {
@@ -2167,13 +2301,13 @@ void cmd_parser(void) __banked
 			} else if (cmd_compare(1, "on")) {
 				print_string("LLDP enabled\n");
 				lldp_enabled = 1;
-				trap_rma_set(RTL837X_RMA0E_CONF, RTL837X_RMA_ACT_TRAP);
+				trap_rma_set(TRAP_RMA_LLDP, TRAP_ACT_TRAP);
 			} else if (cmd_compare(1, "off")) {
 				print_string("LLDP disabled\n");
 				if (lldp_enabled)
 					lldp_shutdown(lldp_logical_port_status);
 				lldp_enabled = 0;
-				trap_rma_set(RTL837X_RMA0E_CONF, RTL837X_RMA_ACT_FORWARD);
+				trap_rma_set(TRAP_RMA_LLDP, TRAP_ACT_FORWARD);
 				lldp_init();
 			} else if (cmd_compare(1, "show")) {
 				lldp_show();
@@ -2402,7 +2536,7 @@ void health_stack_paint(void) __banked
 }
 
 
-static void ph_line(__code const char *name, uint8_t id)
+static void ph_line(__code const char *name, __xdata uint8_t id)	/* id in xdata: internal RAM is full in SNMP builds */
 {
 	print_string(name);
 	print_string(" max ");
@@ -2416,11 +2550,11 @@ static void ph_line(__code const char *name, uint8_t id)
 void health_show(void) __banked
 {
 	__xdata uint8_t i;
+	__xdata uint32_t up;
 
 	print_string("up ");
-	reg_read_m(RTL837X_REG_SEC_COUNTER);
-	print_byte(sfr_data[0]); print_byte(sfr_data[1]);
-	print_byte(sfr_data[2]); print_byte(sfr_data[3]);
+	read_reg_timer(&up);
+	print_long(up);
 	print_string(" ticks ");
 	print_long(ticks);
 	print_string(" loops ");

@@ -33,6 +33,7 @@ void reg_read_m(uint16_t r){(void)r; SFR_DATA_U16=1522; memset(sfr_data,0,4);}
 void phy_read(uint8_t p,uint8_t d,uint16_t r){(void)p;(void)d;(void)r;SFR_DATA_U16=0;}
 uint16_t port_pvid_get(uint8_t p){return p+1;}
 uint8_t port_lag_of(uint8_t p){(void)p;return PORT_LAG_NONE;}
+uint16_t port_mtu_get(uint8_t p){(void)p;return 1522;}
 void tcpip_output(void){
     const uint8_t *f=uip_buf+RTL_FRAME_DESC_SIZE;
     unsigned mask=((unsigned)f[18]<<8)|f[19], p=mask==1?0:1;

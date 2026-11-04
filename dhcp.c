@@ -6,12 +6,13 @@
 // #define DEBUG
 
 #include <stdint.h>
-#include "rtl837x_sfr.h"
 #include "rtl837x_common.h"
 #include "dhcp.h"
 #include "uip.h"
 #include "uip/uip.h"
 #include "timer.h"
+
+extern __xdata uint8_t sfr_data[4];
 
 __xdata struct dhcp_state dhcp_state;
 static __xdata struct timer dhcp_second;
@@ -371,12 +372,11 @@ void dhcp_start(void) __banked
 		return;
 	}
 	get_random_32();
-	// Workaround SDCC bug 4070: dhcp_state.transaction_id = SFR_DATA_U32;
 	__xdata uint8_t * tid = (__xdata uint8_t *)&dhcp_state.transaction_id;
-	*tid++ = SFR_DATA_24;
-	*tid++ = SFR_DATA_16;
-	*tid++ = SFR_DATA_8;
-	*tid = SFR_DATA_0;
+	*tid++ = sfr_data[0];
+	*tid++ = sfr_data[1];
+	*tid++ = sfr_data[2];
+	*tid = sfr_data[3];
 	dhcp_state.state = DHCP_START;
 }
 

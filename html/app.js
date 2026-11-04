@@ -87,6 +87,14 @@ var LANG = {
         pt_conn: "Devices learned",
         pt_speed: "Speed",
         pt_mtu: "MTU",
+        pt_custom: "Custom advertisement",
+        pt_poe: "PoE",
+        poe_permitted: "PoE",
+        poe_disabled: "PoE disabled",
+        poe_delivery: "PoE power delivery",
+        poe_unknown: "Unavailable (no telemetry)",
+        poe_pd: "Powered device (LLDP)",
+        lldp_nb_poe: "PoE",
         pt_sfp_note: "SFP speed is set per slot and is not saved in the startup config.",
         pt_name_err: "Port name: 1-15 characters, no spaces",
         pt_mtu_err: "MTU must be 64-16383",
@@ -281,6 +289,9 @@ var LANG = {
         iso_legend: "The cell of the port itself is always allowed. A port number in red marks a port that is not fully open.",
         lag_hash: "Hash:",
         lag_note: "A LAG needs at least one member to be saved in the startup config; applying an empty group clears it.",
+        lag_fixed836: "This switch chip has two fixed LAGs, each taking ports from its own range only. Both use the same hash fields.",
+        lag_range836: "Ports {a} to {b}",
+        lag_hash836: "Hash fields, for both LAGs:",
         lacp_heading: "LACP (802.3ad)",
         lag_mode: "Mode",
         lag_static: "Static",
@@ -2255,6 +2266,12 @@ var rtlLang = (function() {
 })();
 
 function t(k, v) {
+    if (S && S.info.mib_family === "rtl836x") {
+        if (k === "st_txg") return "TX U/M/B packets";
+        if (k === "st_rxg") return "RX U/M/B packets";
+        if (k === "st_txb" || k === "d_txbad") return "TX excessive collisions";
+        if (k === "st_rxb" || k === "d_rxbad") return "RX FCS errors";
+    }
     var s = LANG[rtlLang][k] || LANG.en[k] || k;
     if (v)
         for (var x in v) s = s.split("{" + x + "}").join(v[x]);
@@ -2435,6 +2452,8 @@ var CONF_CMDS = [
     /^pvid\s+\d+\s+\d+$/m,
     /^ingress(\s+\d+[tua])+$/, /^ingress\s+[tua]$/,
     /^port\s+\d+\s+(10m|100m|1g|2g5|5g|10g|auto|on|off)(\s+(half|full))?$/,
+    /^port\s+\d+\s+duplex\s+(half|full)$/,
+    /^poe\s+port\s+\d+\s+(on|off)$/,
     /^port\s+\d+\s+name\s+\S+$/,
     /^port\s+\d+\s+lldp\s+(permit|block)+$/,
     /^eee\s+(on|off)(\s+\d+)?(\s+(100m|1g|2g5))?$/,
@@ -2764,8 +2783,8 @@ function pollStatus() {
             if (dt > 0.2) s.forEach(function(p, i) {
                 var q = S.prev[i];
                 if (q) S.rates[p.portNum - 1] = {
-                    tx: Number(BigInt(p.txG) - BigInt(q.txG)) / dt,
-                    rx: Number(BigInt(p.rxG) - BigInt(q.rxG)) / dt,
+                    tx: counterRate(p.txG, q.txG, dt),
+                    rx: counterRate(p.rxG, q.rxG, dt),
                 };
             });
         }
@@ -2791,6 +2810,15 @@ function fmtPps(v) {
     return Math.round(v);
 }
 
+function counterText(v) {
+    return v == null ? "-" : BigInt(v).toString();
+}
+
+function counterRate(v, previous, dt) {
+    if (v == null || previous == null || BigInt(v) < BigInt(previous)) return null;
+    return Number(BigInt(v) - BigInt(previous)) / dt;
+}
+
 function portLabel(p) {
     return p.name ? p.portNum + " " + p.name : String(p.portNum)
 }
@@ -2814,6 +2842,13 @@ function portTip(i) {
         capture: true
     })
 });
+
+// PoE mark: an outline bolt in the nav icons' 24-unit stroke style, drawn in the text colour
+var BOLT = '<svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round" style="vertical-align:-1px"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg> ';
+
+function poeLabel(p) {
+    return p.poe_admin == null ? "" : t(p.poe_admin ? "poe_permitted" : "poe_disabled");
+}
 
 function buildStrip() {
     var st = $("strip");
@@ -2844,6 +2879,7 @@ function buildStrip() {
                 id: "ppl" + i,
                 text: "..."
             }),
+            h("span", {class: "poe", id: "ppoeLabel" + i}),
         ]));
     })(i);
 }
@@ -2859,6 +2895,11 @@ function updateStrip() {
         el.classList.toggle("up", !!up);
         if (up) el.style.setProperty("--pc", "var(" + (LINKC[p.link] || "--s1000") + ")");
         lb.textContent = !p.enabled ? t("c_off") : (p.link > 0 ? LINKS[p.link] : t("c_down"));
+        var poe = $("ppoeLabel" + i);
+        if (poe) {
+            poe.hidden = p.poe_admin == null;
+            poe.innerHTML = (p.poe_admin ? BOLT : "") + esc(poeLabel(p));
+        }
     });
     if (S.tip != null) portTip(S.tip);
     if (S.detail != null) {
@@ -2908,10 +2949,17 @@ function portRows(p) {
     ];
     if (p.name) rows.push([t("c_name"), p.name]);
     rows.push([t("p_state"), !p.enabled ? t("p_disabled") : (p.link > 0 ? t("p_up") + " " + LINKS[p.link] : t("c_down"))]);
-    rows.push([t("st_txg"), BigInt(p.txG) + " " + t("p_pkts")]);
-    rows.push([t("st_txb"), BigInt(p.txB) + " " + t("p_pkts")]);
-    rows.push([t("st_rxg"), BigInt(p.rxG) + " " + t("p_pkts")]);
-    rows.push([t("st_rxb"), BigInt(p.rxB) + " " + t("p_pkts")]);
+    rows.push([t("st_txg"), counterText(p.txG) + " " + t("p_pkts")]);
+    rows.push([t("st_txb"), counterText(p.txB) + " " + t("p_pkts")]);
+    rows.push([t("st_rxg"), counterText(p.rxG) + " " + t("p_pkts")]);
+    rows.push([t("st_rxb"), counterText(p.rxB) + " " + t("p_pkts")]);
+    if (p.poe_admin != null) {
+        rows.push([t("pt_poe"), poeLabel(p)]);
+        rows.push([t("poe_delivery"), t("poe_unknown")]);
+    }
+    (S.lldpNb || []).forEach(function(n) {
+        if (n.port === p.portNum && n.poe) rows.push([t("poe_pd"), lldpPoe(n)]);
+    });
     if (p.isSFP) {
         if (p.sfp_vendor) rows.push([t("p_module"), [p.sfp_vendor, p.sfp_model, p.sfp_serial].filter(Boolean).join(" / ")]);
         var ext = p.sfp_options & 0x40;
@@ -2963,6 +3011,9 @@ function portDetail(i) {
     if (!S.ports[i]) return;
     modal(t("c_port") + " " + (i + 1), detailTable(S.ports[i]));
     S.detail = i;
+    getJSON("/lldp.json").then(function(s) {
+        S.lldpNb = s.neighbors || []
+    }).catch(function() {});
 }
 
 function renderInfo() {
@@ -3004,7 +3055,9 @@ function renderInfo() {
 
 function pollInfo() {
     return getJSON("/information.json").then(function(j) {
+        var familyChanged = S.info.mib_family !== j.mib_family;
         S.info = j;
+        if (familyChanged) i18nApply();
         (j.logPort || []).forEach(function(l, i) {
             S.physToLog[i] = l;
             S.logToPhys[l] = i + 1
@@ -3032,8 +3085,8 @@ function dashStatus() {
         r.cells[1].innerHTML = linkBadge(p);
         r.cells[2].textContent = rt ? fmtPps(rt.tx) : "-";
         r.cells[3].textContent = rt ? fmtPps(rt.rx) : "-";
-        r.cells[4].textContent = BigInt(p.txB).toString();
-        r.cells[5].textContent = BigInt(p.rxB).toString();
+        r.cells[4].textContent = counterText(p.txB);
+        r.cells[5].textContent = counterText(p.rxB);
     });
 }
 tabHooks.dash = {
@@ -3251,10 +3304,11 @@ function portCfg(p) {
     return {
         en: !!p.enabled,
         name: p.name || "",
-        spd: p.isSFP ? null : (ADVSEL[parseInt(p.adv, 2)] || "auto"),
+        spd: p.isSFP ? null : (ADVSEL[parseInt(p.adv, 2)] || (S.info.mib_family === "rtl836x" ? "custom" : "auto")),
         mtu: S.mtu[i] != null ? String(S.mtu[i]) : "",
         fc: !!(p.fc & FC_ADV),
-        eee: !!(p.eee & EEE_ADV)
+        eee: !!(p.eee & EEE_ADV),
+        poe: p.poe_admin == null ? null : !!p.poe_admin
     };
 }
 
@@ -3265,7 +3319,8 @@ function readCtl(r) {
         spd: r.spd.value,
         mtu: r.mtu.value.trim(),
         fc: r.fc ? r.fc.checked : false,
-        eee: r.eee ? r.eee.checked : false
+        eee: r.eee ? r.eee.checked : false,
+        poe: r.poe ? r.poe.checked : null
     };
 }
 
@@ -3279,6 +3334,10 @@ function buildPorts() {
     var tb = $("ptable").tBodies[0];
     if (tb.rows.length || !S.n) return;
     fitBadges();
+    var rtl836x = S.info.mib_family === "rtl836x";
+    var ph = $("ptpoe");
+    ph.hidden = !S.info.poe_ports;
+    ph.innerHTML = BOLT + esc(t("pt_poe"));
     PT.rows = [];
     PT.orig = [];
     S.ports.forEach(function(p) {
@@ -3296,7 +3355,13 @@ function buildPorts() {
         r.spd = h("select", {
             class: "in"
         });
+        if (rtl836x) r.spd.appendChild(h("option", {
+            value: "custom",
+            text: t("pt_custom"),
+            disabled: true
+        }));
         (p.isSFP ? SFPRATES : SPEEDS).forEach(function(o) {
+            if (rtl836x && o[0] === "2g5") return;
             r.spd.appendChild(h("option", {
                 value: o[0],
                 text: speedLabel(o[1])
@@ -3310,6 +3375,7 @@ function buildPorts() {
         });
         r.fc = p.isSFP ? null : swCtl();
         r.eee = p.isSFP ? null : swCtl();
+        r.poe = p.poe_admin == null ? null : swCtl();
         var tr = r.row = tb.insertRow();
         var pc = cellL(tr, "c_port");
         pc.className = "pn";
@@ -3326,7 +3392,8 @@ function buildPorts() {
             return linkInfo(S.ports[i])
         })]));
         cellL(tr, "pt_speed").appendChild(r.spd);
-        cellL(tr, "pt_mtu").appendChild(r.mtu);
+        var mc = cellL(tr, "pt_mtu");
+        mc.appendChild(r.mtu);
         featCell(cellL(tr, "pt_fc"), "pff", r.fc, infoBtn(pTitle(p, t("pt_fc")), function() {
             var q = S.ports[i];
             return pairInfo(q, flagList(q.fc, ["Pause", "Asym"]), flagList(q.fc >> 2, ["Pause", "Asym"]))
@@ -3335,14 +3402,24 @@ function buildPorts() {
             var q = S.ports[i];
             return pairInfo(q, flagList(q.eee, EEE_SPEEDS), flagList(q.eee >> 5, EEE_SPEEDS))
         }));
-        [r.en, r.name, r.spd, r.mtu, r.fc, r.eee].forEach(function(c) {
+        var pc2 = cellL(tr, "pt_poe");
+        pc2.hidden = !S.info.poe_ports;
+        // Ports without PoE get n/a, as SFP ports do for flow control and EEE
+        pc2.appendChild(r.poe ? r.poe.parentNode : h("span", {
+            class: "na",
+            html: badge(t("e_na"))
+        }));
+        // The narrow layout labels each cell from CSS, which cannot draw the bolt: give PoE a real label
+        pc2.className = "ppoe";
+        pc2.insertAdjacentHTML("afterbegin", '<span class="plb">' + BOLT + esc(t("pt_poe")) + "</span>");
+        [r.en, r.name, r.spd, r.mtu, r.fc, r.eee, r.poe].forEach(function(c) {
             if (c) {
                 c.addEventListener("input", ptUpdate);
                 c.addEventListener("change", ptUpdate)
             }
         });
         var cfg = portCfg(p);
-        ["en", "name", "spd", "mtu", "fc", "eee"].forEach(function(k) {
+        ["en", "name", "spd", "mtu", "fc", "eee", "poe"].forEach(function(k) {
             setCtl(r, k, cfg[k])
         });
         PT.rows[i] = r;
@@ -3366,6 +3443,23 @@ function loadMtu() {
         });
         portsSync();
     });
+}
+// Controls the user has not touched follow the switch; edited ones keep the draft
+function portsSync() {
+    PT.rows.forEach(function(r, i) {
+        var p = S.ports[i],
+            cfg = portCfg(p),
+            cur = readCtl(r),
+            o = PT.orig[i];
+        r.p = p;
+        ["en", "name", "spd", "mtu", "fc", "eee", "poe"].forEach(function(k) {
+            if (cfg[k] == null || cur[k] !== o[k]) return;
+            setCtl(r, k, cfg[k]);
+            o[k] = readCtl(r)[k];
+        });
+        portsSync();
+    });
+    ptUpdate();
 }
 // Controls the user has not touched follow the switch; edited ones keep the draft
 function portsSync() {
@@ -3407,7 +3501,9 @@ function portCmds(r, s, o) {
     if (s.en) {
         // Setting the speed restarts autonegotiation, so only when it changed or the port comes back on
         if (!p.isSFP) {
-            if (s.spd !== o.spd || !p.enabled) c.push("port " + n + " " + s.spd);
+            if (s.spd === "custom") {
+                if (!p.enabled) c.push("port " + n + " on");
+            } else if (s.spd !== o.spd || !p.enabled) c.push("port " + n + " " + s.spd);
         } else {
             if (!p.enabled) c.push("port " + n + " on");
             // The SFP rate cannot be read back, so it is only sent when it was changed
@@ -3419,6 +3515,8 @@ function portCmds(r, s, o) {
         c.push("port " + n + " fc " + (s.fc ? "on" : "off"));
         c.push("eee " + (s.eee ? "on" : "off") + " " + n)
     }
+    // PoE only when it changed: the controller restarts detection on the port
+    if (s.poe != null && s.poe !== o.poe) c.push("poe port " + n + " " + (s.poe ? "on" : "off"));
     return c;
 }
 
@@ -3428,7 +3526,7 @@ function ptChanged() {
         var a = PT.orig[i],
             b = readCtl(r),
             ch = [];
-        ["en", "name", "spd", "mtu", "fc", "eee"].forEach(function(k) {
+        ["en", "name", "spd", "mtu", "fc", "eee", "poe"].forEach(function(k) {
             if (a[k] !== b[k]) ch.push(k)
         });
         if (ch.length) out.push({
@@ -3446,7 +3544,7 @@ function ptUpdate() {
         box = $("ppending");
     PT.rows.forEach(function(r) {
         r.row.classList.remove("chg");
-        ["en", "name", "spd", "mtu", "fc", "eee"].forEach(function(k) {
+        ["en", "name", "spd", "mtu", "fc", "eee", "poe"].forEach(function(k) {
             if (r[k])(r[k].type === "checkbox" ? r[k].nextSibling : r[k]).classList.remove("chg")
         });
     });
@@ -3905,8 +4003,46 @@ var MIB = [
     "TX Good Counter PHY", 8, "", 0, "RX Good Counter PHY", 8, "", 0,
     "RX Error Counter PHY", 4, "TX Error Counter PHY", 4,
 ];
+/* Native per-port SRAM order, one counter per JSON entry (width in bytes). */
+var MIB836X = [
+    "Interface in Octets", 8, "802.3 FCS errors", 4,
+    "802.3 Symbol errors", 4, "802.3 In Pause frames", 4,
+    "802.3 Control in unknown opcodes", 4, "Ether fragments", 4,
+    "Ether jabbers", 4, "Interface in Unicast Pkts", 4,
+    "Ether drop events", 4, "Interface in Multicast Pkts", 4,
+    "Interface in Broadcast Pkts", 4, "In MLD checksum errors", 4,
+    "In IGMP checksum errors", 4, "In MLD specific query", 4,
+    "In MLD general query", 4, "In IGMP specific query", 4,
+    "In IGMP general query", 4, "In MLD leaves", 4, "In IGMP leaves", 4,
+    "Ether RX/TX Octets", 8, "Ether RX/TX undersize Pkts", 4,
+    "Ether RX/TX oversize Pkts", 4, "Ether RX/TX Pkts 64 Octets", 4,
+    "Ether RX/TX Pkts 65-127 Octets", 4, "Ether RX/TX Pkts 128-255 Octets", 4,
+    "Ether RX/TX Pkts 256-511 Octets", 4, "Ether RX/TX Pkts 512-1023 Octets", 4,
+    "Ether RX/TX Pkts 1024-1518 Octets", 4, "Interface out Octets", 8,
+    "802.3 Single collision frames", 4, "802.3 Multi collision frames", 4,
+    "802.3 Deferred transmissions", 4, "802.3 Late collisions", 4,
+    "Ether collisions", 4, "802.3 Excessive collisions", 4,
+    "802.3 Out Pause frames", 4, "Interface out discards", 4,
+    "802.1d Tp Port in discards", 4, "Interface out Unicast Pkts", 4,
+    "Interface out Multicast Pkts", 4, "Interface out Broadcast Pkts", 4,
+    "Out OAMPDU Pkts", 4, "In OAMPDU Pkts", 4,
+    "In IGMP joins success", 4, "In IGMP joins fail", 4,
+    "In MLD joins success", 4, "In MLD joins fail", 4,
+    "In report suppression drops", 4, "In leave suppression drops", 4,
+    "Out IGMP reports", 4, "Out IGMP leaves", 4,
+    "Out IGMP general query", 4, "Out IGMP specific query", 4,
+    "Out MLD reports", 4, "Out MLD leaves", 4,
+    "Out MLD general query", 4, "Out MLD specific query", 4,
+    "In known multicast Pkts", 4
+];
 /* counters.json returns 64-bit hex words; two 32-bit counters share one word */
 function decodeCounters(s) {
+    if (S.info.mib_family === "rtl836x") {
+        if (s.length !== MIB836X.length / 2) throw new Error("Invalid native MIB array");
+        return s.map(function(v, i) {
+            return [MIB836X[2 * i], v == null ? null : BigInt(v)];
+        });
+    }
     var out = [];
     for (var i = 0; i < MIB.length; i += 4) {
         if (MIB[i] === "" && MIB[i + 1] === 8) continue;
@@ -3942,7 +4078,9 @@ function showCounters(i) {
     body.appendChild(wrap);
 
     function load() {
-        return getJSON("/counters.json?port=" + (i + 1)).then(function(s) {
+        return (S.info.hw_ver ? Promise.resolve() : pollInfo()).then(function() {
+            return getJSON("/counters.json?port=" + (i + 1));
+        }).then(function(s) {
             var rows = decodeCounters(s);
             var tb = h("table", {
                 class: "t"
@@ -3959,11 +4097,13 @@ function showCounters(i) {
                     text: r[0]
                 }), h("td", {
                     class: "num mono",
-                    text: r[1].toString()
+                    text: r[1] == null ? "-" : r[1].toString()
                 })]));
             });
             wrap.innerHTML = "";
             wrap.appendChild(tb);
+        }).catch(function() {
+            wrap.textContent = t("st_fail");
         });
     }
     nz.addEventListener("change", load);
@@ -3972,9 +4112,7 @@ function showCounters(i) {
         return auto.checked ? load() : Promise.resolve()
     }, 2500);
     ctrPoll.start();
-    load().catch(function() {
-        wrap.textContent = t("st_fail")
-    });
+    load();
     modal(t("c_port") + " " + (i + 1) + ": " + t("st_counters"), body,
         [h("button", {
                 class: "ctl",
@@ -4016,11 +4154,11 @@ function statsStatus() {
         r.cells[0].textContent = p.portNum;
         r.cells[1].textContent = p.name || "";
         r.cells[2].innerHTML = linkBadge(p);
-        r.cells[3].textContent = BigInt(p.txG).toString();
-        r.cells[4].textContent = BigInt(p.txB).toString();
-        r.cells[5].textContent = BigInt(p.rxG).toString();
-        r.cells[6].textContent = BigInt(p.rxB).toString();
-        r.cells[7].textContent = parseInt(p.macs, 16) & 0x1fff;
+        r.cells[3].textContent = counterText(p.txG);
+        r.cells[4].textContent = counterText(p.txB);
+        r.cells[5].textContent = counterText(p.rxG);
+        r.cells[6].textContent = counterText(p.rxB);
+        r.cells[7].textContent = p.macs == null ? "-" : parseInt(p.macs, 16) & 0x1fff;
     });
 }
 tabHooks.stats = {
@@ -4168,6 +4306,8 @@ function vlanRefresh() {
 function buildVlanEdit() {
     var tb = $("vedit").tBodies[0];
     if (tb.rows.length || !S.n) return;
+    /* the RTL836x keeps management untagged in VLAN 1 */
+    $("vmgmtpromote").closest("div").hidden = S.info.mib_family === "rtl836x";
     var hd = tb.insertRow();
     hd.insertCell().className = "mut";
     var rN = tb.insertRow();
@@ -4772,9 +4912,46 @@ tabHooks.isolate = {
 var HASHF = ["spa", "smac", "dmac", "sip", "dip", "sport", "dport"];
 
 function buildLag() {
-    var w = $("lagwrap");
+    var w = $("lagwrap"),
+        fixed = S.info.mib_family === "rtl836x";
     if (w.children.length) return;
-    for (var g = 1; g <= 4; g++)(function(g) {
+    if (fixed) {
+        var hc = h("div", {
+            class: "card",
+            style: "grid-column:1/-1",
+            id: "lghcard"
+        });
+        hc.appendChild(h("p", {
+            class: "small mut",
+            style: "margin-bottom:10px",
+            text: t("lag_fixed836")
+        }));
+        var hrow = h("div", {
+            style: "display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px",
+            class: "small"
+        });
+        hrow.appendChild(h("span", {
+            class: "mut",
+            text: t("lag_hash836")
+        }));
+        HASHF.forEach(function(f) {
+            hrow.appendChild(h("label", null, [h("input", {
+                type: "checkbox",
+                id: "lgh" + f
+            }), document.createTextNode(" " + f + " ")]));
+        });
+        hc.appendChild(hrow);
+        hc.appendChild(h("button", {
+            class: "ctl pri",
+            text: t("c_apply"),
+            onclick: lagHashApply
+        }));
+        hc.addEventListener("change", function() {
+            hc.dataset.dirty = "1"
+        });
+        w.appendChild(hc);
+    }
+    for (var g = 1; g <= (fixed ? 2 : 4); g++)(function(g) {
         var card = h("div", {
             class: "card"
         });
@@ -4814,28 +4991,45 @@ function buildLag() {
         var pr = h("div", {
             style: "display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px"
         });
-        for (var p = 1; p <= S.n; p++) pr.appendChild(h("label", null, [
-            h("input", {
-                type: "checkbox",
-                id: "lg" + g + "p" + p
-            }), document.createTextNode(" " + p + " "),
-        ]));
+        var lo = 0,
+            hi = 0;
+        for (var p = 1; p <= S.n; p++) {
+            if (fixed && (S.physToLog[p - 1] >> 2) !== g - 1) continue;
+            lo = lo || p;
+            hi = p;
+            pr.appendChild(h("label", null, [
+                h("input", {
+                    type: "checkbox",
+                    id: "lg" + g + "p" + p
+                }), document.createTextNode(" " + p + " "),
+            ]));
+        }
+        if (fixed) card.insertBefore(h("p", {
+            class: "small mut",
+            style: "margin-bottom:10px",
+            text: t("lag_range836", {
+                a: lo,
+                b: hi
+            })
+        }), mr);
         card.appendChild(pr);
-        var hr = h("div", {
-            style: "display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px",
-            class: "small"
-        });
-        hr.appendChild(h("span", {
-            class: "mut",
-            text: t("lag_hash")
-        }));
-        HASHF.forEach(function(f) {
-            hr.appendChild(h("label", null, [h("input", {
-                type: "checkbox",
-                id: "lg" + g + "h" + f
-            }), document.createTextNode(" " + f + " ")]));
-        });
-        card.appendChild(hr);
+        if (!fixed) {
+            var hr = h("div", {
+                style: "display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px",
+                class: "small"
+            });
+            hr.appendChild(h("span", {
+                class: "mut",
+                text: t("lag_hash")
+            }));
+            HASHF.forEach(function(f) {
+                hr.appendChild(h("label", null, [h("input", {
+                    type: "checkbox",
+                    id: "lg" + g + "h" + f
+                }), document.createTextNode(" " + f + " ")]));
+            });
+            card.appendChild(hr);
+        }
         card.appendChild(h("button", {
             class: "ctl pri",
             text: t("c_apply"),
@@ -4865,7 +5059,7 @@ function lagLoad() {
         c.lags.forEach(function(lg, i) {
             var g = i + 1;
             lacpCfg[g] = parseInt(lg.cfg, 16);
-            if ($("lgm" + g).closest(".card").dataset.dirty) return;
+            if (!$("lgm" + g) || $("lgm" + g).closest(".card").dataset.dirty) return;
             $("lgm" + g).value = lacpCfg[g] ? "lacp" : "static";
             $("lgs" + g).textContent = lacpCfg[g] ? "LACP: " + t("lacp_agg") + " " + (lg.aggValid ? lg.agg : "(" + t("lacp_neg") + ")") + ", " + t("lacp_members") + " " + maskPorts(parseInt(lg.members, 16)) : "";
         });
@@ -4880,13 +5074,18 @@ function lagLoad() {
     }).then(function(s) {
         s.forEach(function(l) {
             var g = l.lagNum + 1;
-            if ($("lgm" + g).closest(".card").dataset.dirty) return;
+            if (!$("lgm" + g) || $("lgm" + g).closest(".card").dataset.dirty) return;
             var members = lacpCfg[g] || parseInt(l.members, 2);
-            for (var p = 1; p <= S.n; p++)
-                $("lg" + g + "p" + p).checked = !!((members >> S.physToLog[p - 1]) & 1);
-            var hash = parseInt(l.hash, 16);
+            for (var p = 1; p <= S.n; p++) {
+                var cb = $("lg" + g + "p" + p);
+                if (cb) cb.checked = !!((members >> S.physToLog[p - 1]) & 1);
+            }
+            var hash = parseInt(l.hash, 16),
+                fixed = !!$("lghcard"),
+                hp = fixed ? "lgh" : "lg" + g + "h";
+            if (fixed && $("lghcard").dataset.dirty) return;
             HASHF.forEach(function(f, i) {
-                $("lg" + g + "h" + f).checked = !!((hash >> i) & 1)
+                $(hp + f).checked = !!((hash >> i) & 1)
             });
         });
     });
@@ -4898,11 +5097,13 @@ function lagApply(g) {
         n = 0,
         pre = [];
     delete $("lgm" + g).closest(".card").dataset.dirty;
-    for (var p = 1; p <= S.n; p++)
-        if ($("lg" + g + "p" + p).checked) {
+    for (var p = 1; p <= S.n; p++) {
+        var cb = $("lg" + g + "p" + p); /* a fixed-group chip has only its own range */
+        if (cb && cb.checked) {
             cmd += " " + p;
             n++;
         }
+    }
     if (!lacp && lacpCfg[g]) pre.push("lag " + g + " lacp off");
     if (lacp && !n) cmd = "lag " + g + " lacp off";
     if (!n && !lacp) {
@@ -4913,17 +5114,29 @@ function lagApply(g) {
         });
         return;
     }
-    var hcmd = "laghash " + g,
-        nh = 0;
-    HASHF.forEach(function(f) {
-        if ($("lg" + g + "h" + f).checked) {
-            hcmd += " " + f;
-            nh++;
-        }
-    });
+    if (!$("lghcard")) {
+        var hcmd = "laghash " + g,
+            nh = 0;
+        HASHF.forEach(function(f) {
+            if ($("lg" + g + "h" + f).checked) {
+                hcmd += " " + f;
+                nh++;
+            }
+        });
+    }
     var cmds = pre.concat([cmd]);
     if (nh) cmds.push(hcmd);
     postCmds(cmds).then(lagLoad).catch(function() {});
+}
+
+/* The RTL836x hash is one for both groups: laghash takes any group number */
+function lagHashApply() {
+    var cmd = "laghash 1";
+    delete $("lghcard").dataset.dirty;
+    HASHF.forEach(function(f) {
+        if ($("lgh" + f).checked) cmd += " " + f;
+    });
+    (cmd === "laghash 1" ? lagLoad() : postCmds([cmd]).then(lagLoad)).catch(function() {});
 }
 var lagPoller = new Poller(function() {
     return lagLoad().catch(function() {})
@@ -5059,7 +5272,7 @@ function lldpWarning(cell, n, bit, key, s) {
                         var port = s.portStatus.filter(function(p) {
                             return p.portNum === n.port
                         })[0];
-                        if (port && data.length === 4 && data.every(function(g) {
+                        if (port && data.length === (S.info.mib_family === "rtl836x" ? 2 : 4) && data.every(function(g) {
                                 return /^[01]{16}$/.test(g.members)
                             })) {
                             var group = data.filter(function(g) {
@@ -5078,6 +5291,14 @@ function lldpWarning(cell, n, bit, key, s) {
             modal(t(key), body);
         }
     }));
+}
+
+function lldpPoe(n) {
+    if (!n.poe) return "";
+    var parts = ["802.3" + n.poe];
+    if (n.poeClass != null) parts.push("class " + n.poeClass);
+    if (n.poeReq != null) parts.push((n.poeReq / 10).toFixed(1) + " W");
+    return parts.join(", ");
 }
 
 function lldpLoad() {
@@ -5129,6 +5350,7 @@ function lldpLoad() {
             sw.firstChild.checked = p.permitted;
             tr.insertCell().appendChild(sw);
         });
+        S.lldpNb = s.neighbors || [];
         var nb = $("lldp_nb_table").tBodies[0];
         nb.innerHTML = "";
         (s.neighbors || []).sort(function(a, b) {
@@ -5159,6 +5381,7 @@ function lldpLoad() {
             lag.textContent = n.agg ? (n.agg === 2 ? t("c_yes") : t("c_no")) : "-";
             lldpWarning(lag, n, 2, "lldp_w_lag", s);
             tr.insertCell().textContent = lldpLink(n);
+            tr.insertCell().textContent = lldpPoe(n);
             tr.insertCell().textContent = n.ttl;
         });
     });
@@ -5179,6 +5402,7 @@ tabHooks.lldp = {
         lldpPoller.stop()
     }
 };
+
 
 function bwLoad() {
     return getJSON("/bandwidth.json").then(function(s) {
@@ -5897,10 +6121,13 @@ function mergeConf(base, texts) {
                 drop(new RegExp("^vlan " + m[1] + "( |$)"));
                 return;
             }
+            /* the RTL836x hash is one for both LAGs: deleting a LAG keeps it, and the last laghash line is all that counts */
+            var lagHashGlobal = typeof S !== "undefined" && S.info.mib_family === "rtl836x";
             if ((m = line.match(/^lag (\d) d$/))) {
-                drop(new RegExp("^lag(hash)? " + m[1] + "( |$)"));
+                drop(new RegExp("^lag" + (lagHashGlobal ? "" : "(hash)?") + " " + m[1] + "( |$)"));
                 return;
             }
+            if (lagHashGlobal && /^laghash \d\b/.test(line)) drop(/^laghash /);
             if ((m = line.match(/^eee (on|off)(?: (\d{1,2}))?(?: (?:100m|1g|2g5))?$/))) {
                 if (m[2]) drop(new RegExp("^eee (on|off) " + m[2] + "\\b"));
                 else drop(/^eee /);
@@ -5926,6 +6153,16 @@ function mergeConf(base, texts) {
                 return;
             }
             if (!isConfCmd(line)) return;
+            if ((m = line.match(/^(port \d{1,2}) duplex (half|full)$/))) {
+                drop(new RegExp("^" + m[1] + " duplex "));
+                conf.push(line);
+                return;
+            }
+            if ((m = line.match(/^(poe port \d{1,2}) (on|off)$/))) {
+                drop(new RegExp("^" + m[1] + " (on|off)$"));
+                conf.push(line);
+                return;
+            }
             if ((m = line.match(/^ingress (.+)$/))) {
                 if (/^[tua]$/.test(m[1])) {
                     drop(/^ingress /);

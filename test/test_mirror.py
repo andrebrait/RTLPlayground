@@ -50,18 +50,24 @@ void write_char(char c) { (void)c; }
 void print_phys_port(uint8_t p) { (void)p; }
 void print_short(uint16_t v) { (void)v; }
 void reg_read_m(uint16_t reg) { (void)reg; reads++; }
-void port_mirror_set(uint8_t p, uint16_t rx, uint16_t tx)
+bool port_mirror_set(uint8_t p, uint16_t rx, uint16_t tx)
 {
     writes++;
     monitor = p;
     rx_mask = rx;
     tx_mask = tx;
+    return true;
 }
 void port_mirror_del(void)
 {
     writes++;
     monitor = 0;
     rx_mask = tx_mask = 0;
+}
+void port_mirror_get(struct port_mirror *m)
+{
+    reads++;
+    memset(m, 0, sizeof(*m));
 }
 """
 tests = r"""
@@ -116,7 +122,7 @@ int main(void)
     valid("mirror 2", p2, 0, 0);
     valid("mirror off", 0, 0, 0);
     run("mirror status");
-    CHECK(err_status == ERR_OK && writes == 0 && reads == 2, "mirror status");
+    CHECK(err_status == ERR_OK && writes == 0 && reads == 1, "mirror status");
 
     /* Every front-panel mapping: valid user ports, never the logical CPU port. */
     for (unsigned i = 0; i < 9; i++) {

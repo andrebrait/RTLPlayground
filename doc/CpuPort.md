@@ -109,3 +109,21 @@ The `pmask` word: bit 15 is `ALLOW`, bits 14 to 0 are a port mask.
   the ports given
 * `ALLOW` set: the ASIC looks the destination up as usual and the mask
   only limits which ports the result may use
+
+## RTL836x protocol traps
+
+On the TL-SG108PE V5, the NIC is chip port 10. `CPU_PORT_MASK` (0x1219)
+enables CPU-tag parsing on that port. `CPU_CTRL` (0x121a) selects trap port
+10 using bits 5:3 and extension bit 10. Its RX insertion mode is 2 (no CPU
+tag): `nic_rx_packet()` builds the firmware's tag layout from the ingress
+port in the native RX descriptor.
+
+`trap_rma_set()` takes the last byte of the reserved multicast destination,
+not a register address: 0x00 for STP, 0x02 for LACP and 0x0e for LLDP.
+The RTL836x encodes forward, trap and drop as 0, 1 and 2 in bits 8:7 of
+0x0800 plus that byte. LLDP also has an override at 0x0832, enabled by
+0x0833 bit 0; both action fields are kept consistent.
+
+These mappings follow the RTL8367C SDK functions
+`rtl8367c_setAsicCputagTrapPort()`, `rtl8367c_setAsicCputagInsertMode()`,
+`rtl8367c_setAsicRma()` and `rtl8367c_setAsicRmaLldp()`.

@@ -102,10 +102,12 @@ bool     gpio_pin_test(uint8_t pin) { (void)pin; return false; }
 /* MMD 7 (auto-negotiation) registers 0x00-0x3f per port: pause flags at 0x10/0x13, EEE at 0x3c-0x3f */
 uint16_t phy_mock_an[9][0x40];
 extern volatile uint16_t SFR_DATA_U16;
+#if SOC_FAMILY == RTL837X	/* the RTL836x page test brings its own MII register file */
 void     phy_read(uint8_t phy_id, uint8_t dev_id, uint16_t reg)
 {
 	SFR_DATA_U16 = (dev_id == 7 && phy_id < 9 && reg < 0x40) ? phy_mock_an[phy_id][reg] : 0;
 }
+#endif
 /* Writes and resets since the test last cleared them: a skipped write leaves both at 0 */
 int phy_mock_writes, phy_mock_resets;
 void     phy_write(uint8_t phy_id, uint8_t dev_id, uint16_t reg, uint16_t val)
@@ -147,11 +149,19 @@ uint8_t  stp_pp2p[STP_ENTITIES];
 uint8_t  stp_pprio[STP_ENTITIES];
 uint8_t  stp_prio = 0x80, stp_root_port = 0xff, stp_rstp = 1, stp_txhold = 6;
 uint8_t  stp_bpdu_filter, stp_pcost_short, stp_root_fwd = 15, stp_root_maxage = 20;
-uint16_t stp_legacy, stp_link_prev = 0x3ff;
+uint16_t stp_legacy, stp_link_prev = 0x3ff, stp_backup;
+uint8_t  stp_loop_held[STP_ENTITIES];
 uint16_t stp_info_while[STP_ENTITIES];
 uint32_t stp_cnt[STP_CNT_N][STP_ENTITIES];
 uint32_t stp_tc_secs;
-uint8_t  stp_ent_id(uint8_t e) { return e >= STP_LAG_BASE ? e + 101 - STP_LAG_BASE : machine.log_to_phys_port[e]; }
+uint8_t stp_test_no_entities;
+uint8_t stp_ent_id(uint8_t e)
+{
+	if (stp_test_no_entities)
+		return 0;
+	return e >= STP_LAG_BASE ? e + 101 - STP_LAG_BASE
+		: MACHINE_PORT_VALID(e) ? machine.log_to_phys_port[e] : 0;
+}
 
 /* ---- SFP: no module present, reads fail ---- */
 uint8_t sfp_buf[16];
@@ -165,8 +175,8 @@ uint8_t  lacp_rx_state[10];
 uint8_t  lacp_partner_sys[10][MAC_ADDR_LEN];
 uint16_t lacp_rx_count[10];
 uint8_t  lacp_port_lag[10];
-uint16_t lacp_lag_ports[LACP_NUM_LAGS];
-uint8_t  lacp_agg_sys[LACP_NUM_LAGS][MAC_ADDR_LEN];
-uint8_t  lacp_agg_valid[LACP_NUM_LAGS];
-uint16_t lacp_members_last[LACP_NUM_LAGS];
+uint16_t lacp_lag_ports[PORT_LAG_COUNT];
+uint8_t  lacp_agg_sys[PORT_LAG_COUNT][MAC_ADDR_LEN];
+uint8_t  lacp_agg_valid[PORT_LAG_COUNT];
+uint16_t lacp_members_last[PORT_LAG_COUNT];
 void lldp_neighbors_to_html(void) {}

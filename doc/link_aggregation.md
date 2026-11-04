@@ -36,20 +36,51 @@ The code currently provides the following functions:
  * The bitmask represents up to 10 ports
  * If currently no LAG has algorithm used, a default is applied
  */
-void port_lag_members_set(__xdata uint8_t lag, __xdata uint16_t members) __banked;
+bool port_lag_members_set(__xdata uint8_t lag, __xdata uint16_t members) __banked;
+
+/* Whether the group exists and the hardware can take these members; writes nothing, so a caller can refuse first */
+bool port_lag_members_valid(__xdata uint8_t lag, __xdata uint16_t members) __banked;
 
 /*
  * Configures the hash algorithm used for a LAG
  * lag is the Group to configure and hash is a bitmask
  */
-void port_lag_hash_set(__xdata uint8_t lag, __xdata uint8_t hash_bits) __banked;
+bool port_lag_hash_set(__xdata uint8_t lag, __xdata uint8_t hash_bits) __banked;
+
+/* The hash of a LAG, the same bitmask */
+uint8_t port_lag_hash_get(__xdata uint8_t lag) __banked;
 ```
+Both setters return false, with nothing written, for a group or value the hardware cannot take.
+`PORT_LAG_COUNT` is the number of groups, 4 on the RTL837x and 2 on the RTL836x.
+
+## RTL836x (RTL8370N)
+The chip has two fixed LAGs, so the limits are the hardware's, not the firmware's:
+
+- LAG 1 takes ports 1-4 and LAG 2 takes ports 5-8 (chip ports 0-3 and 4-7). A group
+  takes up to 4 of the ports in its own range; the CPU port is never a member.
+  `lag 1 4 5` and `lag 3 ...` are refused without writing anything.
+- `GROUP_MASK` (0x08d0) holds one nibble per group, bit k of nibble n being chip port 4n + k
+  (`rtl8367c_setAsicTrunkingGroup`, `rtk_trunk_port_set`).
+- The hash is one 7-bit set of fields for the whole switch, `PORT_TRUNK_CTRL` (0x08cf)
+  bits 6:0, in the bit order of the `LAG_HASH_*` values above (`rtl8367c_setAsicTrunkingHashSelect`;
+  `rtk_trunk_distributionAlgorithm_set` accepts only the whole system). `laghash 1` and
+  `laghash 2` set the same hash, and `lag show` prints it for both. A LAG created while the hash
+  selector is 0 (the chip's reset value, which would send every flow to one member) gets all seven
+  fields, the vendor firmware's mask; a selector that is already set is kept. The two reserved bits above
+  the fields (the dumb mode and flood bits) are never written.
+- The 16-entry table that maps a hash value to a member (0x08d2, shared by both groups) stays at its
+  reset value, as in the vendor firmware, which never writes it.
+- A port's PVID is set for every member of its group, so the members stay in one VLAN as on the RTL837x.
+- LACP runs on the same two groups, see [lacp.md](lacp.md#rtl836x-rtl8370n): `lag <n> lacp <port>...` takes only ports of
+  the group's own range, and refuses anything else before it changes the group.
+- Boot clears the members of both LAGs (`rtl8370_init`) before the startup config is replayed, because a CPU
+  reset keeps switch registers; only a saved `lag` command brings a LAG back. The hash selector is kept.
 
 ## LAG configuration on the Serial Console
 For testing the following commands are provided on the serial console:
 ```
 > lag <LAG-ID> <p1> [p2]...
-  Create or set a LAG. LAG-ID is 1 to 4. Ports are physical ports.
+  Create or set a LAG. LAG-ID is 1 to 4 (1 to 2 on the RTL836x). Ports are physical ports.
 
 > lag <LAG-ID> d
   Delete the LAG.

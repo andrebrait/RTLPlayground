@@ -100,11 +100,11 @@ __xdata uint8_t  lacp_ntt[10];
 #define LACP_CATCH_UP	8
 static __xdata struct timer lacp_step_timer;
 
-__xdata uint16_t lacp_lag_ports[LACP_NUM_LAGS];
+__xdata uint16_t lacp_lag_ports[PORT_LAG_COUNT];
 __xdata uint8_t  lacp_port_lag[10];
-__xdata uint8_t  lacp_agg_sys[LACP_NUM_LAGS][MAC_ADDR_LEN];
-__xdata uint8_t  lacp_agg_valid[LACP_NUM_LAGS];
-__xdata uint16_t lacp_members_last[LACP_NUM_LAGS];
+__xdata uint8_t  lacp_agg_sys[PORT_LAG_COUNT][MAC_ADDR_LEN];
+__xdata uint8_t  lacp_agg_valid[PORT_LAG_COUNT];
+__xdata uint16_t lacp_members_last[PORT_LAG_COUNT];
 
 __xdata uint16_t lacp_scratch_mask;
 __xdata uint8_t  lacp_scratch_flag;
@@ -161,7 +161,7 @@ static uint8_t lacp_mux_machine(uint8_t port)
 
 void lacp_mux_update(void) __banked
 {
-	for (uint8_t lag = 0; lag < LACP_NUM_LAGS; lag++) {
+	for (uint8_t lag = 0; lag < PORT_LAG_COUNT; lag++) {
 		if (!lacp_lag_ports[lag])
 			continue;
 		lacp_scratch_mask = 0;
@@ -180,9 +180,9 @@ void lacp_mux_update(void) __banked
 }
 
 
-void lacp_send(uint8_t port) __banked
+void lacp_send(__xdata uint8_t port) __banked
 {
-	uint16_t saved_mgmt_vlan;
+	__xdata uint16_t saved_mgmt_vlan;
 
 	memset((__xdata uint8_t *)LACP_O, 0, sizeof(struct lacpdu));
 	LACP_O->dst[0] = 0x01; LACP_O->dst[1] = 0x80; LACP_O->dst[2] = 0xc2;
@@ -298,7 +298,9 @@ void lacp_in(void) __banked
 
 static void lacp_step(void)
 {
-	for (uint8_t i = MACHINE_MIN_PORT; i <= MACHINE_MAX_PORT; i++) {
+	__xdata uint8_t i, lag, any_current;
+
+	for (i = MACHINE_MIN_PORT; i <= MACHINE_MAX_PORT; i++) {
 		if (lacp_port_lag[i] == LACP_LAG_NONE)
 			continue;
 
@@ -323,12 +325,12 @@ static void lacp_step(void)
 			lacp_send(i);
 	}
 
-	for (uint8_t lag = 0; lag < LACP_NUM_LAGS; lag++) {
-		uint8_t any_current = 0;
+	for (lag = 0; lag < PORT_LAG_COUNT; lag++) {
+		any_current = 0;
 
 		if (!lacp_agg_valid[lag])
 			continue;
-		for (uint8_t i = MACHINE_MIN_PORT; i <= MACHINE_MAX_PORT; i++) {
+		for (i = MACHINE_MIN_PORT; i <= MACHINE_MAX_PORT; i++) {
 			if (lacp_port_lag[i] == lag && lacp_rx_state[i] == LACP_RX_CURRENT
 			    && lacp_sys_eq(lacp_partner_sys[i], lacp_agg_sys[lag])) {
 				any_current = 1;
@@ -345,7 +347,7 @@ static void lacp_step(void)
 
 void lacp_timers(void) __banked
 {
-	uint8_t n = LACP_CATCH_UP;
+	__xdata uint8_t n = LACP_CATCH_UP;
 	while (n-- && timer_expired(&lacp_step_timer)) {
 		timer_reset(&lacp_step_timer);
 		lacp_step();
@@ -380,7 +382,7 @@ static void lacp_port_release(uint8_t port)
 
 static uint8_t lacp_any_lag(void)
 {
-	for (uint8_t l = 0; l < LACP_NUM_LAGS; l++)
+	for (uint8_t l = 0; l < PORT_LAG_COUNT; l++)
 		if (lacp_lag_ports[l])
 			return 1;
 	return 0;
@@ -390,12 +392,12 @@ static void lacp_engine_on(void)
 {
 	timer_set(&lacp_step_timer, LACP_TICK_STEP);
 	lacpEnabled = 1;
-	trap_rma_set(RTL837X_RMA2_CONF, RTL837X_RMA_ACT_TRAP);
+	trap_rma_set(TRAP_RMA_LACP, TRAP_ACT_TRAP);
 }
 
 static void lacp_engine_off(void)
 {
-	trap_rma_set(RTL837X_RMA2_CONF, RTL837X_RMA_ACT_DROP);
+	trap_rma_set(TRAP_RMA_LACP, TRAP_ACT_DROP);
 	lacpEnabled = 0;
 }
 
@@ -406,7 +408,7 @@ void lacp_init(void) __banked
 		lacp_actor_state[i] = 0;
 		lacp_ntt[i] = 0;
 	}
-	for (uint8_t l = 0; l < LACP_NUM_LAGS; l++) {
+	for (uint8_t l = 0; l < PORT_LAG_COUNT; l++) {
 		lacp_lag_ports[l] = 0;
 		lacp_agg_valid[l] = 0;
 		lacp_members_last[l] = 0;
@@ -414,9 +416,10 @@ void lacp_init(void) __banked
 	lacpEnabled = 0;
 }
 
+/* Candidates the hardware could not aggregate leave the running groups alone: the RTL836x has fixed banks */
 void lacp_lag_set(uint8_t lag, __xdata uint16_t ports) __banked
 {
-	if (lag >= LACP_NUM_LAGS)
+	if (!port_lag_members_valid(lag, ports))
 		return;
 	if (ports && ports == lacp_lag_ports[lag])
 		return;
@@ -466,7 +469,7 @@ void lacp_lag_set(uint8_t lag, __xdata uint16_t ports) __banked
 
 void lacp_off(void) __banked
 {
-	for (uint8_t l = 0; l < LACP_NUM_LAGS; l++)
+	for (uint8_t l = 0; l < PORT_LAG_COUNT; l++)
 		if (lacp_lag_ports[l])
 			lacp_lag_set(l, 0);
 }
@@ -475,7 +478,7 @@ void lacp_off(void) __banked
 void lacp_show(void) __banked
 {
 	print_string("LACP "); print_string(lacpEnabled ? "on" : "off"); write_char('\n');
-	for (uint8_t l = 0; l < LACP_NUM_LAGS; l++) {
+	for (uint8_t l = 0; l < PORT_LAG_COUNT; l++) {
 		if (!lacp_lag_ports[l])
 			continue;
 		print_string("lag "); print_byte(l + 1);

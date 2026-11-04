@@ -140,7 +140,8 @@ void send_stp(void) __banked
 		pi_u32 = dsg ? stp_dcost[i] : root_bridge_cost; u32hex_html();
 		string_to_html("\"},");
 	}
-	slen -= 1; // remove comma
+	if (outbuf[slen - 1] == ',')	/* the RTL836x may list no ports */
+		slen--;
 	string_to_html("]}");
 }
 
@@ -172,6 +173,7 @@ void send_stp_counters(void) __banked
 		byte_to_html(stp_bpdu_age[i]);
 		string_to_html("\"},");
 	}
-	slen -= 1;
+	if (outbuf[slen - 1] == ',')
+		slen--;
 	string_to_html("]}");
 }

@@ -8,6 +8,7 @@
 #include "uip.h"
 #include "rtl837x_regs.h"
 #include "rtl837x_lacp.h"
+#include "rtl837x_trap.h"
 
 /* ---------- platform mocks ---------- */
 
@@ -34,21 +35,28 @@ void write_char(char c) { if (verbose) putchar(c); }
 static uint16_t hw_members_lag[4];
 static int hw_set_calls;
 #define hw_members hw_members_lag[0]
-void port_lag_members_set(uint8_t lag, uint16_t members)
+bool port_lag_members_set(uint8_t lag, uint16_t members)
 {
 	if (lag < 4)
 		hw_members_lag[lag] = members;
 	hw_set_calls++;
+	return true;
+}
+
+/* The RTL837x port layer takes any members of its four groups */
+bool port_lag_members_valid(uint8_t lag, uint16_t members)
+{
+	(void)members;
+	return lag < PORT_LAG_COUNT;
 }
 
 /* Reserved-multicast action mock: delivery of a LACPDU to the CPU rests on
  * the action of the slow-protocols entry alone, so record what the engine
  * sets. The real trap_rma_set() touches only the action field. */
-static uint16_t hw_rma_reg;
+static uint8_t hw_rma_reg;
 static uint8_t hw_rma_act;
 static int hw_rma_calls;
-void trap_rma_set(uint16_t reg, uint8_t act);
-void trap_rma_set(uint16_t reg, uint8_t act)
+void trap_rma_set(uint8_t reg, uint8_t act)
 {
 	hw_rma_reg = reg;
 	hw_rma_act = act;
@@ -329,7 +337,7 @@ int main(int argc, char **argv)
 	/* T13: removing the last LACP LAG shuts the engine down */
 	lacp_lag_set(2, 0);
 	CHECK(lacpEnabled == 0 && hw_members_lag[2] == 0
-	      && hw_rma_reg == RTL837X_RMA2_CONF && hw_rma_act == RTL837X_RMA_ACT_DROP,
+	      && hw_rma_reg == TRAP_RMA_LACP && hw_rma_act == TRAP_ACT_DROP,
 	      "T13 last LAG removed: engine off, trunk drained, address dropped");
 
 	/* T14: while the engine runs, the slow-protocols address is trapped to
@@ -337,8 +345,8 @@ int main(int argc, char **argv)
 	 * entry and nothing written per VLAN or per PVID. */
 	hw_rma_calls = 0;
 	lacp_lag_set(0, 0x0003);
-	CHECK(hw_rma_calls == 1 && hw_rma_reg == RTL837X_RMA2_CONF
-	      && hw_rma_act == RTL837X_RMA_ACT_TRAP,
+	CHECK(hw_rma_calls == 1 && hw_rma_reg == TRAP_RMA_LACP
+	      && hw_rma_act == TRAP_ACT_TRAP,
 	      "T14 engine on traps 01:80:c2:00:00:02 to the CPU");
 
 	/* T15: a trapped LACPDU arrives without the VLAN tag a forwarded one

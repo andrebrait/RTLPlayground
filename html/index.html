@@ -143,6 +143,7 @@ input.in.sm{width:7em}
 .port.up.sfp .jack:before{background-color:color-mix(in srgb,var(--pc) 10%,var(--panel2))}
 .port.up .ps{color:var(--pc);font-weight:600}
 .port.dis{opacity:.45;border-style:dashed}
+.port .poe:not([hidden]){display:block;font-size:8px;line-height:1.2;color:var(--fg2)}
 .badge{font-size:11px;font-weight:600;border-radius:10px;padding:1px 8px;background:var(--panel2);color:var(--fg2)}
 .badge.ok{color:var(--ok)}.badge.bad{color:var(--bad)}
 .badge.fit{display:inline-block;box-sizing:border-box;text-align:center}
@@ -210,6 +211,7 @@ textarea.cfg{
 .small{font-size:12px}
 .dangerzone{border-color:color-mix(in srgb,var(--bad) 40%,var(--bd))}
 button.danger{background:var(--bad);color:#fff;border-color:transparent}
+.plb{display:none}
 @media (max-width:820px){
   #nav{position:fixed;left:-210px;transition:left .18s;z-index:30;box-shadow:var(--shadow)}
   #nav.open{left:0}
@@ -230,6 +232,9 @@ button.danger{background:var(--bad);color:#fff;border-color:transparent}
   #ptable td.pn,#ptable td.pn+td{grid-column:auto;display:block;font-weight:650}
   #ptable td.pn+td::before{content:none}
   #ptable td.pn::before{color:inherit;font-size:inherit;margin-right:4px}
+  #ptable td.ppoe::before{content:none}
+  #ptable td[hidden]{display:none}	/* the grid rule above would otherwise show MTU on chips without it */
+  #ptable .plb{display:inline;color:var(--fg2);font-size:12px}
   #ptable select{width:100%!important}
 }
 @media (max-width:720px){
@@ -290,7 +295,7 @@ button.danger{background:var(--bad);color:#fff;border-color:transparent}
     <section class="tab" id="tab-ports">
       <div class="card"><h2 data-i18n="pt_title">Port configuration</h2>
         <div class="scrollx"><table class="t" id="ptable">
-          <thead><tr><th data-i18n="c_port">Port</th><th data-i18n="c_enabled">Enabled</th><th data-i18n="c_name">Name</th><th data-i18n="c_link">Link</th><th data-i18n="pt_speed">Speed</th><th data-i18n="pt_mtu">MTU</th><th data-i18n="pt_fc">Flow control</th><th data-i18n="pt_eee">EEE</th></tr></thead>
+          <thead><tr><th data-i18n="c_port">Port</th><th data-i18n="c_enabled">Enabled</th><th data-i18n="c_name">Name</th><th data-i18n="c_link">Link</th><th data-i18n="pt_speed">Speed</th><th data-i18n="pt_mtu">MTU</th><th data-i18n="pt_fc">Flow control</th><th data-i18n="pt_eee">EEE</th><th id="ptpoe" hidden>PoE</th></tr></thead>
           <tbody></tbody></table></div>
         <p class="small mut" style="margin-top:8px" data-i18n="pt_sfp_note">SFP speed is set per slot and is not saved in the startup config.</p>
         <div id="pbar">
@@ -403,7 +408,7 @@ button.danger{background:var(--bad);color:#fff;border-color:transparent}
       </div>
       <div class="card"><h2 data-i18n="lldp_nb_title">Neighbours</h2>
         <div class="scrollx"><table class="t" id="lldp_nb_table">
-          <thead><tr><th data-i18n="c_port">Port Number</th><th data-i18n="lldp_nb_chassis">Chassis ID</th><th data-i18n="lldp_nb_portid">Port ID</th><th data-i18n="lldp_nb_sysname">System Name</th><th data-i18n="lldp_nb_sysdesc">System Description</th><th data-i18n="lldp_nb_portdesc">Port Description</th><th data-i18n="lldp_nb_addr">Address</th><th data-i18n="lldp_nb_caps">Capabilities</th><th data-i18n="lldp_nb_pvid">PVID</th><th data-i18n="lldp_nb_mtu">MTU</th><th data-i18n="lldp_nb_lag">LAG</th><th data-i18n="lldp_nb_link">Link</th><th data-i18n="lldp_nb_ttl">TTL</th></tr></thead>
+          <thead><tr><th data-i18n="c_port">Port Number</th><th data-i18n="lldp_nb_chassis">Chassis ID</th><th data-i18n="lldp_nb_portid">Port ID</th><th data-i18n="lldp_nb_sysname">System Name</th><th data-i18n="lldp_nb_sysdesc">System Description</th><th data-i18n="lldp_nb_portdesc">Port Description</th><th data-i18n="lldp_nb_addr">Address</th><th data-i18n="lldp_nb_caps">Capabilities</th><th data-i18n="lldp_nb_pvid">PVID</th><th data-i18n="lldp_nb_mtu">MTU</th><th data-i18n="lldp_nb_lag">LAG</th><th data-i18n="lldp_nb_link">Link</th><th data-i18n="lldp_nb_poe">PoE</th><th data-i18n="lldp_nb_ttl">TTL</th></tr></thead>
           <tbody></tbody></table></div>
       </div>
       <div class="card"><h2 data-i18n="lldp_tlvs">Optional TLVs</h2>

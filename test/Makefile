@@ -45,13 +45,23 @@ TESTS = $(BUILDDIR)/test_cmd_editor \
         $(BUILDDIR)/test_nic_rx \
         $(BUILDDIR)/test_lacp \
         $(BUILDDIR)/test_lldp \
-        $(BUILDDIR)/test_lldp_tx
+        $(BUILDDIR)/test_lldp_tx \
+        $(BUILDDIR)/test_rtl8370n_console \
+        $(BUILDDIR)/test_rtl836x_regs \
+        $(BUILDDIR)/test_rtl836x_nic \
+        $(BUILDDIR)/test_page_json_836x \
+        $(BUILDDIR)/test_rtl836x_phy
+
+TESTS += $(BUILDDIR)/test_trap_836x $(BUILDDIR)/test_trap_837x
+$(BUILDDIR)/test_trap_836x: CFLAGS += -DMACHINE_NAME=TPLINK_TL_SG108PE_V5
+$(BUILDDIR)/test_trap_836x $(BUILDDIR)/test_trap_837x: test_trap.c $(SRCROOT)/rtl837x_trap.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
 
 # The table tests link the register mock and one environment file; stub/
 # stands in for the two headers a firmware build generates.
 TABLE_ENV = support.c hw_mock.c env_tables.c $(SRCROOT)/cmd_editor.c \
             $(SRCROOT)/rtl837x_port.c $(SRCROOT)/rtl837x_pause.c $(SRCROOT)/httpd/page_impl.c \
-            $(SRCROOT)/httpd/html_out.c
+            $(SRCROOT)/httpd/html_out.c $(SRCROOT)/vlan.c
 
 TESTS += $(BUILDDIR)/test_rx_bounds
 
@@ -71,6 +81,15 @@ $(BUILDDIR)/test_prometheus_status_json: test_prometheus_status_json.c test_page
 
 all: run lldp-conf prometheus-gui
 
+# The RTL836x web pages; the test carries its own 16-bit register file.
+$(BUILDDIR)/test_page_json_836x: CFLAGS += -DMACHINE_NAME=TPLINK_TL_SG108PE_V5 -ffunction-sections -fdata-sections
+$(BUILDDIR)/test_page_json_836x: test_page_json_836x.c support.c env_tables.c $(SRCROOT)/cmd_editor.c \
+                                 $(SRCROOT)/httpd/page_impl.c $(SRCROOT)/httpd/page_stp.c $(SRCROOT)/httpd/html_out.c \
+                                 $(SRCROOT)/rtl836x_mib.c $(SRCROOT)/rtl836x_port.c $(SRCROOT)/vlan.c \
+                                 $(SRCROOT)/rtl836x_phy.c $(SRCROOT)/snmp_hw.c \
+                                 $(SRCROOT)/machine/TPLINK_TL_SG108PE_V5_init.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) -Wl,--gc-sections
+
 $(BUILDDIR):
 	mkdir -p $(BUILDDIR)
 
@@ -89,6 +108,28 @@ $(BUILDDIR)/test_tick_gate: test_tick_gate.c support.c $(SRCROOT)/cmd_editor.c $
 $(BUILDDIR)/test_timer: test_timer.c support.c $(SRCROOT)/cmd_editor.c $(SRCROOT)/timer.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
 
+# The experimental console uses the same SDCC shim and a simulated SFR edge.
+$(BUILDDIR)/test_rtl8370n_console: test_rtl8370n_console.c rtl8370n_hw.h $(SRCROOT)/rtl8370n/console.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) -Wno-pointer-to-int-cast -Wno-int-to-pointer-cast $< -o $@ $(LDFLAGS)
+
+# The RTL836x register primitives on a model of the RTL8370N register controller.
+$(BUILDDIR)/test_rtl836x_regs: CFLAGS += -DMACHINE_NAME=TPLINK_TL_SG108PE_V5
+$(BUILDDIR)/test_rtl836x_regs: test_rtl836x_regs.c $(SRCROOT)/rtl836x_regs.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS)
+
+# RTL836x NIC frame conversion; the register controller and the DMA engine are modelled.
+$(BUILDDIR)/test_rtl836x_nic: CFLAGS += -DMACHINE_NAME=TPLINK_TL_SG108PE_V5
+$(BUILDDIR)/test_rtl836x_nic: test_rtl836x_nic.c $(SRCROOT)/rtl836x_nic.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS)
+
+# Port commands and their native Clause 22 PHY implementation.
+$(BUILDDIR)/test_rtl836x_phy: CFLAGS += -DMACHINE_NAME=TPLINK_TL_SG108PE_V5 \
+    -Wno-parentheses -Wno-incompatible-pointer-types -Wno-int-to-pointer-cast -Wno-pointer-to-int-cast \
+    -ffunction-sections -fdata-sections
+$(BUILDDIR)/test_rtl836x_phy: test_rtl836x_phy.c $(SRCROOT)/cmd_parser.c $(SRCROOT)/rtl836x_phy.c \
+    $(SRCROOT)/machine/TPLINK_TL_SG108PE_V5_init.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) -Wl,--gc-sections
+
 # Exercise the production RX ring reader; only the hardware DMA edge is mocked.
 # Discard unused TX functions so this RX fixture needs no TX register mocks.
 $(BUILDDIR)/test_nic_rx: test_nic_rx.c $(SRCROOT)/rtl837x_nic.c $(SRCROOT)/rtl837x_nic.h | $(BUILDDIR)
@@ -100,6 +141,21 @@ $(BUILDDIR)/test_page_json: test_page_json.c $(TABLE_ENV) hw_mock.h | $(BUILDDIR
 # rtl837x_lacp.c is compiled UNMODIFIED from the firmware tree.
 $(BUILDDIR)/test_lacp: test_lacp.c $(SRCROOT)/rtl837x_lacp.c $(SRCROOT)/timer.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
+
+# The same engine in its RTL836x build, over the real RTL836x port layer and the real RMA trap; only the
+# register controller (a register file), the NIC's TX edge and the console are modelled.
+TESTS += $(BUILDDIR)/test_lacp_836x
+$(BUILDDIR)/test_lacp_836x: CFLAGS += -DMACHINE_NAME=TPLINK_TL_SG108PE_V5
+$(BUILDDIR)/test_lacp_836x: test_lacp_836x.c $(SRCROOT)/rtl837x_lacp.c $(SRCROOT)/rtl836x_port.c $(SRCROOT)/rtl837x_trap.c $(SRCROOT)/timer.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) $(GC_CFLAGS) $^ -o $@ $(LDFLAGS) $(GC_LDFLAGS)
+
+TESTS += $(BUILDDIR)/test_stp_836x $(BUILDDIR)/test_l2_flush_836x
+$(BUILDDIR)/test_stp_836x $(BUILDDIR)/test_l2_flush_836x: CFLAGS += -DMACHINE_NAME=TPLINK_TL_SG108PE_V5
+$(BUILDDIR)/test_stp_836x: CFLAGS += -fpack-struct=1
+$(BUILDDIR)/test_stp_836x: test_stp_836x.c $(SRCROOT)/rtl837x_stp.c $(SRCROOT)/rtl836x_port.c $(SRCROOT)/rtl837x_trap.c $(SRCROOT)/timer.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) $(GC_CFLAGS) $^ -o $@ $(LDFLAGS) $(GC_LDFLAGS)
+$(BUILDDIR)/test_l2_flush_836x: test_l2_flush_836x.c $(SRCROOT)/rtl836x_port.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) $(GC_CFLAGS) $^ -o $@ $(LDFLAGS) $(GC_LDFLAGS)
 
 $(BUILDDIR)/test_lldp: test_lldp.c $(SRCROOT)/rtl837x_lldp.c $(SRCROOT)/rtl837x_lldp_tx_strings.c $(SRCROOT)/httpd/html_out.c $(SRCROOT)/timer.c fw_memset.h | $(BUILDDIR)
 	$(CC) $(CFLAGS) -include fw_memset.h test_lldp.c $(SRCROOT)/rtl837x_lldp.c $(SRCROOT)/rtl837x_lldp_tx_strings.c $(SRCROOT)/httpd/html_out.c $(SRCROOT)/timer.c -o $@ $(LDFLAGS)
@@ -133,11 +189,12 @@ run: $(TESTS) $(BUILDDIR)/fileadder snmp snmp-horaco-profile snmp-status snmp-cl
 		echo; \
 	done; \
 	python3 test_fileadder.py $(BUILDDIR)/fileadder || fail=1; \
-	if [ $$fail -ne 0 ]; then echo "TESTS FAILED"; exit 1; else echo "ALL TESTS PASSED"; fi
+	if [ $$fail -ne 0 ]; then echo "TESTS FAILED"; exit 1; fi
+	CC="$(CC)" python3 test_bringup_safety.py
 	CC="$(CC)" python3 test_lacp_cli.py
-
-l2-delete:
-	node test_l2_delete.cjs
+	node test_mib.js
+	node test_ports.js
+	@echo "ALL TESTS PASSED"
 
 # Save to flash keeps one "lldp tlv" line per TLV (html/app.js mergeConf)
 NODE ?= node
@@ -148,6 +205,9 @@ NODE ?= node
 # Prometheus card on the System page and its saved on/off command
 prometheus-gui:
 	cd $(SRCROOT) && $(NODE) test/test_prometheus_gui.cjs
+
+l2-delete:
+	node test_l2_delete.cjs
 
 clean:
 	rm -rf $(BUILDDIR)

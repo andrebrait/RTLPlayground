@@ -22,6 +22,10 @@ harness = r'''
 #include "rtl837x_regs.h"
 #include <test/support.h>
 #define N_WORDS 15
+/* Diagnostic wording is not under test. */
+#define LAG_USAGE ""
+#define LAG_PORTS_ERROR ""
+#define LAGHASH_USAGE ""
 uint8_t cmd_buffer[CMD_BUF_SIZE], cmd_words_len, cmd_words_b[15];
 uint8_t err_status, atoi_results_u8;
 volatile uint8_t sfr_data[4];
@@ -30,6 +34,7 @@ int tests_run, tests_failed;
 static unsigned writes, reads;
 static uint16_t members, lacp;
 static uint8_t hash;
+static bool lag_valid = true;
 void print_string(const char *s) {(void)s;}
 void print_string_x(char *s) {(void)s;}
 void print_byte(uint8_t p) {(void)p;}
@@ -38,8 +43,10 @@ void print_phys_port(uint8_t p) {(void)p;}
 void write_char(char c) {(void)c;}
 void reg_read_m(uint16_t r) {(void)r; reads++;}
 uint16_t port_lag_members_get(uint8_t g) {(void)g; reads++; return 0;}
-void port_lag_members_set(uint8_t g, uint16_t m) {(void)g; writes++; members=m;}
-void port_lag_hash_set(uint8_t g, uint8_t h) {(void)g; writes++; hash=h;}
+bool port_lag_members_set(uint8_t g, uint16_t m) {(void)g; writes++; members=m; return true;}
+bool port_lag_members_valid(uint8_t g, uint16_t m) {(void)g; (void)m; return lag_valid;}
+bool port_lag_hash_set(uint8_t g, uint8_t h) {(void)g; writes++; hash=h; return true;}
+uint8_t port_lag_hash_get(uint8_t g) {(void)g; reads++; return hash;}
 void lacp_lag_set(uint8_t g, uint16_t m) {(void)g; writes++; lacp=m;}
 '''
 tests = r'''
@@ -68,6 +75,14 @@ int main(void) {
     CHECK(err_status==ERR_OK && members==0 && lacp==0, "valid deletion still works");
     run("lag 1 lacp off");
     CHECK(err_status==ERR_OK && lacp==0 && members==0x55, "valid LACP stop still works");
+    run("lag 1 lacp 1 3");
+    CHECK(err_status==ERR_OK && lacp==5 && members==0x55 && writes==1, "valid LACP candidates start negotiation, the static trunk is the LACP engine's to clear");
+    lag_valid = false;	/* the hardware refuses these members: nothing may be cleared first */
+    run("lag 1 lacp 1 5");
+    CHECK(err_status==ERR_INVALID_ARGUMENT && !writes && members==0x55 && lacp==0x33, "LACP candidates the hardware refuses leave LACP and the trunk alone");
+    run("lag 1 1 5");
+    CHECK(err_status==ERR_INVALID_ARGUMENT && !writes && members==0x55 && lacp==0x33, "static members the hardware refuses leave a running LACP group alone");
+    lag_valid = true;
     run("laghash 1 smac dport");
     CHECK(err_status==ERR_OK && hash==0x42 && writes==1, "valid hash selection still works");
     run("lag show");

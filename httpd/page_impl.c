@@ -24,6 +24,13 @@
 #ifdef PROMETHEUS
 #include "metrics.h"
 #endif
+#if SOC_FAMILY == RTL836X
+#include "rtl836x_regs.h"
+#include "rtl836x_mib.h"
+#endif
+#ifdef MACHINE_POE_PORTS
+#include "poe.h"
+#endif
 
 // #define DEBUG
 #include "debug.h"
@@ -107,6 +114,9 @@ void itoa16_html(uint16_t v) /* up to five digits (65535) */
 
 static void temp_to_html(void)
 {
+#if SOC_FAMILY == RTL836X
+	string_to_html("n/a");	/* shortcut: no temperature reading on the RTL836x yet */
+#else
 	int16_t v;
 
 	reg_read(RTL837X_TM_RESULT);
@@ -120,6 +130,7 @@ static void temp_to_html(void)
 	itoa_html(((v & 0x7f) * 10) >> 7);
 	char_to_html(' ');
 	char_to_html('C');
+#endif
 }
 
 uint16_t stat_content(void)
@@ -180,6 +191,7 @@ void reg_to_html_long(uint16_t reg)
 }
 
 
+#if SOC_FAMILY == RTL837X
 /* The 64-bit counter of the last STAT_GET as one number: the low word keeps
  * its leading zeros whenever the high word is set. */
 void counter_to_html(void)
@@ -192,6 +204,23 @@ void counter_to_html(void)
 		reg_to_html(RTL837X_STAT_V_LOW);
 	}
 }
+#else
+static void mib_to_html(__xdata uint8_t *value, __xdata bool available)
+{
+	if (!available) {
+		string_to_html("null");
+		return;
+	}
+	string_to_html("\"0x");
+	uint8_t b = 0;
+	while (b < 7 && !value[b]) b++;
+	if (value[b] < 16)
+		charhex_to_html(value[b++]);
+	for (; b < 8; b++)
+		byte_to_html(value[b]);
+	char_to_html('"');
+}
+#endif
 
 
 void send_sfp_info(uint8_t sfp)
@@ -308,6 +337,13 @@ void send_basic_info(void)
 	string_to_html(",\"prometheus\":");
 	itoa_html(prometheus_enabled);
 #endif
+#if SOC_FAMILY == RTL836X
+	string_to_html(",\"mib_family\":\"rtl836x\"");
+#endif
+#ifdef MACHINE_POE_PORTS
+	string_to_html(",\"poe_ports\":");
+	itoa_html(MACHINE_POE_PORTS);
+#endif
 	char_to_html('}');
 }
 
@@ -329,7 +365,7 @@ void send_vlan(uint16_t vlan)
 			json_char_to_html(vlan_names[n++]);
 	}
 	string_to_html("\",\"pvid\":\"0x");
-	uint16_t pvid_mask = 0;
+	__xdata uint16_t pvid_mask = 0;	/* xdata: internal RAM is full in RTL836x SNMP builds */
 	for (uint8_t i = MACHINE_MIN_PORT; i <= MACHINE_MAX_PORT; i++) {
 		if (port_pvid_get(i) == vlan)
 			pvid_mask |= (1 << i);
@@ -339,6 +375,7 @@ void send_vlan(uint16_t vlan)
 	string_to_html("\"}");
 }
 
+#if SOC_FAMILY == RTL837X
 /* Send counters
  * Only accepts physical port 1..9.
  * Returns an error if the port physical don't exists.
@@ -529,59 +566,68 @@ void l2_delete(uint16_t idx)
 	char_to_html('}');
 }
 
-
-void send_mirror(void)
+#else
+/* shortcut: the L2 table is not ported to the RTL836x, so its
+ * pages get valid but empty JSON; port it with the feature */
+static void send_json(__code const char *s)
 {
-	dbg_string("send_mirror called\n");
 	slen = strtox(outbuf, HTTP_RESPONCE_JSON);
-
-	reg_read_m(RTL837x_MIRROR_CTRL);
-	uint8_t mPort = sfr_data[3];
-	if (mPort & 1) {
-		string_to_html("{\"enabled\":1,\"mPort\":");
-	} else {
-		string_to_html("{\"enabled\":0,\"mPort\":");
-	}
-	itoa_html(machine.log_to_phys_port[mPort >> 1]);
-
-	reg_read_m(RTL837x_MIRROR_CONF);
-	uint16_t m = sfr_data[0];
-	m = (m << 8) | sfr_data[1];
-	string_to_html(",\"mirror_rx\":\"");
-	for (uint8_t i = 0; i < 16; i++) {
-		bool_to_html(!!(m & 0x8000));
-		m <<= 1;
-	}
-	m = sfr_data[2];
-	m = (m << 8) | sfr_data[3];
-	string_to_html("\",\"mirror_tx\":\"");
-	for (uint8_t i = 0; i < 16; i++) {
-		bool_to_html(!!(m & 0x8000));
-		m <<= 1;
-	}
-	char_to_html('\"');
-	char_to_html('}');
+	slen += strtox(outbuf + slen, s);
 }
+
+bool send_counters(uint8_t phys_port)
+{
+	if (!phys_port || phys_port > MACHINE_MAX_PORT - MACHINE_MIN_PORT + 1)
+		return true;
+	uint8_t port = machine.phys_to_log_port[phys_port - 1];
+	__xdata uint8_t value[8];
+	slen = strtox(outbuf, HTTP_RESPONCE_JSON);
+	char_to_html('[');
+	for (uint8_t counter = 0; counter < RTL836X_MIB_COUNT; counter++) {
+		bool available = rtl836x_mib_read(port, counter, value);
+		mib_to_html(value, available);
+		if (counter + 1 < RTL836X_MIB_COUNT)
+			char_to_html(',');
+	}
+	char_to_html(']');
+	return false;
+}
+
+void send_l2(uint16_t idx)
+{
+	(void)idx;
+	send_json("[]");
+}
+
+void l2_delete(uint16_t idx)
+{
+	(void)idx;
+	send_json("{\"result\":0}");
+}
+#endif
 
 
 void send_lag(void)
 {
+	/* xdata: internal RAM is full in RTL836x SNMP builds */
+	__xdata uint8_t l, i;
+	__xdata uint16_t ports;
+
 	dbg_string("send_lag called\n");
 	slen = strtox(outbuf, HTTP_RESPONCE_JSON);
 
 	char_to_html('[');
-	for (uint8_t l=0; l < 4; l++) {
+	for (l = 0; l < PORT_LAG_COUNT; l++) {
 		string_to_html("{\"lagNum\":");
 		itoa_html(l);
 		string_to_html(",\"members\":\"");
-		uint16_t ports = port_lag_members_get(l);
-		for (uint8_t i = 0; i < 16; i++) {
-			bool_to_html(!!(ports & 0x8000));
+		ports = port_lag_members_get(l);
+		for (i = 0; i < 16; i++) {
+			bool_to_html(ports >> 15);
 			ports <<= 1;
 		}
-		string_to_html("\",\"hash\":\"");
-		reg_read_m(RTL837X_TRK_HASH_CTRL_BASE + (l << 2));
-		sfr_data_to_html();
+		string_to_html("\",\"hash\":\"000000");
+		byte_to_html(port_lag_hash_get(l));
 		string_to_html("\"},");
 	}
 	slen -=1; // remove comma
@@ -597,7 +643,7 @@ void send_lacp(void)
 	string_to_html("{\"on\":");
 	bool_to_html(lacpEnabled);
 	string_to_html(",\"lags\":[");
-	for (uint8_t l = 0; l < LACP_NUM_LAGS; l++) {
+	for (uint8_t l = 0; l < PORT_LAG_COUNT; l++) {
 		string_to_html("{\"cfg\":\"");
 		byte_to_html(lacp_lag_ports[l] >> 8);
 		byte_to_html(lacp_lag_ports[l]);
@@ -670,6 +716,8 @@ void send_lldp(void)
 	char_to_html('}');
 }
 
+
+#if SOC_FAMILY == RTL837X
 /* EEE_* bits of a copper port; eee_ablty is RTL8373_PHY_EEE_ABLTY, read once per reply */
 // Parameters and locals in xdata: internal RAM is full on SNMP builds
 static uint16_t port_eee_state(__xdata uint8_t port, __xdata uint16_t eee_ablty)
@@ -775,6 +823,82 @@ void send_storm(void)
 }
 
 
+#else
+/* EEE_* bits: native advertisement and negotiated LPI; the partner's EEE is not read yet */
+static uint16_t port_eee_state(uint8_t port)
+{
+	__xdata uint16_t s = 0;
+	phy_read(port, 0, RTL836X_OCP_EEE_ADV);
+	if (SFR_DATA_U16 & 2) s |= EEE_ADV_100M;
+	if (SFR_DATA_U16 & 4) s |= EEE_ADV_1G;
+	reg_read(RTL836X_REG_PORT0_STATUS + port);
+	if ((SFR_DATA_U16 & PORT_STATUS_LINK) && (SFR_DATA_U16 & PORT_STATUS_EEE_CAP))
+		s |= EEE_ACTIVE;
+	return s;
+}
+/* shortcut: bandwidth and storm control are not ported to the RTL836x */
+
+void send_bandwidth(void)
+{
+	send_json("[]");
+}
+
+void send_storm(void)
+{
+	send_json("[]");
+}
+#endif
+
+void send_mtu(void)
+{
+	dbg_string("send_mtu called\n");
+	slen = strtox(outbuf, HTTP_RESPONCE_JSON);
+	char_to_html('[');
+	for (__xdata uint8_t i = MACHINE_MIN_PORT; i <= MACHINE_MAX_PORT; i++) {
+		string_to_html("{\"portNum\":");
+		itoa_html(machine.log_to_phys_port[i]);
+		string_to_html(",\"mtu\":\"0x");
+		__xdata uint16_t mtu = port_mtu_get(i);
+		byte_to_html(mtu >> 8);
+		byte_to_html(mtu & 0xff);
+		char_to_html('"');
+		char_to_html('}');
+		if (i < MACHINE_MAX_PORT)
+			char_to_html(',');
+	}
+	char_to_html(']');
+}
+
+static void pmask_to_html(__xdata uint16_t m)
+{
+	for (__xdata uint8_t i = 0; i < 16; i++) {
+		bool_to_html(m >> 15);	/* no !!: that takes one of the few bit variables */
+		m <<= 1;
+	}
+}
+
+void send_mirror(void)
+{
+	__xdata struct port_mirror m;
+
+	dbg_string("send_mirror called\n");
+	slen = strtox(outbuf, HTTP_RESPONCE_JSON);
+	port_mirror_get(&m);
+	if (m.enabled) {
+		string_to_html("{\"enabled\":1,\"mPort\":");
+	} else {
+		string_to_html("{\"enabled\":0,\"mPort\":");
+	}
+	itoa_html(machine.log_to_phys_port[m.port]);
+	string_to_html(",\"mirror_rx\":\"");
+	pmask_to_html(m.rx_pmask);
+	string_to_html("\",\"mirror_tx\":\"");
+	pmask_to_html(m.tx_pmask);
+	char_to_html('\"');
+	char_to_html('}');
+}
+
+
 void send_isolation(void)
 {
 	__xdata uint16_t allow;
@@ -798,35 +922,18 @@ void send_isolation(void)
 }
 
 
-void send_mtu(void)
-{
-	dbg_string("send_mtu called\n");
-	slen = strtox(outbuf, HTTP_RESPONCE_JSON);
-	char_to_html('[');
-	for (uint8_t i = MACHINE_MIN_PORT; i <= MACHINE_MAX_PORT; i++) {
-		string_to_html("{\"portNum\":");
-		itoa_html(machine.log_to_phys_port[i]);
-		string_to_html(",\"mtu\":\"0x");
-		reg_read_m(RTL8373_REG_MAC_L2_PORT_MAX_LEN + ((uint16_t) i << 8));
-		uint16_t mtu = SFR_DATA_U16 & 0x3fff;
-		byte_to_html(mtu >> 8);
-		byte_to_html(mtu & 0xff);
-		char_to_html('"');
-		char_to_html('}');
-		if (i < MACHINE_MAX_PORT)
-			char_to_html(',');
-	}
-	char_to_html(']');
-}
-
-
 void send_status(void)
 {
 	slen = strtox(outbuf, HTTP_RESPONCE_JSON);
 	dbg_string("sending status\n");
+#if SOC_FAMILY == RTL837X
 	reg_read_m(RTL8373_PHY_EEE_ABLTY);
 	__xdata uint16_t eee_ablty = ((uint16_t)sfr_data[2] << 8) | sfr_data[3];
+#endif
 	char_to_html('[');
+#ifdef MACHINE_POE_PORTS
+	__xdata uint8_t poe_enabled = poe_admin_mask();
+#endif
 
 	for (uint8_t i = MACHINE_MIN_PORT; i <= MACHINE_MAX_PORT; i++) {
 		string_to_html("{\"portNum\":");
@@ -888,16 +995,27 @@ void send_status(void)
 			}
 		} else {
 			string_to_html(",\"isSFP\":0,\"enabled\":");
+#if SOC_FAMILY == RTL836X
+			phy_read(i, 0, 0);			// MII BMCR
+			bool_to_html(!(SFR_DATA_8 & 0x08));	// not powered down
+			string_to_html(",\"adv\":\"0");	// no 2500Base
+			uint16_t w;
+#else
 			phy_read(i, PHY_MMD31, 0xa610);
 			bool_to_html(SFR_DATA_8 == 0x20);
 			string_to_html(",\"adv\":\"");
 			phy_read(i, PHY_MMD_AN, PHY_ANEG_MGBASE_CTRL);
 			uint16_t w = SFR_DATA_U16;
 			bool_to_html(!!(w & 0x80));		// 2500BaseN-Full
+#endif
 			phy_read(i, PHY_MMD31, PHY_MMD31_GBCR);
 			w = SFR_DATA_U16;
 			bool_to_html(!!(w & 0x0200));		// 1000Base-Full
+#if SOC_FAMILY == RTL836X
+			phy_read(i, 0, 4);			// MII ANAR
+#else
 			phy_read(i, PHY_MMD_AN, PHY_ANEG_ADV);
+#endif
 			w = SFR_DATA_U16;
 			bool_to_html(!!(w & 0x0100));		// 100Base-Full
 			bool_to_html(!!(w & 0x80));		// 100Base-Half
@@ -907,6 +1025,35 @@ void send_status(void)
 		}
 
 		string_to_html(",\"link\":");
+#if SOC_FAMILY == RTL836X
+		reg_read(RTL836X_REG_PORT0_STATUS + i);
+		uint16_t status = SFR_DATA_U16;
+		char_to_html(status & PORT_STATUS_LINK ? '1' + (status & PORT_STATUS_SPEED_MASK) : '0');
+		string_to_html(",\"fc\":");
+		itoa_html(port_pause_state(i));
+		string_to_html(",\"eee\":");
+		itoa16_html(port_eee_state(i));
+		__xdata uint8_t value[8];
+		for (uint8_t metric = 0; metric < 4; metric++) {
+			switch (metric) {
+			case 0: string_to_html(",\"txG\":"); break;
+			case 1: string_to_html(",\"txB\":"); break;
+			case 2: string_to_html(",\"rxG\":"); break;
+			default: string_to_html(",\"rxB\":"); break;
+			}
+			bool available = rtl836x_mib_summary(i, metric, value);
+			mib_to_html(value, available);
+		}
+#ifdef MACHINE_POE_PORTS
+		uint8_t phys_port = machine.log_to_phys_port[i];
+		if (phys_port && phys_port <= MACHINE_POE_PORTS) {
+			string_to_html(",\"poe_admin\":");
+			bool_to_html(poe_enabled & (1 << (phys_port - 1)));
+			string_to_html(",\"poe_on\":null");
+		}
+#endif
+		string_to_html(",\"macs\":null}");
+#else
 		
 		uint8_t b = 0;
 		// Determine link state
@@ -954,6 +1101,7 @@ void send_status(void)
 		string_to_html("\",\"macs\":\"0x");
 		reg_to_html(RTL837X_L2_LRN_PORT_CONSTRT_CNT + (i << 2));
 		string_to_html("\"}");
+#endif
 		if (i < MACHINE_MAX_PORT)
 			char_to_html(',');
 	}
