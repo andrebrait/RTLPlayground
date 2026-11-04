@@ -47,6 +47,11 @@
     The appender is shared in the common area, so the STP pages in BANK4 and the HTTP
     responses in `httpd.c` use it too.
   - Rename the Prometheus section to Metrics, keeping the toggle labelled Prometheus exporter.
+  - Place LLDP warnings beside the affected maximum frame size, aggregation state
+    and chassis ID. Open warning details for local and advertised values; read
+    existing MTU and LAG endpoints on demand without changing firmware defaults.
+    Closing a warning restores keyboard focus to the correct neighbour even when
+    multiple neighbours share a physical port and the table refreshes.
 - HTTP
   - `/status.json` carries the flow control (`fc`) and EEE (`eee`) state of every port; `/eee.json` is gone.
   - The chip port of each front-panel port moved from `logPort` in every `/status.json` entry to one

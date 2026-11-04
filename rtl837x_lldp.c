@@ -549,7 +549,7 @@ void lldp_neighbors_to_html(void) __banked __reentrant
     uint8_t i;
     bool first = true;
 
-    slen += strtox(outbuf + slen, ",\"neighbors\":[");
+    string_to_html(",\"neighbors\":[");
     for (i = 0; i < LLDP_NB_MAX; i++) {
         if (!lldp_nb[i].ttl)
             continue;
@@ -558,31 +558,31 @@ void lldp_neighbors_to_html(void) __banked __reentrant
         if (!first)
             lldp_put(',', true);
         first = false;
-        slen += strtox(outbuf + slen, "{\"port\":");
+        string_to_html("{\"port\":");
         lldp_put_dec(machine.log_to_phys_port[lldp_nb[i].port], true);
-        slen += strtox(outbuf + slen, ",\"chassis\":\"");
+        string_to_html(",\"chassis\":\"");
         lldp_put_chassis(&lldp_nb[i], true);
-        slen += strtox(outbuf + slen, "\",\"portId\":\"");
+        string_to_html("\",\"portId\":\"");
         lldp_put_port_id(i, true);
-        slen += strtox(outbuf + slen, "\",\"sysName\":\"");
+        string_to_html("\",\"sysName\":\"");
         lldp_put_string(lldp_nb[i].sys_name, true);
-        slen += strtox(outbuf + slen, "\",\"sysDesc\":\"");
+        string_to_html("\",\"sysDesc\":\"");
         lldp_put_string(lldp_nb[i].sys_desc, true);
-        slen += strtox(outbuf + slen, "\",\"portDesc\":\"");
+        string_to_html("\",\"portDesc\":\"");
         lldp_put_string(lldp_nb[i].port_desc, true);
-        slen += strtox(outbuf + slen, "\",\"mgmtAddr\":\"");
+        string_to_html("\",\"mgmtAddr\":\"");
         lldp_put_addr(lldp_nb[i].mgmt_addr, true);
-        slen += strtox(outbuf + slen, "\",\"caps\":");
+        string_to_html("\",\"caps\":");
         lldp_put_dec(lldp_nb[i].caps, true);
-        slen += strtox(outbuf + slen, ",\"pvid\":");
+        string_to_html(",\"pvid\":");
         lldp_put_dec(lldp_nb[i].pvid, true);
-        slen += strtox(outbuf + slen, ",\"mtu\":");
+        string_to_html(",\"mtu\":");
         lldp_put_dec(lldp_nb[i].mtu, true);
-        slen += strtox(outbuf + slen, ",\"agg\":");
+        string_to_html(",\"agg\":");
         lldp_put_dec((lldp_nb[i].agg & LLDP_AGG_ANNOUNCED) ? ((lldp_nb[i].agg & LLDP_AGG_ACTIVE) ? 2 : 1) : 0, true);
-        slen += strtox(outbuf + slen, ",\"warn\":");
+        string_to_html(",\"warn\":");
         lldp_put_dec(lldp_warnings(&lldp_nb[i]), true);
-        slen += strtox(outbuf + slen, ",\"ttl\":");
+        string_to_html(",\"ttl\":");
         lldp_put_dec(lldp_nb[i].ttl, true);
         lldp_put('}', true);
     }
