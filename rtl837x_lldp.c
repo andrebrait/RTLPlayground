@@ -433,6 +433,10 @@ bool lldp_in(void) __banked __reentrant
                 lldp_tmp.mtu = ((uint16_t)p[4] << 8) | p[5];
             else if (lldp_oui_is(p, lldp_oui_8023) && p[3] == LLDP_8023_SUBTYPE_LINK_AGG && len > LLDP_ORG_TLV_HEADER_LENGTH)
                 lldp_tmp.agg = (p[4] & (LLDP_AGG_CAPABLE | LLDP_AGG_ACTIVE)) | LLDP_AGG_ANNOUNCED;
+            else if (lldp_oui_is(p, lldp_oui_8023) && p[3] == LLDP_8023_SUBTYPE_MAC_PHY && len == LLDP_ORG_TLV_HEADER_LENGTH + 5) {
+                lldp_tmp.aneg = (p[4] & LLDP_AUTONEG_ENABLED) | LLDP_ANEG_ANNOUNCED;
+                lldp_tmp.mau = ((uint16_t)p[7] << 8) | p[8];
+            }
             break;
         }
         p += len;
@@ -575,6 +579,10 @@ void lldp_neighbors_to_html(void) __banked __reentrant
         lldp_put_dec(lldp_nb[i].mtu, true);
         slen += strtox(outbuf + slen, ",\"agg\":");
         lldp_put_dec((lldp_nb[i].agg & LLDP_AGG_ANNOUNCED) ? ((lldp_nb[i].agg & LLDP_AGG_ACTIVE) ? 2 : 1) : 0, true);
+        slen += strtox(outbuf + slen, ",\"mau\":");
+        lldp_put_dec(lldp_nb[i].mau, true);
+        slen += strtox(outbuf + slen, ",\"aneg\":");
+        lldp_put_dec((lldp_nb[i].aneg & LLDP_ANEG_ANNOUNCED) ? ((lldp_nb[i].aneg & LLDP_AUTONEG_ENABLED) ? 2 : 1) : 0, true);
         slen += strtox(outbuf + slen, ",\"warn\":");
         lldp_put_dec(lldp_warnings(&lldp_nb[i]), true);
         slen += strtox(outbuf + slen, ",\"ttl\":");
@@ -608,6 +616,9 @@ void lldp_show(void) __banked __reentrant
         print_string(" mtu ");
         lldp_put_dec(lldp_nb[i].mtu, false);
         print_string((lldp_nb[i].agg & LLDP_AGG_ACTIVE) ? " lag" : "");
+        print_string(" mau ");
+        lldp_put_dec(lldp_nb[i].mau, false);
+        print_string((lldp_nb[i].aneg & LLDP_AUTONEG_ENABLED) ? " auto" : "");
         print_string("  ");
         lldp_put_dec(lldp_nb[i].ttl, false);
         print_string("s");

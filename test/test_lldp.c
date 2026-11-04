@@ -109,6 +109,19 @@ static void reset(bool enabled, uint16_t links)
 	reg_reads = tx_frames = 0;
 }
 
+/* Send the frame in uip_buf again with tlv before its End TLV */
+static bool add_tlv(const uint8_t *tlv, uint8_t n)
+{
+	uint8_t *p = uip_buf + uip_len - 2;
+
+	memcpy(p, tlv, n);
+	p += n;
+	*p++ = 0;
+	*p++ = 0;
+	uip_len = p - uip_buf;
+	return lldp_in();
+}
+
 int main(void)
 {
 	uint8_t i;
@@ -171,6 +184,32 @@ int main(void)
 	CHECK(frame(5, LLDP_PORT_ID_TLV_SUBTYPE, "94:2a:6f:d2:25:6e", 17, LLDP_PORT_ID_TLV_SUBTYPE, "eth0", 4)
 	      && lldp_nb[3].chassis_len == 17 && !memcmp(lldp_nb[3].chassis, "94:2a:6f:d2:25:6e", 17),
 	      "L12 a MAC address sent as text is kept whole as the chassis ID");
+
+	/* 802.3 MAC/PHY Status: auto-negotiation supported and on, 1000BASE-T FD (MAU 30) */
+	static const uint8_t macphy[] = {LLDP_ORG_TLV_TYPE << 1, 9, 0x00, 0x12, 0x0f, 1, 0x03, 0x6c, 0x01, 0x00, 30};
+	reset(true, 0x01ff);
+	frame(2, LLDP_CHASSIS_ID_TLV_SUBTYPE, (const char *)ap_mac, MAC_ADDR_LEN, LLDP_PORT_ID_SUBTYPE_MAC, (const char *)ap_mac, MAC_ADDR_LEN);
+	slen = 0;
+	lldp_neighbors_to_html();
+	outbuf[slen] = 0;
+	CHECK(strstr((char *)outbuf, "\"mau\":0,\"aneg\":0"), "L13 no MAC/PHY Status TLV: mau 0, aneg 0");
+	add_tlv(macphy, sizeof(macphy));
+	slen = 0;
+	lldp_neighbors_to_html();
+	outbuf[slen] = 0;
+	CHECK(lldp_nb[0].mau == 30 && strstr((char *)outbuf, "\"mau\":30,\"aneg\":2"),
+	      "L14 MAC/PHY Status TLV: MAU type 30, auto-negotiation on");
+	static const uint8_t forced[] = {LLDP_ORG_TLV_TYPE << 1, 9, 0x00, 0x12, 0x0f, 1, 0x01, 0x00, 0x00, 0x00, 16};
+	frame(2, LLDP_CHASSIS_ID_TLV_SUBTYPE, (const char *)ap_mac, MAC_ADDR_LEN, LLDP_PORT_ID_SUBTYPE_MAC, (const char *)ap_mac, MAC_ADDR_LEN);
+	add_tlv(forced, sizeof(forced));
+	slen = 0;
+	lldp_neighbors_to_html();
+	outbuf[slen] = 0;
+	CHECK(strstr((char *)outbuf, "\"mau\":16,\"aneg\":1"), "L15 auto-negotiation supported but off: aneg 1");
+	static const uint8_t short_tlv[] = {LLDP_ORG_TLV_TYPE << 1, 8, 0x00, 0x12, 0x0f, 1, 0x03, 0x6c, 0x01, 0x00};
+	frame(2, LLDP_CHASSIS_ID_TLV_SUBTYPE, (const char *)ap_mac, MAC_ADDR_LEN, LLDP_PORT_ID_SUBTYPE_MAC, (const char *)ap_mac, MAC_ADDR_LEN);
+	add_tlv(short_tlv, sizeof(short_tlv));
+	CHECK(lldp_nb[0].mau == 0 && lldp_nb[0].aneg == 0, "L16 a MAC/PHY Status TLV of the wrong length is ignored");
 
 	printf("\n%s (%d failure%s)\n", failures ? "SANDBOX: FAILURES" : "SANDBOX: ALL PASS",
 	       failures, failures == 1 ? "" : "s");

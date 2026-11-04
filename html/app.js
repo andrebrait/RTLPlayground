@@ -173,6 +173,7 @@ var LANG = {
         lldp_nb_pvid: "PVID",
         lldp_nb_mtu: "MTU",
         lldp_nb_lag: "LAG",
+        lldp_nb_link: "Link",
         lldp_w_mtu: "Maximum frame size larger than ours",
         lldp_w_lag: "LAG only on one side",
         lldp_w_dup: "Same neighbour on another port",
@@ -4547,6 +4548,37 @@ function lldpCaps(c) {
     }).join(", ")
 }
 
+/* IANA dot3MauType values a switch port is likely to report */
+var LLDP_MAU = {
+    10: "10BASE-T HD",
+    11: "10BASE-T FD",
+    15: "100BASE-TX HD",
+    16: "100BASE-TX FD",
+    17: "100BASE-FX HD",
+    18: "100BASE-FX FD",
+    21: "1000BASE-X HD",
+    22: "1000BASE-X FD",
+    24: "1000BASE-LX FD",
+    26: "1000BASE-SX FD",
+    29: "1000BASE-T HD",
+    30: "1000BASE-T FD",
+    31: "10GBASE-X",
+    33: "10GBASE-R",
+    35: "10GBASE-LR",
+    36: "10GBASE-SR",
+    54: "10GBASE-T",
+    103: "2.5GBASE-T",
+    104: "5GBASE-T",
+    110: "2.5GBASE-X",
+    112: "5GBASE-R"
+};
+
+function lldpLink(n) {
+    if (!n.aneg) return "-";
+    var s = n.mau ? LLDP_MAU[n.mau] || "MAU " + n.mau : "-";
+    return n.aneg === 2 ? s + ", " + t("c_auto") : s;
+}
+
 function lldpWarning(cell, n, bit, key, s) {
     if (!(n.warn & bit)) return;
     var label = t(key) + " (" + t("c_port") + " " + n.port + ")";
@@ -4682,6 +4714,7 @@ function lldpLoad() {
             var lag = tr.insertCell();
             lag.textContent = n.agg ? (n.agg === 2 ? t("c_yes") : t("c_no")) : "-";
             lldpWarning(lag, n, 2, "lldp_w_lag", s);
+            tr.insertCell().textContent = lldpLink(n);
             tr.insertCell().textContent = n.ttl;
         });
     });
