@@ -121,10 +121,13 @@ run: $(TESTS) $(BUILDDIR)/fileadder snmp snmp-horaco-profile snmp-status snmp-cl
 	if [ $$fail -ne 0 ]; then echo "TESTS FAILED"; exit 1; else echo "ALL TESTS PASSED"; fi
 	CC="$(CC)" python3 test_lacp_cli.py
 
+l2-delete:
+	node test_l2_delete.cjs
+
 clean:
 	rm -rf $(BUILDDIR)
 
-.PHONY: all run clean test_mirror
+.PHONY: all run clean test_mirror l2-delete
 
 
 # SNMP host benches compile the same firmware sources; listener is opt-in here.
