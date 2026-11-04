@@ -93,6 +93,13 @@
     data rather than a fabricated empty table; deletion failures leave the UI row.
     Native host tests cover SRAM/CAM indices, CPU mapping, LAG association,
     pagination, key-preserving deletion and busy refusal.
+    Build `58a99c49` listed 52 live entries across three pages; the browser later
+    rendered 63 with correct front-panel and CPU labels. Deleting the switch's
+    own MAC was refused. Deleting one learned neighbour removed only that entry,
+    a repeat deletion was refused, and normal traffic relearned it after 7.2 s.
+    The test made no link or PoE changes; the saved configuration was unchanged.
+    Full-capacity coverage is a host/browser-fixture test, not a silicon table-fill
+    test.
     IGMP, bandwidth, storm control and cable test are not ported: their commands
     are refused and their pages are empty. Temperature remains unavailable
     without a verified sensor mapping.
