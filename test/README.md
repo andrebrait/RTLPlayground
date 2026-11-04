@@ -63,6 +63,10 @@ The L2 frontend deletion regression runs separately with `make -C test l2-delete
 It requires Node.js, without additional packages, and checks rejected, successful
 and failed deletion requests against the production renderer.
 
+The MAC-table loader regression runs separately with `make -C test l2-load`.
+It requires Node.js without extra packages and checks full 4096/4160-entry
+tables, short pages, wrap termination and an empty table.
+
 ## Adding a test for another module
 1. Write `test_<module>.c` with `main()` driving the module's entry points and
    `CHECK(cond, msg)` assertions.

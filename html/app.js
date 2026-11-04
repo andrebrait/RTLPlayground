@@ -4564,7 +4564,6 @@ function l2Load() {
     var seen = {},
         all = [],
         idx = 0,
-        guard = 0,
         gen = ++l2Gen;
 
     function step() {
@@ -4585,7 +4584,7 @@ function l2Load() {
                 e.where = e.lag ? "LAG" + e.lag : String(e.pport);
                 all.push(e);
             });
-            if (wrapped || ++guard > 140) return all;
+            if (wrapped) return all;
             idx = s[s.length - 1].idx + 1;
             return step();
         });

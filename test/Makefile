@@ -209,6 +209,9 @@ prometheus-gui:
 l2-delete:
 	node test_l2_delete.cjs
 
+l2-load:
+	node test_l2_load.cjs
+
 clean:
 	rm -rf $(BUILDDIR)
 
@@ -310,3 +313,4 @@ run: test_lag_tokens
 .PHONY: prometheus-replay
 prometheus-replay:
 	cd $(SRCROOT) && CC="$(CC)" python3 test/test_prometheus_replay.py
+.PHONY: l2-load
