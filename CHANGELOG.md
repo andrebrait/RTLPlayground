@@ -79,6 +79,8 @@
     `application/macbinary` sent by Chrome on macOS for `.bin` files.
   - Store embedded assets uncompressed when gzip would not make them smaller, with the
     compression flag set separately for each file. Empty files no longer hide later assets.
+  - Refuse MAC-table deletion when the requested index has aged out or is out of
+    range, instead of using the next entry's data for a write.
 
 - Health
   - `HEALTH=1` builds no longer write past the phase timing arrays at the LLDP checkpoint, which
