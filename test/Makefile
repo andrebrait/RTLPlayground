@@ -117,7 +117,7 @@ clean:
 
 # SNMP host benches compile the same firmware sources; listener is opt-in here.
 SNMPFLAGS = $(CFLAGS) -DSNMP
-SNMPENV = $(SRCROOT)/snmp.c $(SRCROOT)/snmp_control.c $(SRCROOT)/uip/uip.c $(SRCROOT)/httpd/httpd.c $(SRCROOT)/sessions.c
+SNMPENV = $(SRCROOT)/snmp.c $(SRCROOT)/snmp_control.c $(SRCROOT)/uip/uip.c $(SRCROOT)/httpd/httpd.c $(SRCROOT)/sessions.c $(SRCROOT)/timer.c
 # Eight-port mock (logical ports 0..7); the *_nine benches keep the default 0..8.
 $(BUILDDIR)/test_snmp $(BUILDDIR)/test_snmp_transport $(BUILDDIR)/test_snmp_cli: CFLAGS += -DMACHINE_MAX_PORT=7
 # Six user ports (logical 3..8), as on an RTL8372 board.
