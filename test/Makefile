@@ -314,3 +314,9 @@ run: test_lag_tokens
 prometheus-replay:
 	cd $(SRCROOT) && CC="$(CC)" python3 test/test_prometheus_replay.py
 .PHONY: l2-load
+
+.PHONY: test_bw_cli
+test_bw_cli:
+	CC="$(CC)" python3 test_bw_cli.py
+
+run: test_bw_cli
