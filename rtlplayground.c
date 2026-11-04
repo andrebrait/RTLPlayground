@@ -36,6 +36,9 @@
 #include "httpd/page_impl.h"
 #include "boot.h"
 #include "sfp.h"
+#ifdef PROMETHEUS
+#include "snmp_hw.h"
+#endif
 
 extern __code const struct machine machine;
 extern __xdata uint32_t flash_size;
@@ -1726,6 +1729,9 @@ void main(void)
 	uip_arp_init();
 #ifdef SNMP
     snmp_init();
+#endif
+#if defined(PROMETHEUS) && !defined(SNMP)
+	snmp_hw_init();	/* snmp_init() does this in SNMP builds */
 #endif
 	httpd_init();
 	lldp_init();

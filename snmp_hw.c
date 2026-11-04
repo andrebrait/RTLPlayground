@@ -4,8 +4,9 @@
 #include "machine.h"
 #include "snmp_hw.h"
 
-#pragma codeseg BANK3
-#pragma constseg BANK3
+/* BANK4, beside its callers snmp.c and metrics.c. */
+#pragma codeseg BANK4
+#pragma constseg BANK4
 
 extern __code const struct machine machine;
 /* Set when a statistics request timed out: its selector may still be pending.
@@ -132,6 +133,12 @@ bool snmp_hw_counter32(uint8_t port, __xdata uint8_t selector, __xdata bool high
 {
 	/* Selector 48 is the RX/TX error pair; a 32-bit word is zero-extended. */
 	return selector == 48 && stat_get(port, selector, high, !high, value);
+}
+
+bool snmp_hw_stat(uint8_t port, __xdata uint8_t selector, __xdata bool high, __xdata bool low,
+		  __xdata struct snmp_counter *__xdata value) __banked
+{
+	return selector < 52 && (high || low) && stat_get(port, selector, high, low, value);
 }
 
 /* Copper admin state is PHY MMD31.a610 bit 11 (power down); SFP has no switch. */

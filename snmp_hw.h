@@ -14,6 +14,10 @@ bool snmp_hw_counter(uint8_t port, __xdata uint8_t selector,
  * The 32-bit word is zero-extended into bytes[4..7], bytes[0..3] are zero. */
 bool snmp_hw_counter32(uint8_t port, __xdata uint8_t selector, __xdata bool high,
 		       __xdata struct snmp_counter *__xdata value) __banked;
+/* Any selector 0..51. high and low both: 64-bit snapshot. One of them: that
+ * 32-bit word zero-extended into bytes[4..7]. */
+bool snmp_hw_stat(uint8_t port, __xdata uint8_t selector, __xdata bool high, __xdata bool low,
+		  __xdata struct snmp_counter *__xdata value) __banked;
 /* Normalized MAC bitmap, matching the GUI's REG_LINKS_STS byte mapping. */
 bool snmp_hw_link(uint8_t port, __xdata uint32_t *__xdata value) __banked;
 bool snmp_hw_speed(uint8_t port, __xdata uint16_t *__xdata mbps) __banked;
