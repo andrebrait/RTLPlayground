@@ -781,6 +781,30 @@ void send_storm(void)
 }
 
 
+// The MACHINE_DEFAULT_* values the boot code set up; every PHY is powered up at boot.
+// SFP ports have no "en" or "eee": the GUI keeps those lines as written.
+void send_defaults(void)
+{
+	slen = strtox(outbuf, HTTP_RESPONCE_JSON);
+	string_to_html("{\"lldp\":");
+	bool_to_html(MACHINE_DEFAULT_LLDP);
+	string_to_html(",\"ports\":[");
+	for (__xdata uint8_t i = MACHINE_MIN_PORT; i <= MACHINE_MAX_PORT; i++) {
+		string_to_html("{\"portNum\":");
+		itoa_html(machine.log_to_phys_port[i]);
+		string_to_html(",\"lldp\":");
+		bool_to_html((MACHINE_DEFAULT_LLDP_PORTS >> i) & 1);
+		if (!machine.is_sfp[i]) {
+			string_to_html(",\"en\":1,\"eee\":");
+			bool_to_html(MACHINE_DEFAULT_EEE);
+		}
+		char_to_html('}');
+		if (i < MACHINE_MAX_PORT)
+			char_to_html(',');
+	}
+	string_to_html("]}");
+}
+
 void send_isolation(void)
 {
 	__xdata uint16_t allow;

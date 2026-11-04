@@ -179,8 +179,12 @@ void rtl8373_init(void) __banked
 
 	reg_bit_set(RTL837X_REG_HW_CONF, 0);
 
-	// enable EEE for all ports at 2.5G, but don't reset the PHYs
+	// EEE as MACHINE_DEFAULT_EEE: all ports at 2.5G, but don't reset the PHYs
+#if MACHINE_DEFAULT_EEE
 	port_eee_enable_all(EEE_2G5 | EEE_NORESET);
+#else
+	port_eee_disable_all();
+#endif
 
 	// TODO: patch the PHYs
 
@@ -260,8 +264,12 @@ void rtl8372_init(void) __banked
 	reg_bit_set(RTL837X_REG_HW_CONF, 0);
 
 
-	// enable EEE for all ports at 2.5G and 10G, but don't reset the PHYs
+	// EEE as MACHINE_DEFAULT_EEE: all ports at 2.5G and 10G, but don't reset the PHYs
+#if MACHINE_DEFAULT_EEE
 	port_eee_enable_all(EEE_10G | EEE_NORESET);
+#else
+	port_eee_disable_all();
+#endif
 	
 	// TODO: patch the PHYs
 
