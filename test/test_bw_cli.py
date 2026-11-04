@@ -10,9 +10,11 @@ src = (root / 'cmd_parser.c').read_text()
 functions = []
 for signature in ('uint8_t cmd_compare(', 'uint8_t atoi_hex(', 'uint8_t cmd_parse_port(',
                   'uint8_t cmd_parse_port_separator(', 'static void cmd_error(',
-                  'void cmd_tokenize(', 'void parse_bw('):
+                  'void cmd_tokenize(', 'void parse_bw(', 'void parse_storm('):
     start = src.index(signature)
     functions.append(src[start:src.index('\n}', start) + 2])
+start = src.index('static __code const char * __code const storm_types')
+functions.insert(0, src[start:src.index(';', start) + 1])
 harness = r'''
 #include <assert.h>
 #include <stdint.h>
@@ -22,6 +24,7 @@ harness = r'''
 #include "rtl837x_common.h"
 #include "rtl837x_regs.h"
 #include "rtl837x_bandwidth.h"
+#include "rtl837x_storm.h"
 #include "cmd_parser.h"
 #include "machine.h"
 #include <test/hw_mock.h>
@@ -38,7 +41,10 @@ tests = r'''
 static void command(const char *text) {
     strcpy((char *)cmd_buffer, text);
     cmd_tokenize();
-    if (err_status == ERR_OK) parse_bw();
+    if (err_status == ERR_OK) {
+        if (cmd_compare(0, "bw")) parse_bw();
+        else if (cmd_compare(0, "storm")) parse_storm();
+    }
 }
 int main(void) {
     const uint16_t in = RTL837X_IGBW_PORT_CTRL + 2 * 4;
@@ -71,7 +77,31 @@ int main(void) {
     assert(err_status == ERR_OK && hw_reg_get(in) == 0x0fffff && hw_reg_get(out) == 0x100020);
     command("bw out 3 off");
     assert(err_status == ERR_OK && hw_reg_get(out) == 0x0fffff);
-    puts("PASS bandwidth CLI: invalid arity preserves limits/flow control; valid status, rates, modes and disable work");
+    hw_reset();
+    storm_set(2, 0, 128, 0);
+    storm_set(3, 1, 64, 1);
+    const uint8_t meter = STORM_METER(2, 0);
+    const unsigned long writes = hw_writes;
+    const char *storm_invalid[] = {
+        "storm 3 bcast 8 nope", "storm 3 nope 8 kbps",
+        "storm 3 bcast 0 kbps", "storm 3 bcast 8 kbps extra"
+    };
+    for (unsigned i = 0; i < sizeof storm_invalid / sizeof storm_invalid[0]; i++) {
+        command(storm_invalid[i]);
+        assert(err_status == ERR_INVALID_ARGUMENT && hw_writes == writes);
+        assert(hw_reg_get(RTL837X_STORM_CTRL) == 4 && hw_reg_get(RTL837X_STORM_CTRL + 4) == 8);
+        assert(hw_reg_get(RTL837X_METER_RATE + (meter << 2)) == 128);
+    }
+    command("storm");
+    assert(err_status == ERR_OK && hw_writes == writes);
+    command("storm 3 bcast 256 kbps");
+    assert(err_status == ERR_OK && hw_reg_get(RTL837X_METER_RATE + (meter << 2)) == 256);
+    command("storm 3 bcast 512 pps");
+    assert(err_status == ERR_OK && hw_reg_get(RTL837X_METER_RATE + (meter << 2)) == 512);
+    assert(reg_bit_test(RTL837X_METER_MODE + ((meter >> 5) << 2), meter & 31));
+    command("storm 3 bcast off");
+    assert(err_status == ERR_OK && hw_reg_get(RTL837X_STORM_CTRL) == 0 && hw_reg_get(RTL837X_STORM_CTRL + 4) == 8);
+    puts("PASS rate-control CLI: invalid commands preserve limits/meters; valid bandwidth and storm commands work");
     return 0;
 }
 '''
@@ -87,6 +117,6 @@ subprocess.run(shlex.split(os.environ.get('CC', 'gcc')) + [
     '-fsanitize=address,undefined', '-fno-omit-frame-pointer',
     '-include', str(root / 'test/sdcc_shim.h'), '-I' + str(root / 'test/stub'),
     '-I' + str(root), '-I' + str(root / 'uip'), '-I' + str(root / 'httpd'),
-    str(source), str(root / 'test/hw_mock.c'), str(root / 'rtl837x_bandwidth.c'),
+    str(source), str(root / 'test/hw_mock.c'), str(root / 'rtl837x_bandwidth.c'), str(root / 'rtl837x_storm.c'),
     '-o', str(binary)], check=True)
 subprocess.run([str(binary)], check=True)
