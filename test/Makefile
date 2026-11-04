@@ -212,3 +212,9 @@ $(addprefix $(BUILDDIR)/,test_snmp test_snmp_nine test_snmp_horaco_profile test_
 .PHONY: config-replay
 config-replay:
 	cd $(SRCROOT) && CC="$(CC)" python3 test/test_config_replay.py
+
+.PHONY: test_lag_tokens
+test_lag_tokens:
+	CC="$(CC)" python3 test_lag_tokens.py
+
+run: test_lag_tokens

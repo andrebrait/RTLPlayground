@@ -56,6 +56,8 @@
 - Commands
   - Reject malformed mirror port tokens, invalid source suffixes, and extra arguments
     after `mirror status` or `mirror off` without changing the mirroring configuration.
+  - Reject incomplete LAG group numbers and extra arguments after `lag show`,
+    `lag <group> d` or `lag <group> lacp off` without changing configuration.
 
 - Time
   - `rtl8372_init()` sets SDS 0 to SGMII as the stock firmware does. The masks were 0, so on RTL8372
