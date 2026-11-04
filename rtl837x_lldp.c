@@ -28,7 +28,7 @@ static __code const uint8_t lldp_oui_8023[3] = {0x00, 0x12, 0x0f};
 
 static __xdata struct timer lldp_timer;
 __xdata uint8_t lldp_seconds;
-__xdata uint16_t lldp_logical_port_status = 0xffff;
+__xdata uint16_t lldp_logical_port_status = MACHINE_DEFAULT_LLDP_PORTS;
 __xdata struct lldp_neighbor lldp_nb[LLDP_NB_MAX];
 static __xdata struct lldp_neighbor lldp_tmp;
 __xdata uint8_t lldp_tlv_mask = LLDP_TX_ALL;

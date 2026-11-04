@@ -224,6 +224,7 @@ void send_l2(uint16_t idx) { (void)idx; }
 void l2_delete(uint16_t idx) { (void)idx; }
 void send_mirror(void) { }
 void send_mtu(void) { }
+void send_defaults(void) { }
 static unsigned configuration_reads;
 void send_config(void) {
     configuration_reads++;

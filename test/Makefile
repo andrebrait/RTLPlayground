@@ -58,6 +58,11 @@ TESTS += $(BUILDDIR)/test_rx_bounds
 $(BUILDDIR)/test_rx_bounds: test_rx_bounds.c $(SRCROOT)/uip/uip_rx.h | $(BUILDDIR)
 	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS)
 
+# trap_init() with LLDP off and on by default
+TESTS += $(BUILDDIR)/test_trap_lldp0 $(BUILDDIR)/test_trap_lldp1
+$(BUILDDIR)/test_trap_lldp%: test_trap_defaults.c $(SRCROOT)/rtl837x_trap.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) -DMACHINE_DEFAULT_LLDP=$* $< -o $@ $(LDFLAGS)
+
 # Prometheus exporter: metrics.c is included by the test, metrics_cli.c is linked.
 TESTS += $(BUILDDIR)/test_metrics
 $(BUILDDIR)/test_metrics: test_metrics.c $(SRCROOT)/metrics.c $(SRCROOT)/metrics_cli.c $(SRCROOT)/httpd/html_out.c $(SRCROOT)/metrics.h | $(BUILDDIR)
@@ -69,7 +74,7 @@ TESTS += $(BUILDDIR)/test_prometheus_status_json
 $(BUILDDIR)/test_prometheus_status_json: test_prometheus_status_json.c test_page_json.c $(TABLE_ENV) hw_mock.h | $(BUILDDIR)
 	$(CC) $(CFLAGS) -DPROMETHEUS test_prometheus_status_json.c $(filter %.c,$(TABLE_ENV)) -o $@ $(LDFLAGS)
 
-all: run lldp-conf prometheus-gui
+all: run lldp-conf prometheus-gui prune-defaults
 
 $(BUILDDIR):
 	mkdir -p $(BUILDDIR)
@@ -96,6 +101,10 @@ $(BUILDDIR)/test_nic_rx: test_nic_rx.c $(SRCROOT)/rtl837x_nic.c $(SRCROOT)/rtl83
 
 $(BUILDDIR)/test_page_json: test_page_json.c $(TABLE_ENV) hw_mock.h | $(BUILDDIR)
 	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@ $(LDFLAGS)
+
+TESTS += $(BUILDDIR)/test_page_json_mixed
+$(BUILDDIR)/test_page_json_mixed: test_page_json.c $(TABLE_ENV) hw_mock.h | $(BUILDDIR)
+	$(CC) $(CFLAGS) -DRTLP_TEST_N10G=1 $(filter %.c,$^) -o $@ $(LDFLAGS)
 
 # rtl837x_lacp.c is compiled UNMODIFIED from the firmware tree.
 $(BUILDDIR)/test_lacp: test_lacp.c $(SRCROOT)/rtl837x_lacp.c $(SRCROOT)/timer.c | $(BUILDDIR)
@@ -147,6 +156,10 @@ NODE ?= node
 lldp-conf:
 	cd $(SRCROOT) && $(NODE) test/test_lldp_conf.cjs
 
+# Save to flash leaves out settings at their board default (html/app.js pruneDefaults)
+prune-defaults:
+	cd $(SRCROOT) && $(NODE) test/test_prune_defaults.cjs
+
 NODE ?= node
 # Prometheus card on the System page and its saved on/off command
 prometheus-gui:
@@ -155,7 +168,7 @@ prometheus-gui:
 clean:
 	rm -rf $(BUILDDIR)
 
-.PHONY: all run lldp-conf prometheus-gui clean test_mirror l2-delete l2-load
+.PHONY: all run lldp-conf prometheus-gui prune-defaults clean test_mirror l2-delete l2-load
 
 
 # SNMP host benches compile the same firmware sources; listener is opt-in here.

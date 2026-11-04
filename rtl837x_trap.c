@@ -2,6 +2,7 @@
 #include "rtl837x_sfr.h"
 #include "rtl837x_regs.h"
 #include "rtl837x_trap.h"
+#include "machine.h"
 
 #pragma codeseg BANK2
 #pragma constseg BANK2
@@ -11,6 +12,8 @@ extern __xdata uint8_t sfr_data[4];
 void trap_init(void) __banked
 {
 	REG_SET(RTL837X_EXT_CPU_CTRL, CPU_PORT);
+	// LLDP on by default needs what "lldp on" sets up: LLDPDUs trapped to the CPU
+	trap_rma_set(RTL837X_RMA0E_CONF, MACHINE_DEFAULT_LLDP ? RTL837X_RMA_ACT_TRAP : RTL837X_RMA_ACT_FORWARD);
 }
 
 void trap_rma_set(uint16_t reg, uint8_t act) __banked
