@@ -498,6 +498,8 @@ void send_lldp(int s)
 	json_object_object_add(p, "pvid", json_object_new_int(20));
 	json_object_object_add(p, "mtu", json_object_new_int(1518));
 	json_object_object_add(p, "agg", json_object_new_int(1));
+	json_object_object_add(p, "mau", json_object_new_int(30));
+	json_object_object_add(p, "aneg", json_object_new_int(2));
 	json_object_object_add(p, "warn", json_object_new_int(7));
 	json_object_object_add(p, "ttl", json_object_new_int(117));
 	json_object_array_add(neighbors, p);
