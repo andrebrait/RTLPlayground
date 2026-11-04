@@ -779,8 +779,12 @@ void send_defaults(void)
 		slen += strtox(outbuf + slen, ",\"lldp\":");
 		bool_to_html((MACHINE_DEFAULT_LLDP_PORTS >> i) & 1);
 		if (!machine.is_sfp[i]) {
-			slen += strtox(outbuf + slen, ",\"en\":1,\"eee\":");
-			bool_to_html(MACHINE_DEFAULT_EEE);
+			slen += strtox(outbuf + slen, ",\"en\":1");
+			// Mixed-speed boards use different EEE speed defaults at boot and in the CLI.
+			if (!machine.n_10g) {
+				slen += strtox(outbuf + slen, ",\"eee\":");
+				bool_to_html(MACHINE_DEFAULT_EEE);
+			}
 		}
 		char_to_html('}');
 		if (i < MACHINE_MAX_PORT)

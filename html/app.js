@@ -5223,13 +5223,18 @@ function mergeConf(base, texts) {
 // lines that other lines depend on (qualified eee, speed and duplex) stay.
 function pruneDefaults(conf, d) {
     if (!d) return conf;
+    // Noncanonical scalar commands may hide an earlier override; preserve the whole script.
+    if (conf.some(function(l) {
+        return /^(port \S+ (on|off|lldp)\b|lldp (on|off)\b)/.test(l) &&
+            !/^(port [1-9]\d? (on|off|lldp (permit|block))|lldp (on|off))$/.test(l)
+    })) return conf;
     var P = {},
         isDefault = {};
     d.ports.forEach(function(p) {
         P[p.portNum] = p
     });
     var eeeQualified = conf.some(function(l) {
-        return /^eee /.test(l) && !/^eee (on|off) \d{1,2}$/.test(l)
+        return /^eee /.test(l) && !/^eee (on|off) [1-9]\d?$/.test(l)
     });
 
     function setting(l) {
