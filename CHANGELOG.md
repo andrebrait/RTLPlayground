@@ -27,6 +27,15 @@
   - The web session expires after one hour without a request (was 200 seconds). The UI stops
     polling while its tab is hidden, so with 200 seconds switching tabs for a few minutes logged
     you out. `session <seconds>` still sets it.
+  - Place LLDP warnings beside the affected maximum frame size, aggregation state
+    and chassis ID. Open warning details for local and advertised values; read
+    existing MTU and LAG endpoints on demand without changing firmware defaults.
+    Closing a warning restores keyboard focus to the correct neighbour even when
+    multiple neighbours share a physical port and the table refreshes.
+  - The LLDP neighbour table shows each neighbour's link from its 802.3 MAC/PHY
+    Status TLV: the MAU type, such as 1000BASE-T FD, and whether
+    auto-negotiation is on. `/lldp.json` has them as `mau` and `aneg`, and
+    `lldp show` prints `mau <type>`, followed by `auto` when it is on.
 
 ## Fixed
 
