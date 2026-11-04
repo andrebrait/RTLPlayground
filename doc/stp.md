@@ -135,6 +135,14 @@ A warm reset from an unsaved blocking state restored global STP off and all fron
 ports forwarding, with the saved configuration unchanged. Boot restores
 forwarding before replaying the saved settings.
 
+The timer migration was exercised on the same switch with build `16f2c128`.
+Port 3 alone participated in RSTP with automatic edge detection: it started
+blocking and reached edge forwarding after 3.5 seconds, while excluded uplink
+8 stayed forwarding. The metrics clock advanced 16 seconds with a stable boot
+time. All per-port settings and global STP off were restored; the saved
+configuration was byte-identical. This does not test rapid convergence with a
+second bridge.
+
 Root election between real bridges, loop prevention, blocked-port BPDU RX/TX
 exemptions and selective hardware FDB flushing remain untested. The register
 references establish field layouts, not those bypass properties.

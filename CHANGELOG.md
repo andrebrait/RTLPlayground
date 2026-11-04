@@ -84,6 +84,9 @@
     A hardware test verified blocking, learning and timed forwarding on port 3
     while excluded ports stayed forwarding; blocked-port BPDU delivery and
     multi-bridge interoperability remain unverified.
+    The refreshed timer integration was also exercised on hardware: automatic
+    edge recovery, clock progression, LLDP reception and the native port/LAG UI
+    passed, with the saved configuration unchanged.
     L2 table, IGMP, bandwidth, storm control and
     cable test are not ported: their commands are refused and their pages are
     empty. Temperature remains unavailable without a verified sensor mapping.
