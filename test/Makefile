@@ -119,6 +119,7 @@ run: $(TESTS) $(BUILDDIR)/fileadder snmp snmp-horaco-profile snmp-status snmp-cl
 	done; \
 	python3 test_fileadder.py $(BUILDDIR)/fileadder || fail=1; \
 	if [ $$fail -ne 0 ]; then echo "TESTS FAILED"; exit 1; else echo "ALL TESTS PASSED"; fi
+	CC="$(CC)" python3 test_lacp_cli.py
 
 clean:
 	rm -rf $(BUILDDIR)

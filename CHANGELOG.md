@@ -58,6 +58,8 @@
     after `mirror status` or `mirror off` without changing the mirroring configuration.
   - Reject incomplete LAG group numbers and extra arguments after `lag show`,
     `lag <group> d` or `lag <group> lacp off` without changing configuration.
+  - Reject extra arguments to `lacp off` and `lacp show`. A malformed
+    `lacp off 1` no longer silently disables every LACP group.
 
 - Time
   - `rtl8372_init()` sets SDS 0 to SGMII as the stock firmware does. The masks were 0, so on RTL8372
