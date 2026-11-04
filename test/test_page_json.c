@@ -312,6 +312,16 @@ static void t_status_eee(void)
 	CHECK(strstr(out_buf, " INACTIVE ") != NULL, "CLI reports EEE inactive on port 8");
 }
 
+static void t_defaults(void)
+{
+	printf("[test] /defaults.json reports the machine_defaults.h values\n");
+	out_reset();
+	send_defaults();
+	CHECK(has("{\"lldp\":0,\"ports\":[{\"portNum\":") && has(",\"lldp\":1,\"en\":1,\"eee\":1}"),
+	      "LLDP off, every port permitted, copper ports up with EEE");
+	CHECK(slen <= TCP_OUTBUF_SIZE && balanced(), "valid JSON that fits the buffer");
+}
+
 static void t_status_eee_multigig(void)
 {
 	printf("[test] /status.json preserves independent 5G and 10G EEE abilities\n");
@@ -423,6 +433,7 @@ int main(void)
 #endif
 	t_status_fc();
 	t_status_eee();
+	t_defaults();
 	t_status_eee_multigig();
 	t_info_mapping();
 	t_pause_set();

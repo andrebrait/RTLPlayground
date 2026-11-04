@@ -151,6 +151,12 @@
   - The web session expires after one hour without a request (was 200 seconds). The UI stops
     polling while its tab is hidden, so with 200 seconds switching tabs for a few minutes logged
     you out. `session <seconds>` still sets it.
+  - Saving to flash leaves out `port <n> on|off`, `eee on|off <n>`, `port <n> lldp permit|block`
+    and `lldp on|off` when their last line sets what the switch starts with, together with every
+    earlier line for that setting, so switching a setting back lets the default apply again. The
+    defaults are build-time values in `machine_defaults.h`, which a machine header may override;
+    the boot code sets them and `/defaults.json` reports them. Flow control, MTU, SFP ports, and
+    lines that speed, duplex or qualified `eee` lines depend on are always kept.
   - Reuse the JSON string appender to reduce BANK1 code usage without changing responses.
     The appender is shared in the common area, so the STP pages in BANK4 and the HTTP
     responses in `httpd.c` use it too.

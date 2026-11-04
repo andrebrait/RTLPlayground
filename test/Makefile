@@ -68,6 +68,11 @@ TESTS += $(BUILDDIR)/test_rx_bounds
 $(BUILDDIR)/test_rx_bounds: test_rx_bounds.c $(SRCROOT)/uip/uip_rx.h | $(BUILDDIR)
 	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS)
 
+# trap_init() with LLDP off and on by default
+TESTS += $(BUILDDIR)/test_trap_lldp0 $(BUILDDIR)/test_trap_lldp1
+$(BUILDDIR)/test_trap_lldp%: test_trap_defaults.c $(SRCROOT)/rtl837x_trap.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) -DMACHINE_DEFAULT_LLDP=$* $< -o $@ $(LDFLAGS)
+
 # Prometheus exporter: metrics.c is included by the test, metrics_cli.c is linked.
 TESTS += $(BUILDDIR)/test_metrics
 $(BUILDDIR)/test_metrics: test_metrics.c $(SRCROOT)/metrics.c $(SRCROOT)/metrics_cli.c $(SRCROOT)/httpd/html_out.c $(SRCROOT)/metrics.h | $(BUILDDIR)
@@ -200,6 +205,10 @@ run: $(TESTS) $(BUILDDIR)/fileadder snmp snmp-horaco-profile snmp-status snmp-cl
 NODE ?= node
 lldp-conf:
 	cd $(SRCROOT) && $(NODE) test/test_lldp_conf.cjs
+
+# Save to flash leaves out settings at their board default (html/app.js pruneDefaults)
+prune-defaults:
+	cd $(SRCROOT) && $(NODE) test/test_prune_defaults.cjs
 
 NODE ?= node
 # Prometheus card on the System page and its saved on/off command
