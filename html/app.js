@@ -3036,7 +3036,8 @@ function speedLabel(s) {
 var PT = {
     rows: [],
     orig: [],
-    pending: 0
+    pending: 0,
+    polls: 0
 };
 // "fc" bits of /status.json, as PAUSE_* in rtl837x_pause.h
 var FC_ADV = 1;
@@ -3311,7 +3312,6 @@ function buildPorts() {
         r.spd.style.width = w + "px"
     });
     portsStatus();
-    loadMtu();
 }
 
 function loadMtu() {
@@ -3466,9 +3466,16 @@ window.addEventListener("beforeunload", function(e) {
 });
 tabHooks.ports = {
     enter: function() {
-        needPorts(buildPorts)
+        needPorts(function() {
+            buildPorts();
+            loadMtu();
+        })
     },
-    status: portsStatus,
+    // The MTU is not in /status.json: re-read it every 4th poll, so changes made elsewhere show
+    status: function() {
+        portsStatus();
+        if (++PT.polls % 4 === 0) loadMtu();
+    },
     // and confirmModal when switching to another page
     canLeave: function(go) {
         if (!PT.pending) return true;
