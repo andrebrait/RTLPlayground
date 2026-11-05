@@ -56,3 +56,27 @@ The peripheral functions are accessed through 2 different mechanisms:
 The playground image shows access to the different types of memory using the
 SDCC compiler. Any support of Linux or e.g. Zephyr would require porting gcc.
 There are FreeRTOS ports to 8051 processors using sdcc, however.
+
+## RTL836x (TL-SG108PE V5): temperature
+
+No readable temperature interface has been verified for this board's RTL8370N
+(chip ID `0x6368`). The
+[RTL8367C SDK register map](https://github.com/shiroichiheisen/Realtek-Unmanaged-Switch-Arduino-Library/blob/ccd863d61a90e90f096fbc77e3959eadce914213/API_Source/rtl8367c_reg.h)
+names high/low thermal interrupt status and mask bits at `0x112e` and `0x112f`,
+but those are not a temperature value or a Celsius conversion. The inspected
+SDK switch API provides no temperature-reading function.
+
+The RTL837x sensor addresses must not be reused: `0x0338`, `0x0340` and `0x0350`
+are queue-weight registers in the native SDK map. The
+[RTL8370NI-VB datasheet](http://kstmicro.com/upload/wp/2024/08/2208301730_Realtek-Semicon-RTL8370NI-VB-CG_C5155990.pdf)
+lists temperature ratings and package thermal characteristics, not a sensor
+programming interface.
+
+On build `79d1f3ac`, a read-only HTTP check confirmed `chip_temp: "n/a"` in
+`/information.json` and no SoC temperature samples in `/metrics`. No sensor,
+PHY or switch-register writes were made for this investigation.
+
+This does not establish that the silicon lacks a sensor. Implementing a
+reading requires an exact-chip value register, any enable/validity sequence,
+and a documented conversion or independently verified calibration. Until
+those are known, the UI remains unavailable and no temperature is fabricated.
