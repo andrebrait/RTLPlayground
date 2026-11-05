@@ -116,3 +116,20 @@ Both are available in the
 [pinned datasheet collection](https://github.com/jameywine/realtek-doc/tree/e17db159796ec389651516d68351d166988978da/datasheets).
 This expanded search did not establish a safe native read path. No device
 registers were read or written during it.
+
+### Read-only probe
+
+With approval, build `79d1f3ac` on a TL-SG108PE V5 read the RTL8367D thermal
+addresses with `regget` only; nothing was written. `0x1d90`–`0x1da5` and
+`0x1109` responded, `0x1da6`–`0x1dad` read zero, and no value behaved like a
+temperature over 40 samples in 10 minutes: `0x1d92`, `0x1d96`–`0x1d9a`,
+`0x1d9d` and `0x1d9e` never changed by a single count, while `0x1109`,
+`0x1d9f` and `0x1da4` (SRAM output) jumped across most of their range between
+samples. Two reads timed out (`0x1d9a` and `0x1d9d`) without a reset; avoid
+repeating such scans on a production switch.
+
+A photo of the top side of the board shows no separate temperature sensor. The
+8-pin device beside the switch chip is presumably the SPI flash, and the other
+ICs sit in the power and PoE circuits; their markings were not readable, and
+the bottom side was not inspected. The stock firmware contains no temperature
+strings. The temperature therefore stays unavailable on this board.
