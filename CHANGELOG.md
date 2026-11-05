@@ -213,6 +213,10 @@
     limits or flow-control mode.
   - Report invalid storm-control commands as errors instead of returning success
     after printing usage.
+- IGMP
+  - Validate received frame and IPv4 lengths, fragments, and every IGMPv3 record
+    before accessing the ASIC. Truncated reports no longer use stale buffer
+    bytes to change multicast membership.
 
 - Time
   - `rtl8372_init()` sets SDS 0 to SGMII as the stock firmware does. The masks were 0, so on RTL8372

@@ -90,6 +90,14 @@ Reports for groups in 224.0.0.0/24 are ignored: the switch floods that block
 even with IGMP on, and an entry for a group such as 224.0.0.251 (mDNS) would
 otherwise limit it to the ports that reported it, as RFC 4541 warns against.
 
+The receive handler checks the captured frame size, IPv4 version/header/total
+length and fragmentation before reading an IGMP report. For IGMPv3 it checks
+every declared record, source list and auxiliary-data length before touching
+the ASIC, so an incomplete later record cannot partially update a group.
+Truncated input and Ethernet padding never substitute stale receive-buffer
+bytes for a missing payload. This validation does not add multi-record
+processing or source-specific multicast support.
+
 `igmp_show()` prints out the IGMP configuration on the CLI.
 
 
