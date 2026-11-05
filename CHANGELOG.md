@@ -220,6 +220,8 @@
     limits or flow-control mode.
   - Report invalid storm-control commands as errors instead of returning success
     after printing usage.
+  - Reject unknown or extra cable-test arguments on copper ports before
+    accessing the PHY or starting a link-interrupting diagnostic.
 - IGMP
   - Validate received frame and IPv4 lengths, fragments, and every IGMPv3 record
     before accessing the ASIC. Truncated reports no longer use stale buffer

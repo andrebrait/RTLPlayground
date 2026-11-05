@@ -1046,10 +1046,12 @@ void parse_port(void)
 	} else if (machine.is_sfp[phy_settings.port]) {
 		print_string(" is SFP no PHY information available.\n");
 	} else if (cmd_compare(2, "cabletest")) {
-		if (cmd_words_len > 3 && cmd_compare(3, "show"))
+		if (cmd_words_len == 3)
+			cabletest_run();
+		else if (cmd_words_len == 4 && cmd_compare(3, "show"))
 			cabletest_show();
 		else
-			cabletest_run();
+			cmd_error("port <port> cabletest [show]\n");
 #endif
 	} else if (cmd_compare(2, "10m")) {
 		print_string(" 10M\n");
