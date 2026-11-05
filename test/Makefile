@@ -108,7 +108,10 @@ $(BUILDDIR)/test_cpu_vlan_full $(BUILDDIR)/test_cpu_vlan_restricted $(BUILDDIR)/
 $(BUILDDIR)/fileadder: $(SRCROOT)/tools/fileadder.c | $(BUILDDIR)
 	$(CC) -g -O1 -Wall -fsanitize=address,undefined -fno-omit-frame-pointer $< -o $@ -lz
 
-run: $(TESTS) $(BUILDDIR)/fileadder snmp snmp-horaco-profile snmp-status snmp-cli snmp-replay config-replay
+test_mirror:
+	CC="$(CC)" python3 test_mirror.py
+
+run: $(TESTS) $(BUILDDIR)/fileadder snmp snmp-horaco-profile snmp-status snmp-cli snmp-replay config-replay test_mirror
 	@fail=0; for t in $(TESTS); do \
 		echo "=== $$t ==="; \
 		$$t || fail=1; \
@@ -120,7 +123,7 @@ run: $(TESTS) $(BUILDDIR)/fileadder snmp snmp-horaco-profile snmp-status snmp-cl
 clean:
 	rm -rf $(BUILDDIR)
 
-.PHONY: all run clean
+.PHONY: all run clean test_mirror
 
 
 # SNMP host benches compile the same firmware sources; listener is opt-in here.
