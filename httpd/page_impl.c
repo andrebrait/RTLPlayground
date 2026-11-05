@@ -21,6 +21,9 @@
 #ifdef SNMP
 #include "snmp.h"
 #endif
+#ifdef PROMETHEUS
+#include "metrics.h"
+#endif
 
 // #define DEBUG
 #include "debug.h"
@@ -300,6 +303,10 @@ void send_basic_info(void)
         }
         char_to_html(']');
     }
+#endif
+#ifdef PROMETHEUS
+	slen += strtox(outbuf + slen, ",\"prometheus\":");
+	itoa_html(prometheus_enabled);
 #endif
 	char_to_html('}');
 }

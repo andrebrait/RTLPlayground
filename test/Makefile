@@ -63,7 +63,18 @@ TESTS += $(BUILDDIR)/test_trap_lldp0 $(BUILDDIR)/test_trap_lldp1
 $(BUILDDIR)/test_trap_lldp%: test_trap_defaults.c $(SRCROOT)/rtl837x_trap.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) -DMACHINE_DEFAULT_LLDP=$* $< -o $@ $(LDFLAGS)
 
-all: run prune-defaults lldp-conf
+# Prometheus exporter: metrics.c is included by the test, metrics_cli.c is linked.
+TESTS += $(BUILDDIR)/test_metrics
+$(BUILDDIR)/test_metrics: test_metrics.c $(SRCROOT)/metrics.c $(SRCROOT)/metrics_cli.c $(SRCROOT)/metrics.h | $(BUILDDIR)
+	$(CC) $(CFLAGS) -DPROMETHEUS test_metrics.c $(SRCROOT)/metrics_cli.c -o $@ $(LDFLAGS)
+TESTS += $(BUILDDIR)/test_metrics_http
+$(BUILDDIR)/test_metrics_http: test_metrics_http.c test_httpd_tx.c $(SRCROOT)/httpd/httpd.c $(SRCROOT)/httpd/html_out.c $(SRCROOT)/uip/uip.c $(SRCROOT)/sessions.c $(SRCROOT)/timer.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) -DPROMETHEUS test_metrics_http.c $(SRCROOT)/httpd/httpd.c $(SRCROOT)/httpd/html_out.c $(SRCROOT)/uip/uip.c $(SRCROOT)/sessions.c $(SRCROOT)/timer.c -o $@ $(LDFLAGS)
+TESTS += $(BUILDDIR)/test_prometheus_status_json
+$(BUILDDIR)/test_prometheus_status_json: test_prometheus_status_json.c test_page_json.c $(TABLE_ENV) hw_mock.h | $(BUILDDIR)
+	$(CC) $(CFLAGS) -DPROMETHEUS test_prometheus_status_json.c $(filter %.c,$(TABLE_ENV)) -o $@ $(LDFLAGS)
+
+all: run prune-defaults lldp-conf prometheus-gui
 
 $(BUILDDIR):
 	mkdir -p $(BUILDDIR)
@@ -128,7 +139,7 @@ test_mirror:
 $(BUILDDIR)/test_lldp_tx: test_lldp_tx.c $(SRCROOT)/rtl837x_lldp.c $(SRCROOT)/rtl837x_lldp_tx_strings.c $(SRCROOT)/httpd/html_out.c $(SRCROOT)/timer.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) $(GC_CFLAGS) $^ -o $@ $(LDFLAGS) $(GC_LDFLAGS)
 
-run: $(TESTS) $(BUILDDIR)/fileadder snmp snmp-horaco-profile snmp-status snmp-cli snmp-replay config-replay test_mirror
+run: $(TESTS) $(BUILDDIR)/fileadder snmp snmp-horaco-profile snmp-status snmp-cli snmp-replay config-replay prometheus-replay test_mirror
 	@fail=0; for t in $(TESTS); do \
 		echo "=== $$t ==="; \
 		$$t || fail=1; \
@@ -153,10 +164,15 @@ NODE ?= node
 lldp-conf:
 	cd $(SRCROOT) && $(NODE) test/test_lldp_conf.cjs
 
+NODE ?= node
+# Prometheus card on the System page and its saved on/off command
+prometheus-gui:
+	cd $(SRCROOT) && $(NODE) test/test_prometheus_gui.cjs
+
 clean:
 	rm -rf $(BUILDDIR)
 
-.PHONY: all run clean test_mirror l2-delete
+.PHONY: all run prometheus-gui clean test_mirror l2-delete
 
 
 # SNMP host benches compile the same firmware sources; listener is opt-in here.
@@ -270,3 +286,6 @@ test_cable_cli:
 
 run: test_cable_cli
 .PHONY: lldp-conf
+.PHONY: prometheus-replay
+prometheus-replay:
+	cd $(SRCROOT) && CC="$(CC)" python3 test/test_prometheus_replay.py
