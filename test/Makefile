@@ -44,7 +44,8 @@ TESTS = $(BUILDDIR)/test_cmd_editor \
         $(BUILDDIR)/test_cpu_vlan_8372 \
         $(BUILDDIR)/test_nic_rx \
         $(BUILDDIR)/test_lacp \
-        $(BUILDDIR)/test_lldp
+        $(BUILDDIR)/test_lldp \
+        $(BUILDDIR)/test_lldp_tx
 
 # The table tests link the register mock and one environment file; stub/
 # stands in for the two headers a firmware build generates.
@@ -62,7 +63,7 @@ TESTS += $(BUILDDIR)/test_trap_lldp0 $(BUILDDIR)/test_trap_lldp1
 $(BUILDDIR)/test_trap_lldp%: test_trap_defaults.c $(SRCROOT)/rtl837x_trap.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) -DMACHINE_DEFAULT_LLDP=$* $< -o $@ $(LDFLAGS)
 
-all: run prune-defaults
+all: run prune-defaults lldp-conf
 
 $(BUILDDIR):
 	mkdir -p $(BUILDDIR)
@@ -124,6 +125,9 @@ $(BUILDDIR)/fileadder: $(SRCROOT)/tools/fileadder.c | $(BUILDDIR)
 test_mirror:
 	CC="$(CC)" python3 test_mirror.py
 
+$(BUILDDIR)/test_lldp_tx: test_lldp_tx.c $(SRCROOT)/rtl837x_lldp.c $(SRCROOT)/rtl837x_lldp_tx_strings.c $(SRCROOT)/httpd/html_out.c $(SRCROOT)/timer.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) $(GC_CFLAGS) $^ -o $@ $(LDFLAGS) $(GC_LDFLAGS)
+
 run: $(TESTS) $(BUILDDIR)/fileadder snmp snmp-horaco-profile snmp-status snmp-cli snmp-replay config-replay test_mirror
 	@fail=0; for t in $(TESTS); do \
 		echo "=== $$t ==="; \
@@ -143,6 +147,11 @@ l2-load:
 NODE ?= node
 prune-defaults:
 	cd $(SRCROOT) && $(NODE) test/test_prune_defaults.cjs
+
+# Save to flash keeps one "lldp tlv" line per TLV (html/app.js mergeConf)
+NODE ?= node
+lldp-conf:
+	cd $(SRCROOT) && $(NODE) test/test_lldp_conf.cjs
 
 clean:
 	rm -rf $(BUILDDIR)
@@ -260,3 +269,4 @@ test_cable_cli:
 	CC="$(CC)" python3 test_cable_cli.py
 
 run: test_cable_cli
+.PHONY: lldp-conf
