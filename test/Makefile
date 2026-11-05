@@ -73,6 +73,10 @@ TESTS += $(BUILDDIR)/test_trap_lldp0 $(BUILDDIR)/test_trap_lldp1
 $(BUILDDIR)/test_trap_lldp%: test_trap_defaults.c $(SRCROOT)/rtl837x_trap.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) -DMACHINE_DEFAULT_LLDP=$* $< -o $@ $(LDFLAGS)
 
+TESTS += $(BUILDDIR)/test_cable_836x
+$(BUILDDIR)/test_cable_836x: test_cable_836x.c $(SRCROOT)/rtl837x_cabletest.c $(SRCROOT)/timer.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) -DMACHINE_NAME=TPLINK_TL_SG108PE_V5 $< $(SRCROOT)/timer.c -o $@ $(LDFLAGS)
+
 # Prometheus exporter: metrics.c is included by the test, metrics_cli.c is linked.
 TESTS += $(BUILDDIR)/test_metrics
 $(BUILDDIR)/test_metrics: test_metrics.c $(SRCROOT)/metrics.c $(SRCROOT)/metrics_cli.c $(SRCROOT)/httpd/html_out.c $(SRCROOT)/metrics.h | $(BUILDDIR)
@@ -133,6 +137,7 @@ $(BUILDDIR)/test_rtl836x_phy: CFLAGS += -DMACHINE_NAME=TPLINK_TL_SG108PE_V5 \
     -Wno-parentheses -Wno-incompatible-pointer-types -Wno-int-to-pointer-cast -Wno-pointer-to-int-cast \
     -ffunction-sections -fdata-sections
 $(BUILDDIR)/test_rtl836x_phy: test_rtl836x_phy.c $(SRCROOT)/cmd_parser.c $(SRCROOT)/rtl836x_phy.c \
+    $(SRCROOT)/rtl837x_cabletest.c $(SRCROOT)/timer.c \
     $(SRCROOT)/machine/TPLINK_TL_SG108PE_V5_init.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) -Wl,--gc-sections
 

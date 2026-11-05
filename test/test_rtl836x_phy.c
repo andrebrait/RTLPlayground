@@ -26,6 +26,7 @@ const struct machine machine = {
     .phys_to_log_port = {0, 1, 2, 3, 4, 5, 6, 7, 0xff},
     .log_to_phys_port = {1, 2, 3, 4, 5, 6, 7, 8, 0}
 };
+volatile uint32_t ticks;
 bool lldp_enabled;
 uint16_t lldp_logical_port_status;
 static uint16_t registers[8][32];
@@ -46,6 +47,7 @@ void print_string_x(char *s) { print_string(s); }
 void print_byte(uint8_t n) { char s[8]; snprintf(s, sizeof(s), "%u", n); print_string(s); }
 void itoa(uint8_t n) { print_byte(n); }
 void print_short(uint16_t n) { char s[8]; snprintf(s, sizeof(s), "%u", n); print_string(s); }
+void itoa_short(uint16_t n) { print_short(n); }
 void print_phys_port(uint8_t n) { print_byte(n + 1); }
 void lldp_shutdown(uint16_t ports) { (void)ports; }
 

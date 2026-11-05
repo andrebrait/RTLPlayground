@@ -1045,6 +1045,7 @@ void parse_port(void)
 #if SOC_FAMILY == RTL837X
 	} else if (machine.is_sfp[phy_settings.port]) {
 		print_string(" is SFP no PHY information available.\n");
+#endif
 	} else if (cmd_compare(2, "cabletest")) {
 		if (cmd_words_len == 3)
 			cabletest_run();
@@ -1052,7 +1053,6 @@ void parse_port(void)
 			cabletest_show();
 		else
 			cmd_error("port <port> cabletest [show]\n");
-#endif
 	} else if (cmd_compare(2, "10m")) {
 		print_string(" 10M\n");
 		phy_settings.speed = PHY_SPEED_10M;
