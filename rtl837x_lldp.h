@@ -96,17 +96,20 @@
 #define LLDP_ORG_TLV_TYPE 127
 #define LLDP_ORG_TLV_HEADER_LENGTH 4
 #define LLDP_8021_SUBTYPE_PVID 1
+#define LLDP_8023_SUBTYPE_MAC_PHY 1
 #define LLDP_8023_SUBTYPE_LINK_AGG 3
 #define LLDP_8023_SUBTYPE_MAX_FRAME 4
 #define LLDP_AGG_CAPABLE 0x01
 #define LLDP_AGG_ACTIVE 0x02
 #define LLDP_AGG_ANNOUNCED 0x80
+#define LLDP_AUTONEG_ENABLED 0x02
+#define LLDP_ANEG_ANNOUNCED 0x80
 
 #define LLDP_WARN_MTU 0x01
 #define LLDP_WARN_AGG 0x02
 #define LLDP_WARN_DUPLICATE 0x04
 #define PORT_MAX_LEN_MASK 0x3fff
-#define LLDP_NB_JSON_LENGTH 271	/* separator + worst-case neighbour entry in /lldp.json */
+#define LLDP_NB_JSON_LENGTH 292	/* separator + worst-case neighbour entry in /lldp.json */
 
 struct lldp_neighbor {
     uint8_t port;		/* logical ingress port */
@@ -123,6 +126,8 @@ struct lldp_neighbor {
     uint16_t pvid;		/* 802.1 Port VLAN ID, 0 = not announced */
     uint16_t mtu;		/* 802.3 Maximum Frame Size, 0 = not announced */
     uint8_t agg;		/* 802.3 Link Aggregation status, LLDP_AGG_* bits */
+    uint16_t mau;		/* 802.3 MAC/PHY operational MAU type (IANA dot3MauType), 0 = unknown */
+    uint8_t aneg;		/* 802.3 MAC/PHY auto-negotiation: LLDP_AUTONEG_ENABLED, LLDP_ANEG_ANNOUNCED */
     uint8_t warn;		/* LLDP_WARN_* bits as of the last frame */
     uint16_t ttl;		/* seconds until the entry expires, 0 = free slot */
 };

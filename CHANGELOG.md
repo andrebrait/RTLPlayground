@@ -59,6 +59,10 @@
     existing MTU and LAG endpoints on demand without changing firmware defaults.
     Closing a warning restores keyboard focus to the correct neighbour even when
     multiple neighbours share a physical port and the table refreshes.
+  - The LLDP neighbour table shows each neighbour's link from its 802.3 MAC/PHY
+    Status TLV: the MAU type, such as 1000BASE-T FD, and whether
+    auto-negotiation is on. `/lldp.json` has them as `mau` and `aneg`, and
+    `lldp show` prints `mau <type>`, followed by `auto` when it is on.
 - HTTP
   - `/status.json` carries the flow control (`fc`) and EEE (`eee`) state of every port; `/eee.json` is gone.
   - The chip port of each front-panel port moved from `logPort` in every `/status.json` entry to one
