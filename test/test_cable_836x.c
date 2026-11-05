@@ -60,14 +60,15 @@ int main(void) {
     unsigned start_writes = writes; cabletest_run(); assert(writes == start_writes);
     /* No stale DONE result may be consumed before a completed poll. */
     poll(); assert(ct_state && !ct_have);
-    status[0] = 0x0048; lengths[0] = 120; /* 1.5m: API raw/2 in 2.5cm units. */
-    status[1] = 0x0050; lengths[1] = 40;  /* 0.5m */
-    status[2] = 0x0044; lengths[2] = 80;  /* 1.0m */
+    /* Raw words measured on open 2 m (A/C), 0 m (B/D) and 10 m (A/C) cables. */
+    status[0] = 0x0048; lengths[0] = 192;
+    status[1] = 0x0050; lengths[1] = 64;  /* B/D read 64 longer: below their zero */
+    status[2] = 0x0044; lengths[2] = 768;
     status[3] = 0x0148; lengths[3] = 65535; /* Unknown full word, not OPEN. */
     control |= 0x8000; poll();
     assert(!ct_state && ct_have && ct_valid && control == 0x12f2 && !bmcr_writes && bmcr == 0x1140);
-    assert(strstr(output, "Pair A: open at 1.5 m") && strstr(output, "Pair B: short at 0.5 m"));
-    assert(strstr(output, "Pair C: impedance mismatch at 1.0 m") && strstr(output, "Pair D: unknown"));
+    assert(strstr(output, "Pair A: open at 2.0 m\n") && strstr(output, "Pair B: short at 0.0 m\n"));
+    assert(strstr(output, "Pair C: impedance mismatch at 10.0 m\n") && strstr(output, "Pair D: unknown"));
     reads = writes = 0; cabletest_show(); assert(!reads && !writes);
     reset(); cabletest_run();
     /* An admin change during the test must not be overwritten at completion. */

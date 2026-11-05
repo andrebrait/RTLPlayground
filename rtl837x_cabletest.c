@@ -32,8 +32,15 @@
 #define RTCT_ST_DONE		0x40
 #define RTCT_ST_CROSS_SHORT	0x80
 
+#if SOC_FAMILY == RTL836X
+/* Fitted to open 0, 2, 3 and 10 m cables; pairs B and D read 64 counts longer */
+#define RTCT_LEN_ZERO		50
+#define RTCT_LEN_ZERO_BD	114
+#define RTCT_LEN_PER_50CM	36
+#else
 #define RTCT_LEN_ZERO		150
 #define RTCT_LEN_PER_50CM	43
+#endif
 
 #define PHY_POWER		0xa610
 #define PHY_POWER_OFF		0x0800
@@ -126,8 +133,9 @@ bool rtl_phy_cable_test_get_status(uint8_t port) __banked
 		phy_read(port, PHY_MMD31, RTCT_SRAM_DATA);
 		ct_len[ct_pair] = SFR_DATA_U16;
 #if SOC_FAMILY == RTL836X
-		/* SDK raw/2 is in 2.5cm units; the CLI stores decimetres. */
-		ct_len[ct_pair] /= 8;
+		ct_ctrl = ct_pair & 1 ? RTCT_LEN_ZERO_BD : RTCT_LEN_ZERO;
+		ct_len[ct_pair] = ct_len[ct_pair] > ct_ctrl ?
+			((uint32_t)(ct_len[ct_pair] - ct_ctrl) * 5 + RTCT_LEN_PER_50CM / 2) / RTCT_LEN_PER_50CM : 0;
 #else
 		ct_len[ct_pair] = ct_len[ct_pair] > RTCT_LEN_ZERO ? ct_len[ct_pair] - RTCT_LEN_ZERO : 0;
 		ct_len[ct_pair] = ct_len[ct_pair] * 5 / RTCT_LEN_PER_50CM;

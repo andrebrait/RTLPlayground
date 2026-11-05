@@ -115,17 +115,18 @@
     Existing first-record IGMPv3 behavior and IP-based (not VLAN-specific)
     groups are retained.
     Native `port <port> cabletest [show]` uses the RTL8370N's RTCT result
-    addresses and SDK distance units without overriding the port's admin state.
+    addresses without overriding the port's admin state.
     Host tests cover fault decoding, distance conversion, stale completion,
-    timeout cleanup and concurrent admin changes. On physical port 5, open
-    cables of nominal 2 m, 3 m and 10 m reported `open` on all pairs at
-    2.4 to 3.2 m, 3.2 to 4.0 m and 9.6 to 10.4 m. Distances come in 0.8 m
-    steps, and pairs B and D read one step longer than A and C. A healthy 1G
-    link reported `ok` on all four pairs. During each test the link went down
-    and recovered at its previous speed within 7 s. PHY settings and the saved
-    configuration were unchanged. Shorts and impedance mismatches are untested
-    against real faults, and the result of a pair unused by a 100M link is
-    undefined.
+    timeout cleanup and concurrent admin changes. The raw length word changes
+    in steps of 64, and pairs B and D read 64 higher than A and C. As on the
+    RTL837x, the distance is a zero offset and scale fitted on open cables:
+    nominal 0 m (a camera adapter), 2 m, 3 m and 10 m on physical port 5 read
+    0.0 to 0.2 m, 2.0 m, 2.9 m and 10.0 m on every pair. One raw step is
+    about 0.9 m. A healthy 1G link reported `ok` on all four
+    pairs. During each test the link went down and recovered at its previous
+    speed within 7 s. PHY settings and the saved configuration were unchanged.
+    Shorts and impedance mismatches are untested against real faults, and the
+    result of a pair unused by a 100M link is undefined.
     Temperature remains unavailable without a verified sensor mapping.
     The SNMP agent and Prometheus exporter build with `SNMP=1` and `PROMETHEUS=1`:
     counters come from the native MIB, link, speed and admin state from the port
