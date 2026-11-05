@@ -103,7 +103,9 @@
     Native bandwidth and storm control use 8-kbit/s steps from 8 to 1000000
     kbit/s on the eight front ports. Storm control supports kbit/s only; PPS is
     refused. Host tests cover limits, retained meter modes, packed fields and
-    calibration preservation; hardware rate accuracy is not yet verified.
+    calibration preservation. Hardware checks cover port-3 readback, invalid
+    requests, browser Apply and rate-dependent egress delay; calibrated ingress
+    and storm throughput remain unverified.
     IGMP and cable test are not ported: their commands are refused and their
     pages are empty. Temperature remains unavailable without a verified sensor
     mapping.

@@ -36,7 +36,11 @@ Preamble/IFG accounting is disabled for the selected meter without changing
 adjacent meters. Bucket and clock calibration are left untouched.
 
 Host tests cover both banks, retained modes, selectors, calibration preservation
-and rejected inputs. Hardware storm-rate accuracy is not yet verified.
+and rejected inputs. Build `f1fe7cf4` on a TL-SG108PE V5 exercised all four
+classes on port 3, confirmed JSON readback, refused PPS/misaligned requests,
+and preserved the bucket register. The browser applied and removed an
+8-kbit/s broadcast limit. All classes were restored off without saving.
+Hardware storm-rate accuracy needs a controlled ingress traffic source.
 The registers and traffic measurements below describe the RTL837x backend.
 
 ## Registers

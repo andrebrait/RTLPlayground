@@ -123,7 +123,7 @@ void bandwidth_status(uint8_t port) __banked
 		if (count == RTL836X_RATE_OFF)
 			print_string("disabled");
 		else {
-			print_string("0x"); print_long(count << 3); print_string(" kbps");
+			print_long(count << 3); print_string(" kbps");
 		}
 		if (!egress)
 			print_string(reg_bit_test(MISC_REG(port), 11) ? " fc" : " drop");
@@ -173,7 +173,7 @@ void storm_show(void) __banked
 		for (t = 0; t < STORM_TYPES; t++) {
 			print_string(storm_names[t]);
 			if (!reg_bit_test(STORM_CTRL(t), p)) print_string("off");
-			else { print_string("0x"); print_long(rtl836x_storm_get(p, t)); print_string(" kbps"); }
+			else { print_long(rtl836x_storm_get(p, t)); print_string(" kbps"); }
 		}
 		write_char('\n');
 	}
