@@ -208,10 +208,52 @@ void entry_to_l2mc(void)
 #endif
 
 
+/* Validate the complete report before the first table operation. */
+static uint8_t igmp_report_valid(void)
+{
+	__xdata uint8_t hlen;
+	__xdata uint16_t left, pos, records, sources, size;
+
+	hlen = (IGMP_I->hlen & IGMP_IP_IHL) << 2;
+	left = NTOHS(IGMP_I->len);
+	if ((IGMP_I->hlen >> 4) != 4 || hlen < 20 ||
+	    left < hlen + 8 || left > uip_len - IGMP_IP_HDR ||
+	    (NTOHS(IGMP_I->flags) & 0x3fff))
+		return 0;
+	igmp_grp = IGMP_IP_HDR + hlen;
+	if (uip_buf[igmp_grp] != IGMP_V3_REPORT)
+		return 1;
+
+	pos = igmp_grp + IGMP_V3_RECORD_OFS;
+	left -= hlen + IGMP_V3_RECORD_OFS;
+	records = ((uint16_t)uip_buf[igmp_grp + 6] << 8) | uip_buf[igmp_grp + 7];
+	if (!records)
+		return 0;
+	do {
+		if (left < 8)
+			return 0;
+		sources = ((uint16_t)uip_buf[pos + 2] << 8) | uip_buf[pos + 3];
+		if (sources > ((left - 8) >> 2))
+			return 0;
+		size = 8 + (sources << 2);
+		if (uip_buf[pos + 1] > ((left - size) >> 2))
+			return 0;
+		size += (uint16_t)uip_buf[pos + 1] << 2;
+		pos += size;
+		left -= size;
+	} while (--records);
+	return 1;
+}
+
 uint8_t igmp_packet_handler(void) __banked
 {
-	if (IGMP_I->ipv4_tag != HTONS(UIP_ETHTYPE_IP) || IGMP_I->protocol != IGMP_PROTO)
+	if (uip_len < IGMP_IP_HDR + 20 || uip_len > sizeof uip_buf ||
+	    IGMP_I->ipv4_tag != HTONS(UIP_ETHTYPE_IP) || IGMP_I->protocol != IGMP_PROTO)
 		return 0;
+	if (!igmp_report_valid()) {
+		uip_len = 0;
+		return 1;
+	}
 	// By default we do not send anything out
 	uip_len = 0;
 
@@ -223,7 +265,6 @@ uint8_t igmp_packet_handler(void) __banked
 	}
 	write_char('\n');
 #endif
-	igmp_grp = IGMP_IP_HDR + ((IGMP_I->hlen & IGMP_IP_IHL) << 2);
 #ifdef DEBUG
 	print_string("Found IGMP, type: "); print_byte(uip_buf[igmp_grp]); write_char('\n');
 #endif
