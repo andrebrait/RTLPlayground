@@ -176,6 +176,7 @@ var LANG = {
         lldp_nb_chassis: "Chassis ID",
         lldp_nb_portid: "Port ID",
         lldp_nb_sysname: "System Name",
+        lldp_nb_sysdesc: "System Description",
         lldp_nb_portdesc: "Port Description",
         lldp_nb_addr: "Address",
         lldp_nb_caps: "Capabilities",
@@ -4984,6 +4985,7 @@ function lldpLoad() {
             tr.insertCell().textContent = n.chassis;
             tr.insertCell().textContent = n.portId;
             tr.insertCell().textContent = n.sysName;
+            tr.insertCell().textContent = n.sysDesc || "";
             tr.insertCell().textContent = n.portDesc || "";
             var ac = tr.insertCell();
             if (n.mgmtAddr) ac.appendChild(h("a", {

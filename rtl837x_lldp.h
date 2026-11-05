@@ -90,6 +90,7 @@
 #define LLDP_NB_CHASSIS_LENGTH 17
 #define LLDP_NB_PORT_ID_LENGTH 12
 #define LLDP_NB_SYS_NAME_LENGTH 16
+#define LLDP_NB_SYS_DESC_LENGTH 32
 #define LLDP_NB_PORT_DESC_LENGTH 16
 
 #define LLDP_ORG_TLV_TYPE 127
@@ -105,7 +106,7 @@
 #define LLDP_WARN_AGG 0x02
 #define LLDP_WARN_DUPLICATE 0x04
 #define PORT_MAX_LEN_MASK 0x3fff
-#define LLDP_NB_JSON_LENGTH 226	/* separator + worst-case neighbour entry in /lldp.json */
+#define LLDP_NB_JSON_LENGTH 271	/* separator + worst-case neighbour entry in /lldp.json */
 
 struct lldp_neighbor {
     uint8_t port;		/* logical ingress port */
@@ -115,6 +116,7 @@ struct lldp_neighbor {
     uint8_t port_id_mac;	/* 1 = port_id holds a MAC address, subtype 3 */
     char port_id[LLDP_NB_PORT_ID_LENGTH + 1];	/* NUL terminated, printable ASCII, or the MAC address */
     char sys_name[LLDP_NB_SYS_NAME_LENGTH + 1];	/* NUL terminated, printable ASCII */
+    char sys_desc[LLDP_NB_SYS_DESC_LENGTH + 1];	/* NUL terminated, printable ASCII */
     char port_desc[LLDP_NB_PORT_DESC_LENGTH + 1];	/* NUL terminated, printable ASCII */
     uint8_t mgmt_addr[4];	/* IPv4 management address, all zero = none */
     uint16_t caps;		/* enabled System Capabilities bits */
