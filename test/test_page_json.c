@@ -23,6 +23,7 @@ extern uint16_t slen;
 extern uint8_t  vlan_names[VLAN_NAMES_SIZE];
 extern uint16_t vlan_ptr;
 extern uint16_t management_vlan;
+extern const struct machine machine;
 
 /* The response body: what follows the blank line after the header. */
 static const char *body(void)
@@ -407,6 +408,16 @@ static void t_status_counters(void)
 	CHECK(balanced(), "valid JSON");
 }
 
+static void t_defaults(void)
+{
+	out_reset();
+	send_defaults();
+	if (machine.n_10g)
+		CHECK(!has("\"eee\":"), "mixed-speed EEE defaults remain unknown: CLI and boot advertise different speeds");
+	else
+		CHECK(has("\"eee\":1"), "EEE may be pruned when CLI and boot advertise the same speeds");
+}
+
 int main(void)
 {
 	printf("== httpd/page_impl.c JSON tests ==\n");
@@ -427,6 +438,7 @@ int main(void)
 	t_info_mapping();
 	t_pause_set();
 	t_eee_set();
+	t_defaults();
 	printf("\n%d checks, %d failed\n", tests_run, tests_failed);
 	return tests_failed ? 1 : 0;
 }

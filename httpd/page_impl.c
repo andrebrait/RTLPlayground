@@ -772,6 +772,34 @@ void send_storm(void)
 }
 
 
+// The MACHINE_DEFAULT_* values the boot code set up; every PHY is powered up at boot.
+// SFP ports have no "en" or "eee": the GUI keeps those lines as written.
+void send_defaults(void)
+{
+	slen = strtox(outbuf, HTTP_RESPONCE_JSON);
+	slen += strtox(outbuf + slen, "{\"lldp\":");
+	bool_to_html(MACHINE_DEFAULT_LLDP);
+	slen += strtox(outbuf + slen, ",\"ports\":[");
+	for (__xdata uint8_t i = MACHINE_MIN_PORT; i <= MACHINE_MAX_PORT; i++) {
+		slen += strtox(outbuf + slen, "{\"portNum\":");
+		itoa_html(machine.log_to_phys_port[i]);
+		slen += strtox(outbuf + slen, ",\"lldp\":");
+		bool_to_html((MACHINE_DEFAULT_LLDP_PORTS >> i) & 1);
+		if (!machine.is_sfp[i]) {
+			slen += strtox(outbuf + slen, ",\"en\":1");
+			// Mixed-speed boards use different EEE speed defaults at boot and in the CLI.
+			if (!machine.n_10g) {
+				slen += strtox(outbuf + slen, ",\"eee\":");
+				bool_to_html(MACHINE_DEFAULT_EEE);
+			}
+		}
+		char_to_html('}');
+		if (i < MACHINE_MAX_PORT)
+			char_to_html(',');
+	}
+	slen += strtox(outbuf + slen, "]}");
+}
+
 void send_isolation(void)
 {
 	__xdata uint16_t allow;

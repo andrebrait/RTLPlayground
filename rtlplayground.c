@@ -135,7 +135,7 @@ __xdata uint8_t tx_seq;
 
 __xdata bool stp_enabled;
 __xdata uint8_t igmpEnabled;
-__xdata bool lldp_enabled;
+__xdata bool lldp_enabled = MACHINE_DEFAULT_LLDP;
 __xdata char hostname[24];	/* device hostname, default set at boot, see rtl837x_common.h */
 __xdata uint8_t lacpEnabled;
 

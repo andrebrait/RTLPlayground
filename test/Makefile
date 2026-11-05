@@ -57,7 +57,12 @@ TESTS += $(BUILDDIR)/test_rx_bounds
 $(BUILDDIR)/test_rx_bounds: test_rx_bounds.c $(SRCROOT)/uip/uip_rx.h | $(BUILDDIR)
 	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS)
 
-all: run
+# trap_init() with LLDP off and on by default
+TESTS += $(BUILDDIR)/test_trap_lldp0 $(BUILDDIR)/test_trap_lldp1
+$(BUILDDIR)/test_trap_lldp%: test_trap_defaults.c $(SRCROOT)/rtl837x_trap.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) -DMACHINE_DEFAULT_LLDP=$* $< -o $@ $(LDFLAGS)
+
+all: run prune-defaults
 
 $(BUILDDIR):
 	mkdir -p $(BUILDDIR)
@@ -84,6 +89,10 @@ $(BUILDDIR)/test_nic_rx: test_nic_rx.c $(SRCROOT)/rtl837x_nic.c $(SRCROOT)/rtl83
 
 $(BUILDDIR)/test_page_json: test_page_json.c $(TABLE_ENV) hw_mock.h | $(BUILDDIR)
 	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@ $(LDFLAGS)
+
+TESTS += $(BUILDDIR)/test_page_json_mixed
+$(BUILDDIR)/test_page_json_mixed: test_page_json.c $(TABLE_ENV) hw_mock.h | $(BUILDDIR)
+	$(CC) $(CFLAGS) -DRTLP_TEST_N10G=1 $(filter %.c,$^) -o $@ $(LDFLAGS)
 
 # rtl837x_lacp.c is compiled UNMODIFIED from the firmware tree.
 $(BUILDDIR)/test_lacp: test_lacp.c $(SRCROOT)/rtl837x_lacp.c $(SRCROOT)/timer.c | $(BUILDDIR)
@@ -126,6 +135,10 @@ l2-delete:
 
 l2-load:
 	node test_l2_load.cjs
+
+NODE ?= node
+prune-defaults:
+	cd $(SRCROOT) && $(NODE) test/test_prune_defaults.cjs
 
 clean:
 	rm -rf $(BUILDDIR)
@@ -232,3 +245,4 @@ test_bw_cli:
 	CC="$(CC)" python3 test_bw_cli.py
 
 run: test_bw_cli
+.PHONY: prune-defaults
