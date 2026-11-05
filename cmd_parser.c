@@ -2165,7 +2165,9 @@ void cmd_parser(void) __banked
 			else
 				port_l2_learned();
 		} else if (cmd_compare(0, "igmp")) {
-			if (cmd_compare(1, "on"))
+			if (cmd_words_len != 2)
+				cmd_error("igmp on|off|show\n");
+			else if (cmd_compare(1, "on"))
 				igmp_enable();
 			else if (cmd_compare(1, "off"))
 				igmp_setup();

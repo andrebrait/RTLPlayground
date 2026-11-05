@@ -341,3 +341,8 @@ test_bw_cli:
 	CC="$(CC)" python3 test_bw_cli.py
 
 run: test_bw_cli
+.PHONY: test_igmp_cli
+test_igmp_cli:
+	CC="$(CC)" python3 test_igmp_cli.py
+
+run: test_igmp_cli
