@@ -95,6 +95,7 @@ bool rtl_phy_cable_test_get_status(uint8_t port) __banked
 		/* The 0x6368 SDK compares the complete status word, not a bit mask. */
 		ct_ctrl = SFR_DATA_U16; /* SDCC miscompiles switch on a 16-bit SFR. */
 		switch (ct_ctrl) {
+		case 0x0060: ct_result[ct_pair] = CABLE_RESULT_OK; break;	/* all pairs of a healthy 1G link */
 		case 0x0048: ct_result[ct_pair] = CABLE_RESULT_OPEN; break;
 		case 0x0050: ct_result[ct_pair] = CABLE_RESULT_SAME_SHORT; break;
 		case 0x0042:

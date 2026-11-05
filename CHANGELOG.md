@@ -117,12 +117,15 @@
     Native `port <port> cabletest [show]` uses the RTL8370N's RTCT result
     addresses and SDK distance units without overriding the port's admin state.
     Host tests cover fault decoding, distance conversion, stale completion,
-    timeout cleanup and concurrent admin changes. On physical port 5, the test
-    completed, cleared its trigger and recovered the 100M link automatically;
-    PHY settings and saved configuration were unchanged. Active pairs returned
-    an unclassified `0x0060`. Unused pairs reported shorts beyond the known cable
-    length range, so those results are not evidence of a cable fault. Physical
-    distance accuracy still needs a known-length cable fixture.
+    timeout cleanup and concurrent admin changes. On physical port 5, open
+    cables of nominal 2 m, 3 m and 10 m reported `open` on all pairs at
+    2.4 to 3.2 m, 3.2 to 4.0 m and 9.6 to 10.4 m. Distances come in 0.8 m
+    steps, and pairs B and D read one step longer than A and C. A healthy 1G
+    link reported `ok` on all four pairs. During each test the link went down
+    and recovered at its previous speed within 7 s. PHY settings and the saved
+    configuration were unchanged. Shorts and impedance mismatches are untested
+    against real faults, and the result of a pair unused by a 100M link is
+    undefined.
     Temperature remains unavailable without a verified sensor mapping.
     The SNMP agent and Prometheus exporter build with `SNMP=1` and `PROMETHEUS=1`:
     counters come from the native MIB, link, speed and admin state from the port

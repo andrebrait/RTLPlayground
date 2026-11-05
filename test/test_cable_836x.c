@@ -78,7 +78,7 @@ int main(void) {
     reset(); cabletest_run(); status[0] = 0x0041; status[1] = 0x0042; status[2] = 0x0060; status[3] = 0;
     control |= 0x8000; poll();
     assert(ct_result[0] == CABLE_RESULT_UNSPEC && ct_result[1] == CABLE_RESULT_MISMATCH);
-    assert(ct_result[2] == CABLE_RESULT_UNSPEC && ct_result[3] == CABLE_RESULT_UNSPEC);
+    assert(ct_result[2] == CABLE_RESULT_OK && ct_result[3] == CABLE_RESULT_UNSPEC);
     puts("Native cable diagnostics: fault distances, stale DONE, timeout, admin preservation and read-only show passed");
     return 0;
 }
