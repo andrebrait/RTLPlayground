@@ -111,8 +111,9 @@
     RX headers, retained state, membership updates and bounded failures.
     Hardware checks verified real IGMPv3 join/leave, unknown-group filtering,
     representative link-local multicast flooding and unchanged saved settings.
-    Cross-port listener forwarding remains unverified. Existing first-record
-    IGMPv3 behavior and IP-based (not VLAN-specific) groups are retained.
+    Cross-port listener forwarding and post-leave filtering also passed.
+    Existing first-record IGMPv3 behavior and IP-based (not VLAN-specific)
+    groups are retained.
     Cable test is not ported. Temperature remains unavailable without a
     verified sensor mapping.
     The SNMP agent and Prometheus exporter build with `SNMP=1` and `PROMETHEUS=1`:

@@ -134,9 +134,15 @@ ports 2 and 5 fell from 67/67 packets with IGMP off to 2/2 with it on;
 traffic. IGMP was restored off, both test memberships removed, and the saved
 configuration and Ethernet/PoE administrative settings preserved.
 
-Forwarding data to a listener through a different switch port remains
-unverified: the available client and sender both reach uplink 8. A controllable
-endpoint on another front port is needed for that test.
+Cross-port forwarding was then verified with the Proxmox master on front port 1
+and the listener behind uplink 8. Of 64 test datagrams, 63 reached the receiving
+application, the listener-port counter rose by 64, and nonmember ports 5 and 6
+each rose by one background multicast packet. Before the join and after the
+leave, the same 64-packet source stream produced no uplink egress. Counter
+windows were aligned at about two seconds, excluding any extra receive wait.
+IGMP was restored off, the test group removed, and saved/port settings preserved.
+The sender used its existing `vmbr0`; no container or host-network changes were
+needed, and the Proxmox cluster remained quorate.
 
 ## IGMP configuration on the Serial Console
 For testing the following commands are provided on the serial console:
