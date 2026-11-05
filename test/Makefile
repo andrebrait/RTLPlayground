@@ -124,6 +124,9 @@ run: $(TESTS) $(BUILDDIR)/fileadder snmp snmp-horaco-profile snmp-status snmp-cl
 l2-delete:
 	node test_l2_delete.cjs
 
+l2-load:
+	node test_l2_load.cjs
+
 clean:
 	rm -rf $(BUILDDIR)
 
@@ -222,3 +225,4 @@ test_lag_tokens:
 	CC="$(CC)" python3 test_lag_tokens.py
 
 run: test_lag_tokens
+.PHONY: l2-load
