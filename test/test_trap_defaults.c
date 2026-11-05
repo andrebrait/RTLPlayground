@@ -21,7 +21,7 @@ void reg_write_m(uint16_t reg)
 
 int main(void)
 {
-	uint8_t want = MACHINE_DEFAULT_LLDP ? RTL837X_RMA_ACT_TRAP : RTL837X_RMA_ACT_FORWARD;
+	uint8_t want = MACHINE_DEFAULT_LLDP ? 0x10 : 0x00; /* RTL837x action field */
 	trap_init();
 	if ((rma0e & RTL837X_RMA_ACT_MASK) != want || (rma0e | RTL837X_RMA_ACT_MASK) != 0xffffffff) {
 		printf("FAIL: MACHINE_DEFAULT_LLDP=%d leaves RMA0E at 0x%08x\n", MACHINE_DEFAULT_LLDP, (unsigned)rma0e);

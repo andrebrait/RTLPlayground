@@ -9,6 +9,7 @@
 #include "rtl836x_regs.h"
 #include "rtl837x_init.h"
 #include "rtl837x_port.h"
+#include "machine.h"
 
 #pragma codeseg BANK2
 #pragma constseg BANK2
@@ -65,9 +66,12 @@ void rtl8370_init(void) __banked
 	v = SFR_DATA_U16 | 0x0050;
 	REG_SET(RTL836X_REG_MISCELLANEOUS_CONFIGURE0, v);
 
-	/* EEE on by default, 100M and 1G; set before the restart below so the first negotiation carries it.
-	 * A saved "eee off <port>" turns it off again when the startup config is replayed. */
+	/* Apply the build default before saved settings are replayed, including retained PHY state. */
+#if MACHINE_DEFAULT_EEE
 	port_eee_enable_all(EEE_1000 | EEE_NORESET);
+#else
+	port_eee_disable_all();
+#endif
 
 	/* rtk_port_phyEnableAll_set(ENABLED): out of power down (BMCR bit 11), restart autonegotiation */
 	reg_bits(RTL836X_REG_PHY_AD, PHY_AD_PDNPHY, 0);

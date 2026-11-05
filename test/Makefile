@@ -166,6 +166,10 @@ $(BUILDDIR)/test_stp_836x: test_stp_836x.c $(SRCROOT)/rtl837x_stp.c $(SRCROOT)/r
 $(BUILDDIR)/test_l2_flush_836x: test_l2_flush_836x.c $(SRCROOT)/rtl836x_port.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) $(GC_CFLAGS) $^ -o $@ $(LDFLAGS) $(GC_LDFLAGS)
 
+TESTS += $(BUILDDIR)/test_boot_defaults0 $(BUILDDIR)/test_boot_defaults1
+$(BUILDDIR)/test_boot_defaults%: test_boot_defaults.c $(SRCROOT)/rtl8370_init.c $(SRCROOT)/rtl836x_phy.c $(SRCROOT)/rtl836x_port.c stub/phy_patch.h | $(BUILDDIR)
+	$(CC) $(CFLAGS) $(GC_CFLAGS) -DMACHINE_NAME=TPLINK_TL_SG108PE_V5 -DMACHINE_DEFAULT_EEE=$* $(filter %.c,$^) -o $@ $(LDFLAGS) $(GC_LDFLAGS)
+
 $(BUILDDIR)/test_lldp: test_lldp.c $(SRCROOT)/rtl837x_lldp.c $(SRCROOT)/rtl837x_lldp_tx_strings.c $(SRCROOT)/httpd/html_out.c $(SRCROOT)/timer.c fw_memset.h | $(BUILDDIR)
 	$(CC) $(CFLAGS) -include fw_memset.h test_lldp.c $(SRCROOT)/rtl837x_lldp.c $(SRCROOT)/rtl837x_lldp_tx_strings.c $(SRCROOT)/httpd/html_out.c $(SRCROOT)/timer.c -o $@ $(LDFLAGS)
 
