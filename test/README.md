@@ -55,6 +55,10 @@ It runs the real `fileadder` executable against mixed raw and compressed files.
 | `test_lacp` | `rtl837x_lacp.c` | state machines against a simulated 802.3ad partner: convergence, mis-cabling, expiry, re-election, two groups, delivery by trap |
 | `test_fileadder.py` | `tools/fileadder.c` | Mixed compressed/raw assets, empty files, equal-size compression, already-compressed files and the root alias |
 
+The L2 frontend deletion regression runs separately with `make -C test l2-delete`.
+It requires Node.js, without additional packages, and checks rejected, successful
+and failed deletion requests against the production renderer.
+
 ## Adding a test for another module
 1. Write `test_<module>.c` with `main()` driving the module's entry points and
    `CHECK(cond, msg)` assertions.
