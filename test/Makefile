@@ -101,6 +101,10 @@ $(BUILDDIR)/test_lacp: test_lacp.c $(SRCROOT)/rtl837x_lacp.c $(SRCROOT)/timer.c 
 $(BUILDDIR)/test_lldp: test_lldp.c $(SRCROOT)/rtl837x_lldp.c $(SRCROOT)/rtl837x_lldp_tx_strings.c $(SRCROOT)/timer.c fw_memset.h | $(BUILDDIR)
 	$(CC) $(CFLAGS) -include fw_memset.h test_lldp.c $(SRCROOT)/rtl837x_lldp.c $(SRCROOT)/rtl837x_lldp_tx_strings.c $(SRCROOT)/timer.c -o $@ $(LDFLAGS)
 
+TESTS += $(BUILDDIR)/test_igmp_rx
+$(BUILDDIR)/test_igmp_rx: test_igmp_rx.c hw_mock.c $(SRCROOT)/rtl837x_igmp.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) -ffunction-sections -fdata-sections $^ -o $@ $(LDFLAGS) -Wl,--gc-sections
+
 # httpd/httpd.c, httpd/html_out.c and uip/uip.c are compiled UNMODIFIED from the firmware tree;
 # this test carries the environment below them itself.
 $(BUILDDIR)/test_httpd_tx: test_httpd_tx.c $(SRCROOT)/httpd/httpd.c $(SRCROOT)/httpd/html_out.c $(SRCROOT)/uip/uip.c $(SRCROOT)/timer.c | $(BUILDDIR)
@@ -246,3 +250,8 @@ test_bw_cli:
 
 run: test_bw_cli
 .PHONY: prune-defaults
+.PHONY: test_igmp_cli
+test_igmp_cli:
+	CC="$(CC)" python3 test_igmp_cli.py
+
+run: test_igmp_cli
