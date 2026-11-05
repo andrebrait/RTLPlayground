@@ -80,3 +80,39 @@ This does not establish that the silicon lacks a sensor. Implementing a
 reading requires an exact-chip value register, any enable/validity sequence,
 and a documented conversion or independently verified calibration. Until
 those are known, the UI remains unavailable and no temperature is fabricated.
+
+### Related-chip research
+
+The newer RTL8367 common SDK V1.4.2 contains both C- and D-family maps in
+[the same pinned source tree](https://github.com/jameywine/realtek-doc/tree/e17db159796ec389651516d68351d166988978da/sources/uboot-be550/drivers/net/rtl8367_common_V1_4_2/dal).
+The complete C map still names the thermal interrupt bits but no temperature
+output. The D map does define a thermal block, including power/reset controls,
+a sample-toggle bit and sensor-output bits 18:16. Its addresses conflict
+with unrelated functions in the native C-family map:
+
+| Address | RTL8367D | RTL8367C/native map |
+| --- | --- | --- |
+| `0x1d90` | Thermal power/reset controls | Master I²C system control and pin mux |
+| `0x1da4` | Sensor output bits 18:16 and sample toggle | Packet-buffer SRAM data output 0 |
+| `0x1da5` | Thermal status register 1; fields not named in this map | Packet-buffer SRAM data output 1 |
+
+These definitions are in
+[rtl8367d_reg.h](https://github.com/jameywine/realtek-doc/blob/e17db159796ec389651516d68351d166988978da/sources/uboot-be550/drivers/net/rtl8367_common_V1_4_2/dal/rtl8367d/rtl8367d_reg.h)
+and
+[rtl8367c_reg.h](https://github.com/jameywine/realtek-doc/blob/e17db159796ec389651516d68351d166988978da/sources/uboot-be550/drivers/net/rtl8367_common_V1_4_2/dal/rtl8367c/rtl8367c_reg.h).
+No D-family enable sequence should be applied to this board.
+
+[Linux's RTL822x PHY hwmon driver](https://github.com/torvalds/linux/blob/05441d697f7f9a927264f4058cbbc6a03dfcac9d/drivers/net/phy/realtek/realtek_hwmon.c)
+reads MMD vendor-2 register `0xbd84` as a signed 10-bit value in half-degrees.
+That is a PHY-specific interface, not evidence that the RTL8370N's internal
+Gigabit PHYs implement it.
+[OpenWrt's thermal driver](https://github.com/openwrt/openwrt/blob/a3ffc9af4e3ff9d9846af4e809306c1850f0cda9/target/linux/realtek/files-6.18/drivers/thermal/realtek-thermal.c)
+supports RTL8380, RTL8390, RTL9300 and RTL9607 through separate MMIO register
+layouts and conversion paths; none supplies an RTL8370N mapping.
+
+The RTL836x programming guide Rev. 1.3.12 and the RTL8367RB/MB register table
+Rev. 1.0.0 were also checked; no temperature-reading interface was found.
+Both are available in the
+[pinned datasheet collection](https://github.com/jameywine/realtek-doc/tree/e17db159796ec389651516d68351d166988978da/datasheets).
+This expanded search did not establish a safe native read path. No device
+registers were read or written during it.
