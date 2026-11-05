@@ -2271,6 +2271,9 @@ function t(k, v) {
         if (k === "st_rxg") return "RX U/M/B packets";
         if (k === "st_txb" || k === "d_txbad") return "TX excessive collisions";
         if (k === "st_rxb" || k === "d_rxbad") return "RX FCS errors";
+        if (k === "bw_h") return "Mbit/s, 0.008-1000 in 0.008 steps. Limits may throttle management traffic.";
+        if (k === "bw_in_err" || k === "bw_out_err") return "Limit must be 0.008-1000 Mbit/s in 0.008 steps";
+        if (k === "sc_err") return "Use 8-1000000 kbit/s in steps of 8; PPS is unsupported";
     }
     var s = LANG[rtlLang][k] || LANG.en[k] || k;
     if (v)
@@ -5405,14 +5408,16 @@ tabHooks.lldp = {
 
 function bwLoad() {
     return getJSON("/bandwidth.json").then(function(s) {
+        var rtl836x = S.info.mib_family === "rtl836x",
+            step = rtl836x ? 8 : 16;
         var tb = $("btable").tBodies[0];
         tb.innerHTML = "";
         byPort(s).forEach(function(p) {
             var n = p.portNum;
             var iOn = !!Number(p.iLimited),
                 eOn = !!Number(p.eLimited);
-            var iM = (parseInt(p.iBW, 16) * 16 / 1000),
-                eM = (parseInt(p.eBW, 16) * 16 / 1000);
+            var iM = (parseInt(p.iBW, 16) * step / 1000),
+                eM = (parseInt(p.eBW, 16) * step / 1000);
             var tr = tb.insertRow();
             tr.insertCell().textContent = n;
             var icb = h("input", {
@@ -5425,9 +5430,9 @@ function bwLoad() {
                 class: "in sm",
                 id: "bwiv" + n,
                 type: "number",
-                min: "0.016",
-                max: "10000",
-                step: "any"
+                min: String(step / 1000),
+                max: rtl836x ? "1000" : "10000",
+                step: rtl836x ? "0.008" : "any"
             });
             if (iOn) iin.value = +iM.toFixed(3);
             tr.insertCell().appendChild(iin);
@@ -5456,9 +5461,9 @@ function bwLoad() {
                 class: "in sm",
                 id: "bwev" + n,
                 type: "number",
-                min: "0.016",
-                max: "10000",
-                step: "any"
+                min: String(step / 1000),
+                max: rtl836x ? "1000" : "10000",
+                step: rtl836x ? "0.008" : "any"
             });
             if (eOn) ein.value = +eM.toFixed(3);
             tr.insertCell().appendChild(ein);
@@ -5472,10 +5477,11 @@ function bwLoad() {
         });
     });
 }
-/* The bw command takes kbit/s and converts to 16-kbit register steps itself. */
+/* The command takes integer kbit/s; the native chip uses 8-kbit steps. */
 function bwHex(mbit) {
-    var kbit = Math.round(mbit * 1000);
-    if (kbit < 16 || kbit > 10000000) return null;
+    var kbit = Math.round(mbit * 1000),
+        rtl836x = S.info.mib_family === "rtl836x";
+    if (!(kbit >= (rtl836x ? 8 : 16) && kbit <= (rtl836x ? 1000000 : 10000000)) || (rtl836x && kbit % 8)) return null;
     var x = kbit.toString(16);
     return x.length % 2 ? "0" + x : x;
 }
@@ -5506,6 +5512,7 @@ var SC_TYPES = ["bcast", "mcast", "ucast", "umcast"],
 
 function scLoad() {
     return getJSON("/storm.json").then(function(s) {
+        var rtl836x = S.info.mib_family === "rtl836x";
         var tb = $("sctable").tBodies[0];
         byPort(s);
         var sig = s.map(function(p) {
@@ -5526,6 +5533,8 @@ function scLoad() {
                 });
                 tr.insertCell().textContent = n;
                 SC_TYPES.forEach(function(ty) {
+                    var units = [h("option", {value: "kbps", text: "kbit/s"})];
+                    if (!rtl836x) units.unshift(h("option", {value: "pps", text: "pps"}));
                     tr.insertCell().appendChild(h("span", {
                         style: "display:flex;gap:4px"
                     }, [
@@ -5533,22 +5542,14 @@ function scLoad() {
                             class: "in sm",
                             id: "scv" + ty + n,
                             type: "number",
-                            min: "1",
-                            step: "1"
+                            min: rtl836x ? "8" : "1",
+                            max: rtl836x ? "1000000" : "10000000",
+                            step: rtl836x ? "8" : "1"
                         }),
                         h("select", {
                             class: "in",
                             id: "scu" + ty + n
-                        }, [
-                            h("option", {
-                                value: "pps",
-                                text: "pps"
-                            }),
-                            h("option", {
-                                value: "kbps",
-                                text: "kbit/s"
-                            }),
-                        ]),
+                        }, units),
                     ]));
                 });
                 tr.insertCell().appendChild(h("button", {
@@ -5570,7 +5571,7 @@ function scLoad() {
                 var inp = $("scv" + ty + n),
                     sel = $("scu" + ty + n);
                 inp.value = on ? raw : "";
-                sel.value = on && !pps ? "kbps" : "pps";
+                sel.value = rtl836x || (on && !pps) ? "kbps" : "pps";
                 inp.dataset.cur = on ? inp.value + " " + sel.value : "off";
             });
         });
@@ -5587,7 +5588,8 @@ function scApply(n) {
             want = "off";
         if (v !== "" && v !== "0") {
             var x = Number(v);
-            if (!Number.isInteger(x) || x < 1 || (u === "pps" && x > 1048575) || (u === "kbps" && x > 10000000)) {
+            if (!Number.isInteger(x) || x < 1 || (u === "pps" && x > 1048575) || (u === "kbps" && x > 10000000) ||
+                (S.info.mib_family === "rtl836x" && (u !== "kbps" || x < 8 || x > 1000000 || x % 8))) {
                 toast(t("sc_err"), "err");
                 return;
             }

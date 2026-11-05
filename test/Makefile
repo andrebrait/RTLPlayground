@@ -91,7 +91,7 @@ $(BUILDDIR)/test_page_json_836x: CFLAGS += -DMACHINE_NAME=TPLINK_TL_SG108PE_V5 -
 $(BUILDDIR)/test_page_json_836x: test_page_json_836x.c support.c env_tables.c $(SRCROOT)/cmd_editor.c \
                                  $(SRCROOT)/httpd/page_impl.c $(SRCROOT)/httpd/page_stp.c $(SRCROOT)/httpd/html_out.c \
                                  $(SRCROOT)/rtl836x_mib.c $(SRCROOT)/rtl836x_port.c $(SRCROOT)/vlan.c \
-                                 $(SRCROOT)/rtl836x_phy.c $(SRCROOT)/snmp_hw.c \
+                                 $(SRCROOT)/rtl836x_phy.c $(SRCROOT)/rtl836x_rate.c $(SRCROOT)/snmp_hw.c \
                                  $(SRCROOT)/machine/TPLINK_TL_SG108PE_V5_init.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) -Wl,--gc-sections
 

@@ -21,6 +21,24 @@ packets per second goes from 1 to 1048575, a limit in kbit/s from 1 to
 limits are kept in the configuration like any other setting, and the Bandwidth
 page of the web interface has a Storm control card to set them.
 
+## RTL836x (TL-SG108PE V5)
+
+The native backend supports the four classes on ports 1–8 in **kbit/s only**:
+8–1000000 kbit/s, in steps of eight. PPS commands are refused and the UI offers
+only kbit/s. The same `off` commands disable individual classes.
+
+Meters 24–55 are assigned as `24 + port * 4 + type`. The two rate banks start
+at `0x1400` and `0x1740`, with two words per meter and three high rate bits.
+Counts are kbit/s divided by eight. Mode bits at `0x1440`/`0x1780` are cleared
+before enabling a limit, including after a warm boot with retained PPS state.
+The packed selectors start at `0x0a44`; the four enable words at `0x0a40`.
+Preamble/IFG accounting is disabled for the selected meter without changing
+adjacent meters. Bucket and clock calibration are left untouched.
+
+Host tests cover both banks, retained modes, selectors, calibration preservation
+and rejected inputs. Hardware storm-rate accuracy is not yet verified.
+The registers and traffic measurements below describe the RTL837x backend.
+
 ## Registers
 Each port and type has an enable bit and a meter index, and each limit uses
 one of the 64 shared meters of the switch. RTLPlayground gives every port and

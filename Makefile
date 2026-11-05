@@ -158,6 +158,7 @@ SRCS += \
 	rtl836x_leds.c \
 	rtl836x_port.c \
 	rtl836x_phy.c \
+	rtl836x_rate.c \
 	rtl836x_stubs.c
 # The GPHY patch is Realtek data: gen_phy.py extracts it from the board's own
 # flash dump at build time, RTL8370_DUMP=<2 MiB dump>

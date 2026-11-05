@@ -23,6 +23,25 @@ share of bandwidth to an attached device (e.g. to share an uplink), or simulate
 connections with low bandwidth and even bad connectivity with packet drops when
 ingress is not controlled by Flow Control but by simply dropping packets.
 
+## RTL836x (TL-SG108PE V5)
+
+The native backend uses the same commands and Bandwidth page on ports 1–8,
+with 8-kbit/s steps from 8 to 1000000 kbit/s (0.008–1000 Mbit/s in the UI).
+Ingress supports pause-on-exceed or drop; egress shapes transmission.
+`off` restores the ASIC's unlimited count. The CPU port is not rate limited.
+Preamble and IFG are excluded, and reserved control frames bypass ingress
+metering. Limiting a management path can still make the switch unreachable.
+
+`rtl836x_rate.c` uses the RTL8367C SDK register layout: ingress low/high words
+at `0x000f + 32 * port`, egress at `0x038c + 2 * port`, and three high rate
+bits in the following word. Counts are kbit/s divided by eight; `0x1ffff`
+means unlimited. Ingress exceed mode is bit 11 of `0x000e + 32 * port`.
+Initialization removes retained limits before applying the saved script.
+Host tests cover these fields and the shared JSON contract; hardware rate
+accuracy is not yet verified.
+
+The register and measurement sections below describe the RTL837x backend.
+
 ## Ingress/Egress control
 The relevant registers for controlling Ingress and Egress at a port are:
 ```

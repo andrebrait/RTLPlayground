@@ -1685,7 +1685,6 @@ void parse_eee(void)
 }
 
 
-#if SOC_FAMILY == RTL837X	/* bandwidth and storm commands */
 void parse_bw(void)
 {
 	if (cmd_words_len < 3) // Check for at least 3 arguments
@@ -1757,10 +1756,10 @@ err:
 
 static __code const char * __code const storm_types[STORM_TYPES] = { "bcast", "mcast", "ucast", "umcast" };
 
-void parse_storm(void)
+void parse_storm(void) __reentrant
 {
 	uint8_t port, type, d;
-	__xdata uint32_t rate;
+	uint32_t rate;
 	__xdata uint8_t *p;
 
 	if (cmd_words_len == 1)
@@ -1805,7 +1804,6 @@ void parse_storm(void)
 err:
 	cmd_error("usage: storm [<port> bcast|mcast|ucast|umcast <rate> pps|kbps|off]\n");
 }
-#endif
 
 static __code const char * __code const lldp_tlv_names[LLDP_TX_N] = { "portdesc", "syscap", "mgmt", "pvid", "macphy", "lag", "mfs" };
 
@@ -2264,14 +2262,14 @@ void cmd_parser(void) __banked
 			parse_passwd();
 		} else if (cmd_compare(0, "eee")) {
 			parse_eee();
-#if SOC_FAMILY == RTL837X
 		} else if (cmd_compare(0, "bw")) {
 			parse_bw();
+#if SOC_FAMILY == RTL837X
 		} else if (cmd_compare(0, "temp")) {
 			parse_temp();
+#endif
 		} else if (cmd_compare(0, "storm")) {
 			parse_storm();
-#endif
 		} else if (cmd_compare(0, "version")) {
 			print_sw_version();
 		} else if (cmd_compare(0, "history")) {

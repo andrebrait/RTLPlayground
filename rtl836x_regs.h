@@ -145,6 +145,21 @@
 #define RTL836X_REG_VLAN_ACCEPT_FRAME_TYPE_CTRL0	0x07aa	/* + (port >> 3) */
 #define RTL836X_CPU_PORT			10	/* the NIC */
 
+/* Rate control: RTL8367C SDK ingress, scheduling, meter and storm APIs. */
+#define RTL836X_REG_INGRESS_RATE0			0x000f	/* + port * 32, low word then high three bits */
+#define RTL836X_REG_EGRESS_RATE0			0x038c	/* + port * 2 */
+#define RTL836X_REG_INGRESS_BYPASS			0x1214
+#define RTL836X_REG_EGRESS_IFG			0x0300
+#define RTL836X_REG_STORM_CTRL0			0x0a40	/* + type: broadcast, multicast, unknown UC, unknown MC */
+#define RTL836X_REG_STORM_SELECT0			0x0a44	/* + type * 8 + port / 2 */
+#define RTL836X_REG_METER_RATE0			0x1400
+#define RTL836X_REG_METER_RATE32			0x1740
+#define RTL836X_REG_METER_MODE0			0x1440
+#define RTL836X_REG_METER_MODE32			0x1780
+#define RTL836X_REG_METER_IFG0			0x1712
+#define RTL836X_REG_METER_IFG32			0x17b4
+#define RTL836X_REG_IGMP_MLD_CFG0			0x1c00
+
 /* Spanning tree: MSTI0 port states, 2 bits per chip port: 0 disabled, 1 blocking, 2 learning, 3 forwarding.
  * CTRL0 holds chip ports 0-7, CTRL1 chip ports 8-10 (rtl8367c_setAsicSpanningTreeStatus). */
 #define RTL836X_REG_VLAN_MSTI0_CTRL0		0x0a00

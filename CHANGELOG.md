@@ -100,9 +100,13 @@
     The test made no link or PoE changes; the saved configuration was unchanged.
     Full-capacity coverage is a host/browser-fixture test, not a silicon table-fill
     test.
-    IGMP, bandwidth, storm control and cable test are not ported: their commands
-    are refused and their pages are empty. Temperature remains unavailable
-    without a verified sensor mapping.
+    Native bandwidth and storm control use 8-kbit/s steps from 8 to 1000000
+    kbit/s on the eight front ports. Storm control supports kbit/s only; PPS is
+    refused. Host tests cover limits, retained meter modes, packed fields and
+    calibration preservation; hardware rate accuracy is not yet verified.
+    IGMP and cable test are not ported: their commands are refused and their
+    pages are empty. Temperature remains unavailable without a verified sensor
+    mapping.
     The SNMP agent and Prometheus exporter build with `SNMP=1` and `PROMETHEUS=1`:
     counters come from the native MIB, link, speed and admin state from the port
     status and PHY registers. Interface errors are summed from native counters as

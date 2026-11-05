@@ -27,6 +27,7 @@
 #if SOC_FAMILY == RTL836X
 #include "rtl836x_regs.h"
 #include "rtl836x_mib.h"
+#include "rtl836x_rate.h"
 #endif
 #ifdef MACHINE_POE_PORTS
 #include "poe.h"
@@ -938,16 +939,55 @@ static uint16_t port_eee_state(uint8_t port)
 		s |= EEE_ACTIVE;
 	return s;
 }
-/* shortcut: bandwidth and storm control are not ported to the RTL836x */
 
 void send_bandwidth(void)
 {
-	send_json("[]");
+	__xdata uint8_t i;
+	__xdata uint32_t count;
+	slen = strtox(outbuf, HTTP_RESPONCE_JSON);
+	char_to_html('[');
+	for (i = MACHINE_MIN_PORT; i <= MACHINE_MAX_PORT; i++) {
+		string_to_html("{\"portNum\":");
+		itoa_html(machine.log_to_phys_port[i]);
+		count = rtl836x_bw_get(i, 1);
+		string_to_html(",\"iLimited\":");
+		bool_to_html(count != RTL836X_RATE_OFF);
+		string_to_html(",\"iBW\":\"");
+		byte_to_html(count >> 16); byte_to_html(count >> 8); byte_to_html(count);
+		string_to_html("\",\"iFC\":");
+		bool_to_html(reg_bit_test(RTL836X_REG_PORT0_MISC_CFG + ((uint16_t)i << 5), 11));
+		count = rtl836x_bw_get(i, 0);
+		string_to_html(",\"eLimited\":");
+		bool_to_html(count != RTL836X_RATE_OFF);
+		string_to_html(",\"eBW\":\"");
+		byte_to_html(count >> 16); byte_to_html(count >> 8); byte_to_html(count);
+		string_to_html("\"}");
+		if (i < MACHINE_MAX_PORT) char_to_html(',');
+	}
+	char_to_html(']');
 }
 
 void send_storm(void)
 {
-	send_json("[]");
+	__xdata uint8_t i, t;
+	__xdata uint32_t rate;
+	slen = strtox(outbuf, HTTP_RESPONCE_JSON);
+	char_to_html('[');
+	for (i = MACHINE_MIN_PORT; i <= MACHINE_MAX_PORT; i++) {
+		string_to_html("{\"portNum\":");
+		itoa_html(machine.log_to_phys_port[i]);
+		string_to_html(",\"en\":\"");
+		for (t = 0; t < STORM_TYPES; t++)
+			bool_to_html(reg_bit_test(RTL836X_REG_STORM_CTRL0 + t, i));
+		string_to_html("\",\"pps\":\"0000\",\"rate\":\"");
+		for (t = 0; t < STORM_TYPES; t++) {
+			rate = rtl836x_storm_get(i, t);
+			byte_to_html(rate >> 16); byte_to_html(rate >> 8); byte_to_html(rate);
+		}
+		string_to_html("\"}");
+		if (i < MACHINE_MAX_PORT) char_to_html(',');
+	}
+	char_to_html(']');
 }
 #endif
 

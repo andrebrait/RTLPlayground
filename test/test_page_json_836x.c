@@ -36,6 +36,10 @@
 #include "rtl836x_mib.h"
 #include "rtl837x_port.h"
 #include "rtl837x_lacp.h"
+#include "rtl837x_bandwidth.h"
+#include "rtl837x_storm.h"
+#include "rtl836x_rate.h"
+#include "cmd_parser.h"
 #include "page_impl.h"
 #include <test/support.h>
 #include "snmp_hw.h"
@@ -741,11 +745,115 @@ static void t_l2(void)
 	CHECK(!strcmp(body(), "[]"), "an empty native table returns an empty array");
 }
 
+static void t_rate_json(void)
+{
+	printf("[test] native bandwidth counts and byte-rate storm meters on shared JSON endpoints\n");
+	for (unsigned p = 0; p < 8; p++) {
+		regfile[0x000f + 32 * p] = regfile[0x038c + 2 * p] = 0xffff;
+		regfile[0x0010 + 32 * p] = regfile[0x038d + 2 * p] = 0xa5f9;
+	}
+	regfile[0x000f + 32 * 2] = 1;
+	regfile[0x0010 + 32 * 2] = 0xa5f8;
+	regfile[0x000e + 32 * 2] |= 0x0800;
+	regfile[0x038c + 2 * 2] = 0xe848;
+	regfile[0x038d + 2 * 2] = 0xa5f9;
+	send_bandwidth();
+	CHECK(port_has(2, "\"iLimited\":1,\"iBW\":\"000001\",\"iFC\":1,\"eLimited\":1,\"eBW\":\"01e848\""),
+	      "8-kbps ingress and 1-Gbps egress retain native count precision and flow-control mode");
+	CHECK(port_has(0, "\"iLimited\":0,\"iBW\":\"01ffff\""), "the documented native unlimited count is reported as off");
+	CHECK(port_has(7, "\"eLimited\":0,\"eBW\":\"01ffff\"") && balanced() && slen <= TCP_OUTBUF_SIZE,
+	      "all eight bandwidth rows fit valid JSON");
+	for (unsigned t = 0; t < 4; t++)
+		regfile[0x0a40 + t] = 0;
+	regfile[0x0a40] = 4;
+	regfile[0x0a45] = 32;
+	regfile[0x1740] = 1; regfile[0x1741] = 0;
+	regfile[0x0a43] = 0x0080;
+	regfile[0x0a5f] = 55 << 8;
+	regfile[0x176e] = 0xe848; regfile[0x176f] = 1;
+	send_storm();
+	CHECK(port_has(2, "\"en\":\"1000\",\"pps\":\"0000\",\"rate\":\"000008000000000000000000\""),
+	      "broadcast reports 8 kbit/s, not its hardware count, and never claims PPS support");
+	CHECK(port_has(7, "\"en\":\"0001\",\"pps\":\"0000\",\"rate\":\"0000000000000000000f4240\""),
+	      "the last native meter reports a 1-Gbit/s unknown-multicast limit");
+	CHECK(balanced() && slen <= TCP_OUTBUF_SIZE, "native storm rows fit the response buffer");
+}
+
+static void t_rate_backend(void)
+{
+	const unsigned rma[] = { 0x0800, 0x0801, 0x0802, 0x080e, 0x0832 };
+	const uint32_t invalid[] = { 0, 7, 9, 1000008, UINT32_MAX };
+	printf("[test] native rate limits preserve register neighbors, calibration and control frames\n");
+	for (unsigned p = 0; p < 8; p++) {
+		regfile[0x000f + 32 * p] = regfile[0x038c + 2 * p] = 0x1234;
+		regfile[0x0010 + 32 * p] = regfile[0x038d + 2 * p] = 0xa5ff;
+		regfile[0x000e + 32 * p] = 0xace5;
+	}
+	regfile[0x03a0] = 0x1357; /* chip CPU port 10's egress count is not ours to configure */
+	for (unsigned t = 0; t < 4; t++) regfile[0x0a40 + t] = 0xffff;
+	for (unsigned i = 0; i < sizeof rma / sizeof rma[0]; i++) regfile[rma[i]] = 0xa5a5;
+	regfile[0x1214] = 0xa5a0; regfile[0x0300] = 0xa5a5; regfile[0x1c00] = 0x9a55;
+	regfile[0x1618] = 0xbfff; regfile[0x17a7] = 0xa55a;
+	bandwidth_setup();
+	for (unsigned p = 0; p < 8; p++)
+		CHECK(rtl836x_bw_get(p, 1) == 0x1ffff && rtl836x_bw_get(p, 0) == 0x1ffff &&
+		      regfile[0x0010 + 32 * p] == 0xa5f9 && regfile[0x000e + 32 * p] == 0xa4e5,
+		      "warm initialization removes both limits, preserves reserved bits and resets only the exceed mode");
+	for (unsigned t = 0; t < 4; t++)
+		CHECK(regfile[0x0a40 + t] == 0xfb00, "storm state resets on front ports and chip CPU10, leaving unused ports alone");
+	for (unsigned i = 0; i < sizeof rma / sizeof rma[0]; i++)
+		CHECK(regfile[rma[i]] == 0xa5e5, "control-frame storm bypass preserves every action and unrelated RMA bit");
+	CHECK(regfile[0x1214] == 0xa5a4 && regfile[0x0300] == 0xa5a4 && regfile[0x1c00] == 0xba55 &&
+	      regfile[0x03a0] == 0x1357, "accounting/bypass fields change without imposing a CPU rate");
+	bandwidth_ingress_set(0, 8);
+	CHECK(rtl836x_bw_get(0, 1) == 1 && regfile[0x000e] == 0xa8e5,
+	      "minimum ingress limit uses one token, enables pause-on-exceed and excludes IFG");
+	bandwidth_ingress_drop(0);
+	CHECK(regfile[0x000e] == 0xa0e5, "drop changes only the ingress exceed mode");
+	bandwidth_ingress_fc(0);
+	bandwidth_egress_set(7, 524288);
+	CHECK(rtl836x_bw_get(7, 0) == 65536 && regfile[0x039a] == 0 && regfile[0x039b] == 0xa5f9,
+	      "egress retains bit16 when the low word is zero");
+	bandwidth_egress_set(7, 1000000);
+	CHECK(rtl836x_bw_get(7, 0) == 125000, "the maximum front-port rate uses the documented 8-kbit units");
+	regfile[0x0a44] = 0xa5c0; regfile[0x0a5f] = 0xc0a5;
+	regfile[0x1713] = regfile[0x17b5] = 0xffff;
+	regfile[0x1440] = regfile[0x1780] = 0xa558;
+	regfile[0x1441] = regfile[0x1781] = 0xffff;
+	regfile[0x176f] = 0xf8ff;
+	storm_set(0, 0, 8, 0);
+	storm_set(7, 3, 1000000, 0);
+	CHECK(regfile[0x0a44] == 0xa5d8 && regfile[0x0a5f] == 0xf7a5 &&
+	      regfile[0x1713] == 0xfeff && regfile[0x17b5] == 0xff7f && regfile[0x176f] == 0xf8f9,
+	      "both meter banks and packed selectors preserve adjacent ports, flags and high bits");
+	CHECK(regfile[0x1441] == 0xfeff && regfile[0x1781] == 0xff7f &&
+	      regfile[0x1440] == 0xa558 && regfile[0x1780] == 0xa558,
+	      "kbps storm limits replace retained PPS mode in both banks without changing adjacent meters");
+	CHECK(rtl836x_storm_get(0, 0) == 8 && rtl836x_storm_get(7, 3) == 1000000 &&
+	      regfile[0x1618] == 0xbfff && regfile[0x17a7] == 0xa55a, "storm readback is kbit/s and retains bucket calibration");
+	regfile[0x0a44] = (regfile[0x0a44] & ~0x3f) | 1;
+	regfile[0x1402] = 2; regfile[0x1403] = 0;
+	CHECK(rtl836x_storm_get(0, 0) == 16, "readback follows the actual ASIC selector, not a cached allocation");
+	unsigned before = other_writes;
+	for (unsigned i = 0; i < sizeof invalid / sizeof invalid[0]; i++) {
+		err_status = ERR_OK; bandwidth_ingress_set(2, invalid[i]);
+		CHECK(err_status == ERR_INVALID_ARGUMENT && other_writes == before, "unsupported rates are rejected before any write");
+	}
+	bandwidth_egress_set(8, 8); bandwidth_egress_set(9, 8);
+	storm_set(2, 4, 8, 0); storm_set(2, 0, 8, 1); storm_off(9, 0);
+	CHECK(other_writes == before && rtl836x_bw_get(9, 1) == UINT32_MAX &&
+	      rtl836x_storm_get(2, 4) == UINT32_MAX, "CPU/unmapped ports, unknown types and PPS never reach register writes");
+	storm_off(0, 0);
+	CHECK(!(regfile[0x0a40] & 1) && (regfile[0x0a43] & 0x80), "disabling one storm class leaves the other port/type enabled");
+	bandwidth_ingress_disable(0); bandwidth_egress_disable(7);
+	CHECK(rtl836x_bw_get(0, 1) == 0x1ffff && rtl836x_bw_get(7, 0) == 0x1ffff,
+	      "off restores unlimited native counts");
+	err_status = ERR_OK;
+}
+
 static void t_unported(void)
 {
 	printf("[test] pages of unported features answer with valid JSON\n");
-	send_bandwidth();	CHECK(balanced(), "/bandwidth.json");
-	send_storm();		CHECK(balanced(), "/storm.json");
 	send_lldp();		CHECK(balanced(), "/lldp.json");
 	send_stp();		CHECK(balanced(), "/stp.json");
 	send_stp_counters();	CHECK(balanced(), "/stpcnt.json");
@@ -810,6 +918,8 @@ int main(void)
 	t_mtu();
 	t_lag();
 	t_l2();
+	t_rate_backend();
+	t_rate_json();
 	t_unported();
 	printf("\n%d checks, %d failed\n", tests_run, tests_failed);
 	return tests_failed ? 1 : 0;
