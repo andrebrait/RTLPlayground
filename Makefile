@@ -159,6 +159,7 @@ SRCS += \
 	rtl836x_port.c \
 	rtl836x_phy.c \
 	rtl836x_rate.c \
+	rtl836x_igmp.c \
 	rtl836x_stubs.c
 # The GPHY patch is Realtek data: gen_phy.py extracts it from the board's own
 # flash dump at build time, RTL8370_DUMP=<2 MiB dump>
@@ -170,7 +171,6 @@ else
 SRCS += \
 	rtl837x_bandwidth.c \
 	rtl837x_cabletest.c \
-	rtl837x_igmp.c \
 	rtl837x_init.c \
 	rtl837x_nic.c \
 	rtl837x_leds.c \
@@ -182,6 +182,7 @@ SRCS += \
 	rtl837x_storm.c
 endif
 SRCS += \
+	rtl837x_igmp.c \
 	rtl837x_trap.c \
 	rtl837x_flash.c \
 	rtl837x_stp.c \

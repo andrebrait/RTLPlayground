@@ -2164,6 +2164,7 @@ void cmd_parser(void) __banked
 				port_l2_forget();
 			else
 				port_l2_learned();
+#endif
 		} else if (cmd_compare(0, "igmp")) {
 			if (cmd_words_len != 2)
 				cmd_error("igmp on|off|show\n");
@@ -2176,7 +2177,6 @@ void cmd_parser(void) __banked
 			else {
 				cmd_error("igmp on|off|show\n");
 			}
-#endif
 		} else if (cmd_compare(0, "mac")) {
 			parse_mac_cmd();
 #ifdef SNMP

@@ -132,6 +132,7 @@
 #define RTL836X_REG_TABLE_READ_DATA0		0x0520
 /* RTL8370B LUT: 4096 SRAM entries and 64 CAM entries (SDK HAL). */
 #define RTL836X_LUT_SIZE				0x1040
+#define TABLE_ACCESS_LUT_KEY			0x0004
 #define TABLE_ACCESS_LUT_ADDR			0x0014
 #define TABLE_ACCESS_LUT_NEXT_UC			0x0034
 #define TABLE_ACCESS_LUT_WRITE			0x000c
@@ -158,7 +159,22 @@
 #define RTL836X_REG_METER_MODE32			0x1780
 #define RTL836X_REG_METER_IFG0			0x1712
 #define RTL836X_REG_METER_IFG32			0x17b4
+
+/* IPv4 multicast lookup and per-port IGMP/MLD actions (RTL8367C SDK). */
+#define RTL836X_REG_LUT_CFG			0x0a30
+#define RTL836X_LUT_IPMC_HASH_BIT			4
+#define RTL836X_REG_LUT_CFG2			0x0a3a
+#define RTL836X_REG_IPMC_GROUP_VALID0		0x0e87	/* four 16-bit classification masks */
+#define RTL836X_REG_UNKNOWN_IPV4_CTRL0		0x08c9
+#define RTL836X_REG_UNKNOWN_IPV4_CTRL1		0x08ca
 #define RTL836X_REG_IGMP_MLD_CFG0			0x1c00
+#define RTL836X_REG_IGMP_ROUTER_PORT		0x1c04
+#define RTL836X_REG_IGMP_PORT0_CTRL		0x1c05
+#define RTL836X_REG_IGMP_PORT8_CTRL		0x1cb0
+#define RTL836X_IGMP_PORT_FIELDS			0x7fff
+#define RTL836X_IGMP_ALLOW_ALL			0x7c00
+#define RTL836X_IGMP_MLD_FLOOD			0x0155
+#define RTL836X_IGMP_TRAP_IPV4			0x016a	/* IPv4 trap, MLD flood */
 
 /* Spanning tree: MSTI0 port states, 2 bits per chip port: 0 disabled, 1 blocking, 2 learning, 3 forwarding.
  * CTRL0 holds chip ports 0-7, CTRL1 chip ports 8-10 (rtl8367c_setAsicSpanningTreeStatus). */

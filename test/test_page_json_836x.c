@@ -39,6 +39,8 @@
 #include "rtl837x_bandwidth.h"
 #include "rtl837x_storm.h"
 #include "rtl836x_rate.h"
+#include "rtl837x_igmp.h"
+#include "rtl836x_igmp.h"
 #include "cmd_parser.h"
 #include "page_impl.h"
 #include <test/support.h>
@@ -50,6 +52,9 @@ extern uint8_t  vlan_names[VLAN_NAMES_SIZE];
 extern uint16_t vlan_ptr;
 
 uint8_t sfr_data[4];
+uint8_t igmpEnabled;
+uint8_t uip_buf[UIP_CONF_BUFFER_ALLOC_SIZE];
+uint16_t uip_len;
 static uint16_t regfile[0x4000];
 static uint16_t phy_regs[8][32];
 static uint16_t eee_adv[8];
@@ -86,14 +91,13 @@ static void lut_exec(uint16_t command)
 	for (unsigned i = 0; i < 48; i++) {
 		if (!lut[i].present)
 			continue;
-		if (command == 0x000c) {
+		if (command == 0x000c || command == 0x0004) {
 			if (memcmp(lut[i].words, &regfile[0x0510], 6) ||
 			    (lut[i].words[3] & 0x3fff) != (regfile[0x0513] & 0x3fff) ||
-			    (lut[i].words[4] & 0x007f) != (regfile[0x0514] & 0x007f))
+			    (!(lut[i].words[3] & 0x1000) &&
+			     (lut[i].words[4] & 0x007f) != (regfile[0x0514] & 0x007f)))
 				continue;
 			found = i;
-			memcpy(lut[i].words, &regfile[0x0510], 12);
-			lut[i].present = (lut[i].words[4] & 0x3800) || (lut[i].words[5] & 0x0020);
 			break;
 		}
 		if (command == 0x0014) {
@@ -111,6 +115,19 @@ static void lut_exec(uint16_t command)
 	}
 	if (command == 0x0034 && found < 0)
 		found = first;
+	if (command == 0x000c) {
+		if (found < 0) {
+			for (unsigned i = 0; i < 48; i++) {
+				if (!lut[i].present) { found = i; lut[i].idx = 0x1000 + i; break; }
+			}
+		}
+		if (found >= 0) {
+			memcpy(lut[found].words, &regfile[0x0510], 12);
+			uint16_t *w = lut[found].words;
+			lut[found].present = (w[5] & 0x0020) || ((w[3] & 0x1000) ?
+				((w[4] & 0x00ff) || (w[3] & 0xc000) || (w[5] & 0x0080)) : (w[4] & 0x3800));
+		}
+	}
 	regfile[0x0502] = 0;
 	if (found >= 0) {
 		uint16_t idx = lut[found].idx;
@@ -902,6 +919,147 @@ static void t_snmp_hw(void)
 	CHECK(!snmp_hw_counter32(2, 47, true, &c), "only selector 48 is the error pair");
 }
 
+static void t_igmp_boot(void)
+{
+	printf("[test] native IGMP off replaces retained traps and lookup state\n");
+	igmpEnabled = 1;
+	regfile[0x0a30] = 0xffff;
+	regfile[0x1c00] = 0xa555;
+	regfile[0x08c9] = 0xffff;
+	regfile[0x08ca] = 0xa55a;
+	for (unsigned p = 0; p < 8; p++)
+		regfile[0x1c05 + p] = 0xffff;
+	regfile[0x1cb0] = 0x1234; regfile[0x1cb1] = 0x5678; regfile[0x1cb2] = 0xffff;
+	igmp_setup();
+	CHECK(!igmpEnabled && regfile[0x0a30] == 0xffef && regfile[0x1c00] == 0xa554,
+	      "off disables IPv4 lookup and hardware snooping without changing unrelated global fields");
+	CHECK(regfile[0x08c9] == 0 && regfile[0x08ca] == 0xa54a,
+	      "off floods unknown IPv4 multicast on front ports and CPU10, preserving unused ports");
+	for (unsigned p = 0; p < 8; p++)
+		CHECK(regfile[0x1c05 + p] == 0xfd55, "off forwards IGMP/MLD and permits control/data on each front port");
+	CHECK(regfile[0x1cb0] == 0x1234 && regfile[0x1cb1] == 0x5678 && regfile[0x1cb2] == 0xfd55,
+	      "CPU10 control packets forward normally; unused chip ports retain their settings");
+}
+
+static void t_igmp_controls(void)
+{
+	printf("[test] native software IGMP traps IPv4 only and retains non-IGMP fields\n");
+	regfile[0x0a3a] = 0xa55b;
+	for (unsigned i = 0; i < 4; i++) regfile[0x0e87 + i] = 0xffff;
+	igmp_enable();
+	CHECK(igmpEnabled && regfile[0x0a30] == 0xffff && regfile[0x0a3a] == 0xa55a &&
+	      regfile[0x1c00] == 0xa555, "on enables DIP-only lookup and IGMP processing without losing other global fields");
+	CHECK(regfile[0x08c9] == 0x5555 && regfile[0x08ca] == 0xa54a,
+	      "unknown IPv4 groups are dropped on front ingress, not on CPU10 or unused chip ports");
+	for (unsigned p = 0; p < 8; p++)
+		CHECK(regfile[0x1c05 + p] == 0xfd6a, "IPv4 reports trap to software while MLD continues flooding");
+	CHECK(regfile[0x1cb2] == 0xfd55 && regfile[0x1cb0] == 0x1234 && regfile[0x1cb1] == 0x5678,
+	      "enabling snooping does not trap the CPU or change unused port controls");
+	CHECK(!(regfile[0x0e87] | regfile[0x0e88] | regfile[0x0e89] | regfile[0x0e8a]),
+	      "retained source-specific classification cannot redirect DIP-only software groups");
+	regfile[0x1c04] = 0xf800;
+	igmp_router_port_set(0x0209);
+	CHECK(regfile[0x1c04] == 0xfc09, "router masks translate logical CPU9 to chip CPU10 and preserve reserved bits");
+	unsigned writes = other_writes;
+	err_status = ERR_OK; igmp_router_port_set(0x0100);
+	CHECK(err_status == ERR_INVALID_ARGUMENT && other_writes == writes, "unmapped router ports are refused before writes");
+	err_status = ERR_OK;
+	igmp_setup();
+	CHECK(!igmpEnabled && regfile[0x08c9] == 0 && !(regfile[0x0a30] & 0x10),
+	      "off restores ordinary IPv4 multicast forwarding after on");
+}
+
+static void t_igmp_lut(void)
+{
+	uint8_t group[4] = {239, 1, 2, 3}, other[4] = {239, 255, 200, 201}, bad[4] = {192, 0, 2, 1};
+	const uint8_t uc[6] = {2, 1, 2, 3, 4, 5};
+	uint16_t saved_uc[6];
+	printf("[test] native IPv4 multicast membership, key isolation and unavailable-table refusal\n");
+	memset(lut, 0, sizeof lut);
+	lut_stuck = lut_write_miss = false; lut_timeout_command = 0; regfile[0x0502] = 0;
+	lut_put(0, 123, uc, 1, 10, true); memcpy(saved_uc, lut[0].words, sizeof saved_uc);
+	CHECK(rtl836x_igmp_update(group, 2, true) && lut[1].present &&
+	      lut[1].words[0] == 0 && lut[1].words[1] == 0 && lut[1].words[2] == 0x0203 &&
+	      lut[1].words[3] == 0x1f01 && lut[1].words[4] == 4 && lut[1].words[5] == 0x0020,
+	      "a join installs the full DIP with SIP zero and only its requested front port");
+	CHECK(rtl836x_igmp_update(group, 7, true) && lut[1].words[4] == 0x84,
+	      "a later join preserves the first listener");
+	lut[1].words[3] |= 0xc000; lut[1].words[5] |= 0x0080;
+	CHECK(rtl836x_igmp_update(group, 2, false) && lut[1].words[3] == 0xdf01 &&
+	      lut[1].words[4] == 0x80 && lut[1].words[5] == 0x00a0,
+	      "a front-port leave preserves membership on chip ports 8, 9 and CPU10");
+	lut[1].words[3] = 0x1f01; lut[1].words[4] = 0x84; lut[1].words[5] = 0x0020;
+	CHECK(rtl836x_igmp_update(other, 1, true) && lut[2].words[2] == 0xc8c9 &&
+	      lut[2].words[3] == 0x1fff && lut[2].words[4] == 2,
+	      "another group retains high address octets and has independent membership");
+	CHECK(rtl836x_igmp_update(group, 2, false) && lut[1].words[4] == 0x80 && lut[2].words[4] == 2,
+	      "leave removes one listener without changing another group");
+	CHECK(rtl836x_igmp_update(group, 7, false) && !lut[1].present && lut[2].present,
+	      "the final leave removes only the matched multicast key");
+	CHECK(rtl836x_igmp_update(group, 7, false) && !lut[1].present && lut[2].words[4] == 2,
+	      "an absent leave cannot alias the following entry");
+	unsigned writes = other_writes;
+	CHECK(!rtl836x_igmp_update(group, 8, true) && !rtl836x_igmp_update(group, 10, true) &&
+	      !rtl836x_igmp_update(bad, 2, true) && other_writes == writes,
+	      "unmapped/CPU listeners and non-multicast keys never access the ASIC");
+	lut_stuck = true; lut_status_reads = 0;
+	CHECK(!rtl836x_igmp_update(other, 3, true) && other_writes == writes && lut_status_reads < 1024,
+	      "a busy table is bounded and never stages a write");
+	lut_stuck = false; lut_write_miss = true;
+	CHECK(!rtl836x_igmp_update(other, 3, true) && lut[2].words[4] == 2,
+	      "a refused write is not reported as a joined listener");
+	lut_write_miss = false; lut_timeout_command = 0x000c; lut_status_reads = 0;
+	CHECK(!rtl836x_igmp_update(other, 3, true) && lut_status_reads < 1024,
+	      "write completion timeout is bounded and not reported as success");
+	lut_timeout_command = 0; regfile[0x0502] = 0;
+	CHECK(lut[0].present && !memcmp(lut[0].words, saved_uc, sizeof saved_uc),
+	      "membership changes and failed operations preserve the management unicast entry");
+	for (unsigned i = 0; i < 48; i++) {
+		uint8_t mac[6] = {2, 0, 0, 0, 0, i};
+		lut_put(i, 0x200 + i, mac, 1, 0, true);
+	}
+	CHECK(!rtl836x_igmp_update(group, 2, true) && lut[0].words[0] == 0 && lut[47].words[0] == 47,
+	      "a full table is unavailable, not a fabricated successful join");
+}
+
+static void native_igmp_frame(uint8_t type, uint8_t port, uint8_t first_group_octet)
+{
+	memset(uip_buf, 0, sizeof uip_buf);
+	uip_buf[0] = 1; uip_buf[2] = 0x5e;
+	uip_buf[12] = 0x88; uip_buf[13] = 0x99; uip_buf[14] = 4; uip_buf[19] = port;
+	uip_buf[20] = 0x81; uip_buf[24] = 8;
+	uip_buf[26] = 0x45; uip_buf[34] = 1; uip_buf[35] = 2;
+	uip_buf[46] = type;
+	unsigned record = 46;
+	if (type == IGMP_V3_REPORT) {
+		uip_buf[53] = 1; record += 8; uip_buf[record] = IGMP_V3_TO_EXCLUDE;
+	}
+	uip_buf[record + 4] = first_group_octet; uip_buf[record + 5] = 1;
+	uip_buf[record + 6] = 2; uip_buf[record + 7] = 3;
+	uip_len = record + 8; uip_buf[29] = uip_len - 26;
+}
+
+static void t_igmp_rx(void)
+{
+	printf("[test] shared IGMP parser reads the native synthetic VLAN envelope\n");
+	memset(lut, 0, sizeof lut); regfile[0x0502] = 0; igmpEnabled = 1;
+	native_igmp_frame(IGMP_V2_REPORT, 2, 239);
+	CHECK(igmp_packet_handler() == 1 && !uip_len && lut[0].present && lut[0].words[4] == 4,
+	      "native IPv4 EtherType, IHL and source port reach the real membership backend");
+	native_igmp_frame(IGMP_V3_REPORT, 7, 239);
+	CHECK(igmp_packet_handler() == 1 && !uip_len && lut[0].words[4] == 0x84,
+	      "native IGMPv3 uses the same validated first-record logic");
+	native_igmp_frame(IGMP_V2_LEAVE, 2, 239);
+	CHECK(igmp_packet_handler() == 1 && lut[0].words[4] == 0x80, "native leave retains the other listener");
+	unsigned writes = other_writes;
+	native_igmp_frame(IGMP_V2_REPORT, 2, 239); uip_len = 46;
+	CHECK(igmp_packet_handler() == 1 && !uip_len && other_writes == writes && lut[0].words[4] == 0x80,
+	      "truncated native payload cannot reuse the preceding report");
+	native_igmp_frame(IGMP_V2_REPORT, 10, 239);
+	CHECK(igmp_packet_handler() == 1 && !uip_len && other_writes == writes,
+	      "a CPU-originated report cannot become a front-port listener");
+}
+
 int main(void)
 {
 	printf("== httpd/page_impl.c RTL836x JSON tests ==\n");
@@ -920,6 +1078,10 @@ int main(void)
 	t_l2();
 	t_rate_backend();
 	t_rate_json();
+	t_igmp_boot();
+	t_igmp_controls();
+	t_igmp_lut();
+	t_igmp_rx();
 	t_unported();
 	printf("\n%d checks, %d failed\n", tests_run, tests_failed);
 	return tests_failed ? 1 : 0;

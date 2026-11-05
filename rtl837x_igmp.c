@@ -15,6 +15,9 @@
 #include "rtl837x_regs.h"
 #include "rtl837x_igmp.h"
 #include "machine.h"
+#if SOC_FAMILY == RTL836X
+#include "rtl836x_igmp.h"
+#endif
 
 extern __code const struct machine machine;
 extern __xdata uint8_t igmpEnabled;
@@ -30,7 +33,9 @@ extern __xdata uint8_t sfr_data[4];
 extern __xdata struct machine_runtime machine_detected;
 extern __xdata uint8_t uip_buf[UIP_CONF_BUFFER_ALLOC_SIZE];
 
+#if SOC_FAMILY == RTL837X
 __xdata uint16_t idx;
+#endif
 #define IGMP_IP_HDR		offsetof(struct igmp_pkt, hlen)
 #define IGMP_IP_IHL		0x0f
 #define IGMP_GROUP_OFS		4
@@ -39,6 +44,7 @@ __xdata uint16_t idx;
 static __xdata uint8_t igmp_grp;
 static __xdata uint8_t igmp_join;
 
+#if SOC_FAMILY == RTL837X
 #ifdef IPMC_USES_L3MC
 struct ipmc_table_entry {
 	uint8_t sip[4];
@@ -59,11 +65,15 @@ struct l2mc_table_entry {
 };
 static __xdata struct l2mc_table_entry entry;
 #endif
+#endif
 
 struct igmp_pkt {
 	uint8_t ipv4mc_addr[6];
 	uint8_t src_addr[6];
 	struct rtl_tag rtl_tag;
+#if SOC_FAMILY == RTL836X
+	struct vlan_tag native_vlan;
+#endif
 	uint16_t ipv4_tag;
 	uint8_t hlen;
 	uint8_t dscp;
@@ -91,6 +101,7 @@ struct igmp_pkt {
 #define IGMP_I ((__xdata struct igmp_pkt *)&uip_buf[0])
 
 
+#if SOC_FAMILY == RTL837X
 void igmp_setup(void) __banked
 {
 	uint8_t i;
@@ -206,6 +217,7 @@ void entry_to_l2mc(void)
 	REG_WRITE(RTL837x_TBL_DATA_IN_C, 0x00, entry.igmp_asic & 1, entry.igmp_index, entry.pmask >> 2);
 }
 #endif
+#endif
 
 
 /* Validate the complete report before the first table operation. */
@@ -295,6 +307,11 @@ uint8_t igmp_packet_handler(void) __banked
 	if (uip_buf[igmp_grp] == IGMP_LOCAL_NET_0 && !uip_buf[igmp_grp + 1] && !uip_buf[igmp_grp + 2])
 		return 1;
 
+#if SOC_FAMILY == RTL836X
+	if (!rtl836x_igmp_update(&uip_buf[igmp_grp], (IGMP_I->rtl_tag.pmask >> 8) & 0x0f, igmp_join))
+		print_string("IGMP table update failed\n");
+	return 1;
+#else
 #ifdef IPMC_USES_L3MC
 	memset((__xdata uint8_t *)&entry, 0, sizeof(struct ipmc_table_entry));
 	// For IPv4 MC, the Source-IP is 0.0.0.0
@@ -442,4 +459,5 @@ uint8_t igmp_packet_handler(void) __banked
 	print_sfr_data();
 #endif
 	return 1;
+#endif
 }

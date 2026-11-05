@@ -71,7 +71,7 @@ void igmp_enable(void) __banked;
 void igmp_router_port_set(uint16_t pmask) __banked;
 uint8_t igmp_packet_handler(void) __banked;
 void igmp_show(void) __banked;
-```c
+```
 `igmp_setup()` is called at boot-time and configures flooding of all IP-MC packets by
 default, as otherwise no IP-MC would be possible in the network. `igmp off` calls it as
 well; groups learned while IGMP was on stay in the table, but are no longer looked up.
@@ -85,7 +85,7 @@ of IP-MC packets to be limited to only subscribed ports.
 for frames to 01:00:5e:xx:xx:xx and returns 0 when the frame is not a trapped IGMP packet,
 so that it is passed on to the IP stack. IGMPv1/v2 reports (0x12, 0x16) join the group given
 in the IGMP header, IGMPv2 leaves (0x17) leave it, IGMPv3 reports use the first group record
-(type 4 joins, type 3 leaves). Trapped IGMP frames arrive without a VLAN tag.
+(type 4 joins, type 3 leaves). The RTL837x receive envelope has no VLAN tag.
 Reports for groups in 224.0.0.0/24 are ignored: the switch floods that block
 even with IGMP on, and an entry for a group such as 224.0.0.251 (mDNS) would
 otherwise limit it to the ports that reported it, as RFC 4541 warns against.
@@ -99,6 +99,33 @@ bytes for a missing payload. This validation does not add multi-record
 processing or source-specific multicast support.
 
 `igmp_show()` prints out the IGMP configuration on the CLI.
+
+## RTL836x (TL-SG108PE V5)
+
+The native backend uses the same `igmp on|off|show` commands and validated
+software parser. Its NIC inserts a synthetic VLAN header, so IPv4 begins at
+byte 26 rather than byte 22. IGMPv1/v2 reports and the existing first-record
+IGMPv3 behavior update native multicast entries; no source-specific or
+multi-record processing is added. Groups remain IP-based, not VLAN-specific.
+
+`igmp off` disables IPv4 multicast lookup and hardware snooping, restores
+flooding, and removes retained protocol traps. `igmp on` traps IPv4 IGMP to
+software, keeps MLD flooding, enables DIP-only lookup with SIP zero, and drops
+unknown IPv4 multicast on front-port ingress. CPU10 remains unfiltered.
+Retained IPMC classification exceptions are cleared before enabling lookup.
+
+The six-word LUT key contains the full DIP and SIP zero. Joins and leaves
+change only the reporting front port's membership; a final leave removes that
+key. Existing extended membership bits and unrelated unicast entries are
+preserved. A post-write lookup verifies membership, including table-full
+refusal. Busy table operations have a bounded poll limit and are not retried.
+The router-port API translates logical CPU9 to chip CPU10.
+
+Register facts follow the RTL8367C SDK IGMP/LUT APIs. Host coverage includes
+retained state, packed and extended memberships, high address octets, native
+RX headers, key isolation, unavailable/full tables and failed writes.
+Native hardware trapping and forwarding are not yet verified.
+
 
 
 ## IGMP configuration on the Serial Console

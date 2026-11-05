@@ -1,27 +1,15 @@
 /*
- * RTL836x stand-ins for unported IGMP, cable-test and GPIO/I2C modules.
+ * RTL836x stand-ins for unported cable-test and GPIO/I2C modules.
  * Their CLI commands remain disabled; only common runtime hooks are here.
  */
 #include <stdint.h>
 #include <stdbool.h>
 #include "rtl837x_common.h"
 #include "rtl837x_cabletest.h"
-#include "rtl837x_igmp.h"
 #include "rtl837x_pins.h"
 
 #pragma codeseg BANK3
 #pragma constseg BANK3
-
-void igmp_setup(void) __banked
-{
-}
-
-
-uint8_t igmp_packet_handler(void) __banked
-{
-	return 0;
-}
-
 
 void cabletest_tick(void) __banked
 {

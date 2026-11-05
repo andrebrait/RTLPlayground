@@ -106,9 +106,13 @@
     calibration preservation. Hardware checks cover port-3 readback, invalid
     requests, browser Apply and rate-dependent egress delay; calibrated ingress
     and storm throughput remain unverified.
-    IGMP and cable test are not ported: their commands are refused and their
-    pages are empty. Temperature remains unavailable without a verified sensor
-    mapping.
+    Native IGMP uses the validated shared parser with native traps and IPv4
+    multicast LUT entries through `igmp on|off|show`. Host tests cover native
+    RX headers, retained state, membership updates and bounded failures;
+    hardware forwarding remains unverified. Existing first-record IGMPv3
+    behavior and IP-based (not VLAN-specific) groups are retained.
+    Cable test is not ported. Temperature remains unavailable without a
+    verified sensor mapping.
     The SNMP agent and Prometheus exporter build with `SNMP=1` and `PROMETHEUS=1`:
     counters come from the native MIB, link, speed and admin state from the port
     status and PHY registers. Interface errors are summed from native counters as
