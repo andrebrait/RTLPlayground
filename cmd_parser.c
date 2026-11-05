@@ -1596,12 +1596,12 @@ void parse_bw(void)
 		goto err;
 	uint8_t port = atoi_results_u8;
 
-	if (cmd_compare(1, "status")) {
+	if (cmd_compare(1, "status") && cmd_words_len == 3) {
 		bandwidth_status(port);
 		return;
 	}
 
-	if (cmd_words_len < 4) // Check for at least 4 arguments
+	if (cmd_words_len != 4)
 		goto err;
 
 	// Ensure first argument is only `in` or `out`.
@@ -1704,7 +1704,7 @@ void parse_storm(void)
 	return;
 
 err:
-	print_string("usage: storm [<port> bcast|mcast|ucast|umcast <rate> pps|kbps|off]\n");
+	cmd_error("usage: storm [<port> bcast|mcast|ucast|umcast <rate> pps|kbps|off]\n");
 }
 
 void parse_syslog(void)
