@@ -124,9 +124,19 @@ The router-port API translates logical CPU9 to chip CPU10.
 Register facts follow the RTL8367C SDK IGMP/LUT APIs. Host coverage includes
 retained state, packed and extended memberships, high address octets, native
 RX headers, key isolation, unavailable/full tables and failed writes.
-Native hardware trapping and forwarding are not yet verified.
 
+Build `3b69aa05` was exercised on a TL-SG108PE V5. Real OS IGMPv3 joins and
+leaves installed and removed two test groups on their measured ingress port
+(uplink 8, membership `0x80`). Extra-argument CLI requests returned HTTP 400
+without changing state. For 64 test frames, unknown-group egress on control
+ports 2 and 5 fell from 67/67 packets with IGMP off to 2/2 with it on;
+224.0.0.252 traffic still produced 65/65 packets. These counts include background
+traffic. IGMP was restored off, both test memberships removed, and the saved
+configuration and Ethernet/PoE administrative settings preserved.
 
+Forwarding data to a listener through a different switch port remains
+unverified: the available client and sender both reach uplink 8. A controllable
+endpoint on another front port is needed for that test.
 
 ## IGMP configuration on the Serial Console
 For testing the following commands are provided on the serial console:
