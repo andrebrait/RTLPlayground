@@ -114,8 +114,16 @@
     Cross-port listener forwarding and post-leave filtering also passed.
     Existing first-record IGMPv3 behavior and IP-based (not VLAN-specific)
     groups are retained.
-    Cable test is not ported. Temperature remains unavailable without a
-    verified sensor mapping.
+    Native `port <port> cabletest [show]` uses the RTL8370N's RTCT result
+    addresses and SDK distance units without overriding the port's admin state.
+    Host tests cover fault decoding, distance conversion, stale completion,
+    timeout cleanup and concurrent admin changes. On physical port 5, the test
+    completed, cleared its trigger and recovered the 100M link automatically;
+    PHY settings and saved configuration were unchanged. Active pairs returned
+    an unclassified `0x0060`. Unused pairs reported shorts beyond the known cable
+    length range, so those results are not evidence of a cable fault. Physical
+    distance accuracy still needs a known-length cable fixture.
+    Temperature remains unavailable without a verified sensor mapping.
     The SNMP agent and Prometheus exporter build with `SNMP=1` and `PROMETHEUS=1`:
     counters come from the native MIB, link, speed and admin state from the port
     status and PHY registers. Interface errors are summed from native counters as
