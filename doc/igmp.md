@@ -110,6 +110,9 @@ For testing the following commands are provided on the serial console:
 > igmp show
   Shows information on IGMP
 ```
+Each command takes exactly two words. Extra arguments are rejected before
+changing IGMP state or accessing the ASIC.
+
 
 ## LAG configuration via the Web Interface
 Not implemented, yet!

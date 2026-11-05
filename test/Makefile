@@ -103,3 +103,9 @@ clean:
 	rm -rf $(BUILDDIR)
 
 .PHONY: all run clean
+
+.PHONY: test_igmp_cli
+test_igmp_cli:
+	CC="$(CC)" python3 test_igmp_cli.py
+
+run: test_igmp_cli
