@@ -74,6 +74,10 @@ $(BUILDDIR)/test_page_json: test_page_json.c $(TABLE_ENV) hw_mock.h | $(BUILDDIR
 $(BUILDDIR)/test_lacp: test_lacp.c $(SRCROOT)/rtl837x_lacp.c $(SRCROOT)/timer.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
 
+TESTS += $(BUILDDIR)/test_igmp_rx
+$(BUILDDIR)/test_igmp_rx: test_igmp_rx.c hw_mock.c $(SRCROOT)/rtl837x_igmp.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) -ffunction-sections -fdata-sections $^ -o $@ $(LDFLAGS) -Wl,--gc-sections
+
 # httpd/httpd.c and uip/uip.c are compiled UNMODIFIED from the firmware tree;
 # this test carries the environment below them itself.
 $(BUILDDIR)/test_httpd_tx: test_httpd_tx.c $(SRCROOT)/httpd/httpd.c $(SRCROOT)/uip/uip.c $(SRCROOT)/timer.c | $(BUILDDIR)
@@ -99,3 +103,9 @@ clean:
 	rm -rf $(BUILDDIR)
 
 .PHONY: all run clean
+
+.PHONY: test_igmp_cli
+test_igmp_cli:
+	CC="$(CC)" python3 test_igmp_cli.py
+
+run: test_igmp_cli

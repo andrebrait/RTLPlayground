@@ -30,6 +30,13 @@
 
 ## Fixed
 
+- IGMP
+  - Validate received frame and IPv4 lengths, fragments, and every IGMPv3 record
+    before accessing the ASIC. Truncated reports no longer use stale buffer
+    bytes to change multicast membership.
+  - Reject extra arguments to `igmp on`, `igmp off` and `igmp show` before
+    changing state or accessing the ASIC.
+
 - Time
   - `rtl8372_init()` sets SDS 0 to SGMII as the stock firmware does. The masks were 0, so on RTL8372
     boards without 10G ports both SerDes stayed off, and with SDS 0 off `RTL837X_REG_SEC_COUNTER`
