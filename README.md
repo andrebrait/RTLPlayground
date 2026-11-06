@@ -181,7 +181,7 @@ make MACHINE=TPLINK_TL_SG108PE_V5
 ```
 
 The build stops if `../output/rtlplayground.bin` is not a TL-SG108PE V5 image.
-Installation from the stock TP-Link firmware is not yet tested.
+This was tested on a unit running TP-Link firmware 1.0.1 Build 20260330.
 
 > [!CAUTION]
 > This image must ONLY be used for original OEM firmware web interface firmware upgrade.

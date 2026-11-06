@@ -150,7 +150,9 @@
     `make -C installer MACHINE=TPLINK_TL_SG108PE_V5` builds an upgrade file for
     TP-Link's stock web interface: the existing installer with TP-Link's header
     magic and marker and the RTL8370N reset. The build refuses a firmware image
-    for another board. Installation from the stock firmware is not yet tested.
+    for another board. A stock unit running TP-Link 1.0.1 Build 20260330
+    accepted it through the web interface ("Image OK") and rebooted into
+    RTLPlayground with its own factory MAC.
 
 - Web UI
   - Compress the embedded assets (minify + gzip) and switch to a single-page layout. #315
