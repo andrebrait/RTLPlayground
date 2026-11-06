@@ -11,6 +11,16 @@ CC_FLAGS = -mmcs51
 ASM ?= sdas8051
 AFLAGS= -plosgff
 
+# MACHINE selects the board, as for the firmware; unset keeps the RTL837x default
+ifdef MACHINE
+CC_FLAGS += -DMACHINE_NAME=$(MACHINE)
+endif
+# TP-Link's stock loader expects its own header magic and trailing marker
+ifeq ($(MACHINE),TPLINK_TL_SG108PE_V5)
+UPDATEBUILDER_FLAGS = -m 50451085 -r 332256ff
+BOARD_STRING = TP-Link TL-SG108PE V5
+endif
+
 BUILDDIR = output
 
 SRCS = installer.c
@@ -29,7 +39,11 @@ endif
 $(BUILDDIR)/updatebuilder: updatebuilder.c
 	gcc $^ -o $@
 
-$(BUILDDIR)/installer.rel: installer.c
+# Rebuild the installer, and so the package, when MACHINE changes
+$(BUILDDIR)/.machine: FORCE | create_build_dir
+	@echo '$(MACHINE)' | cmp -s - $@ || echo '$(MACHINE)' > $@
+
+$(BUILDDIR)/installer.rel: installer.c $(BUILDDIR)/.machine
 	$(CC) $(CC_FLAGS) --code-loc ${CODE_LOCATION} -o $@ -c $<
 
 $(BUILDDIR)/crtstart.rel: crtstart.asm
@@ -45,7 +59,10 @@ $(BUILDDIR)/rtlinstaller.ihx: $(BUILDDIR)/crtstart.rel $(OBJS)
 	$(CC) $(CC_FLAGS) -Wl-bHOME=${INSTALLER_ADDRESS} -Wl-r -o $@ $^
 
 $(BUILDDIR)/rtlplayground_oem_upgrade.bin: $(BUILDDIR)/rtlinstaller.ihx ../$(BUILDDIR)/rtlplayground.bin
-	./$(BUILDDIR)/updatebuilder -i $< -o $(BUILDDIR)/rtlplayground_oem_upgrade.bin ../$(BUILDDIR)/rtlplayground.bin
+	$(if $(BOARD_STRING),grep -q '$(BOARD_STRING)' ../$(BUILDDIR)/rtlplayground.bin || { echo "ERROR: ../$(BUILDDIR)/rtlplayground.bin is not a $(BOARD_STRING) image" >&2; exit 1; })
+	./$(BUILDDIR)/updatebuilder $(UPDATEBUILDER_FLAGS) -i $< -o $(BUILDDIR)/rtlplayground_oem_upgrade.bin ../$(BUILDDIR)/rtlplayground.bin
 
 clean:
 	rm -r $(BUILDDIR)
+
+.PHONY: all clean create_build_dir FORCE

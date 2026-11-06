@@ -173,6 +173,16 @@ make
 ```
 image location is stored in  `RTLPlayground/installer/output/rtlplayground_oem_upgrade.bin`
 
+For the TP-Link TL-SG108PE V5, build its firmware first and pass the machine:
+
+```
+cd installer
+make MACHINE=TPLINK_TL_SG108PE_V5
+```
+
+The build stops if `../output/rtlplayground.bin` is not a TL-SG108PE V5 image.
+Installation from the stock TP-Link firmware is not yet tested.
+
 > [!CAUTION]
 > This image must ONLY be used for original OEM firmware web interface firmware upgrade.
 > You do not need this image if you are already on RTLplayground firmware.
