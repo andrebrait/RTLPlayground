@@ -86,6 +86,7 @@ static int config_erases, config_writes;
 static uint8_t flash_written[1024];
 static size_t flash_written_len;
 static int flash_write_bad;
+static int flash_write_past_area;
 
 const char * const mime_strings[] = { "text/html", "image/svg+xml", "image/x-icon",
 			 "image/png", "text/javascript", "text/css", "text/plain" };
@@ -116,6 +117,8 @@ void flash_sector_erase(void)
 
 void flash_write_bytes(uint8_t *ptr)
 {
+	if (flash_region.addr + flash_region.len > (uint32_t)FIRMWARE_UPLOAD_START * 2)
+		flash_write_past_area = 1;
 	if (flash_region.addr < FIRMWARE_UPLOAD_START) {
 		config_writes++;
 		config_write_addr = flash_region.addr;
@@ -1312,6 +1315,26 @@ static void scenario_upload_cr_before_boundary(void)
 	      "upload: the CR and the bytes before it reach the flash unchanged");
 }
 
+/* A full-size image ends exactly at the end of the staged area: nothing,
+ * not even the terminating NUL, may be written past it. */
+static void scenario_upload_full_image(void)
+{
+	uint8_t byte = 0;
+
+	boundary[0] = 0;
+	bindex = 0;
+	verify_crc = 0;
+	write_len = 0;
+	uptr = (uint32_t)FIRMWARE_UPLOAD_START * 2;
+	flash_write_past_area = 0;
+	uip_conn = &uip_conns[0];
+	upload_settings.p = &byte;
+	upload_settings.bptr = 0;
+	upload_settings.plen = 1;
+	stream_upload();
+	CHECK(!flash_write_past_area, "full-size image writes nothing past the staged area");
+}
+
 static int upload_whole_and_split(uint8_t *body, uint16_t body_len)
 {
 	return upload_in_two(body, body_len, body_len) && !memcmp(flash_written, body, UPLOAD_LEN)
@@ -1548,6 +1571,7 @@ int main(int argc, char **argv)
 	scenario_upload("MacBinary, split part terminator", "Content-Type: application/macbinary\r\n", 1);
 	scenario_upload("no part Content-Type", "", 0);
 	scenario_upload_cr_before_boundary();
+	scenario_upload_full_image();
 	scenario_upload_last_byte();
 	scenario_upload_broken_matches();
 

@@ -491,10 +491,13 @@ uint8_t stream_upload(void)
 				}
 			}
 			// Make sure there is a 0 at the end of the uploaded data
-			flash_buf[0] = 0;
-			flash_region.addr = uptr;
-			flash_region.len = 1;
-			flash_write_bytes(flash_buf);
+			// (a full-size image ends at the end of the staged area: no room)
+			if (uptr < (uint32_t)FIRMWARE_UPLOAD_START * 2) {
+				flash_buf[0] = 0;
+				flash_region.addr = uptr;
+				flash_region.len = 1;
+				flash_write_bytes(flash_buf);
+			}
 			if (upload_settings.bptr >= upload_settings.plen)
 				return 0;
 			return 1;
