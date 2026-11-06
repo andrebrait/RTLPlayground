@@ -72,9 +72,10 @@ The remaining RTL837x-specific startup in `installer.c` (clock, flash
 controller, serial) is kept where RTLPlayground's own startup on the
 TL-SG108PE V5 already does the same; the implementation plan checks each call.
 
-After installation, flash `0x80000` holds byte `0x62fec` of the staged image.
-RTLPlayground's updater treats `00 40` there as a pending update; the build
-checks those two bytes are not `00 40`.
+After installation, flash `0x80000` holds byte `0x62fec` of the staged image,
+which in current builds lies inside the embedded `app.js` text, not `00 40`. Even if
+it were, RTLPlayground's updater would find a bad CRC and erase
+`0x80000-0xfffff`, which holds only the stale staged copy; no check is needed.
 
 ## Testing
 
