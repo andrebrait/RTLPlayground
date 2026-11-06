@@ -30,6 +30,10 @@
 
 ## Fixed
 
+- Commands
+  - Reject unknown or extra cable-test arguments on copper ports before
+    accessing the PHY or starting a link-interrupting diagnostic.
+
 - Time
   - `rtl8372_init()` sets SDS 0 to SGMII as the stock firmware does. The masks were 0, so on RTL8372
     boards without 10G ports both SerDes stayed off, and with SDS 0 off `RTL837X_REG_SEC_COUNTER`
