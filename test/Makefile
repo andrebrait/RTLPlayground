@@ -99,3 +99,9 @@ clean:
 	rm -rf $(BUILDDIR)
 
 .PHONY: all run clean
+
+.PHONY: test_bw_cli
+test_bw_cli:
+	CC="$(CC)" python3 test_bw_cli.py
+
+run: test_bw_cli
