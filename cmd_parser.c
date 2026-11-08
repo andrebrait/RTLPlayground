@@ -667,11 +667,6 @@ void parse_vlan(void)
 		vlan_settings.vlan = atoi_results_short;
 
 		if (cmd_compare(2, "mgmt")) {
-#if SOC_FAMILY == RTL836X
-			/* shortcut: management stays untagged in VLAN 1, the CPU port's PVID; a tagged
-			 * management VLAN needs rtl836x_nic.c to keep and add the tag on RX and TX */
-			cmd_error("no management VLAN on the RTL836x\n");
-#else
 			if (management_vlan == vlan_settings.vlan) {
 				print_string("Management VLAN unchanged\n");
 				return;
@@ -683,9 +678,9 @@ void parse_vlan(void)
 				dhcp_start();
 			if (!vlan_settings.vlan)
 				print_string("Management VLAN disabled\n");
-			else
+			else {
 				print_string("Management VLAN set to "); print_short(management_vlan); write_char('\n');
-#endif
+			}
 			return;
 		}
 

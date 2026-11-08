@@ -357,3 +357,9 @@ test_cable_cli:
 	CC="$(CC)" python3 test_cable_cli.py
 
 run: test_cable_cli
+
+.PHONY: test_management_vlan
+test_management_vlan:
+	CC="$(CC)" python3 test_management_vlan.py
+
+run: test_management_vlan

@@ -4309,8 +4309,6 @@ function vlanRefresh() {
 function buildVlanEdit() {
     var tb = $("vedit").tBodies[0];
     if (tb.rows.length || !S.n) return;
-    /* the RTL836x keeps management untagged in VLAN 1 */
-    $("vmgmtpromote").closest("div").hidden = S.info.mib_family === "rtl836x";
     var hd = tb.insertRow();
     hd.insertCell().className = "mut";
     var rN = tb.insertRow();

@@ -454,6 +454,8 @@ static void t_vlan(void)
 	for (unsigned i = 0; i < 4 * 32; i++)
 		MC(0, i) = 0x5a5a;	/* whatever the chip holds before the setup */
 	regfile[RTL836X_REG_VLAN_PVID_CTRL0 + 2] = 0x0303;
+	for (unsigned p = 0; p < 8; p++)
+		MISC_CFG(p) = 0x4cb0;
 	MISC_CFG(10) = PORT_MISC_CFG_VLAN_EGRESS_MODE | 0x0001;
 	ACCEPT(0) = ACCEPT(1) = 0xffff;
 	vlan_setup();
@@ -468,6 +470,8 @@ static void t_vlan(void)
 	      "every port has PVID 1");
 	CHECK((MISC_CFG(10) & PORT_MISC_CFG_VLAN_EGRESS_MODE) == 0 && (MISC_CFG(10) & 1),
 	      "egress tag mode original, the rest of PORT10_MISC_CFG kept");
+	for (unsigned p = 0; p < 8; p++)
+		CHECK(MISC_CFG(p) == 0x4c80, "front-port egress follows VLAN untag bits without changing rate-control flags");
 	CHECK(regfile[RTL836X_REG_VLAN_INGRESS] == 0x04ff && ACCEPT(0) == 0 && ACCEPT(1) == 0,
 	      "ingress filter on the front ports and the CPU port, all frame types accepted");
 	CHECK(regfile[RTL836X_REG_VLAN_CTRL] & VLAN_CTRL_ENABLE, "VLANs on");
@@ -476,8 +480,8 @@ static void t_vlan(void)
 	vlan_settings.members = 0x0006;
 	vlan_settings.tagged = 0x0004;
 	vlan_create();
-	CHECK(vlan4k[10][0] == 0x0206 && vlan4k[10][2] == 0x0024,
-	      "VLAN 10: port 1 untagged, port 2 tagged, the CPU port untagged");
+	CHECK(vlan4k[10][0] == 0x0206 && vlan4k[10][2] == 0x0004,
+	      "VLAN 10: port 1 untagged, port 2 tagged, the CPU port tagged to retain ingress VID");
 	port_pvid_set(1, 10);
 	unsigned idx = pvid_index(1);
 	CHECK(idx != 0 && MC(idx, 3) == 10 && MC(idx, 0) == 0x0406 && pvid_index(0) == 0,
@@ -512,8 +516,8 @@ static void t_vlan(void)
 	name_vlan(10, "lab");
 	port_pvid_set(1, 10);
 	send_vlan(10);
-	CHECK(has("\"members\":\"0x2080a02\"") && has("\"name\":\"lab\"") && has("\"pvid\":\"0x0002\"") && balanced(),
-	      "/vlan.json: the RTL837x layout with the CPU port as bit 9, name and PVID ports");
+	CHECK(has("\"members\":\"0x2000a02\"") && has("\"name\":\"lab\"") && has("\"pvid\":\"0x0002\"") && balanced(),
+	      "/vlan.json: native CPU membership is tagged, with name and front-port PVIDs");
 	send_vlanlist();
 	CHECK(has("{\"id\":1,\"name\":\"\"}") && has("{\"id\":10,\"name\":\"lab\"}") && !has("\"id\":20") && balanced(),
 	      "/vlanlist: the VLANs with members");

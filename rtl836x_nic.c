@@ -81,10 +81,14 @@ bool nic_rx_header(uint16_t ring_ptr) __reentrant
 bool nic_rx_packet(__xdata uint8_t *buffer, uint16_t ring_ptr) __reentrant
 {
 	uint16_t len = ((uint16_t)rx_headers[5] << 8 | rx_headers[4]) - RX_TAGS_SIZE;
+	bool tagged;
 
 	if (ring_ptr >= RTL836X_NIC_RX_RING_BYTES)
 		ring_ptr -= RTL836X_NIC_RX_RING_BYTES;
-	if (!nic_rx_dma(buffer + RX_TAGS_SIZE, ring_ptr, (len + 7) >> 3))
+	if (!nic_rx_dma(buffer + RX_TAGS_SIZE, ring_ptr, 2))
+		return false;
+	tagged = buffer[24] == 0x81 && buffer[25] == 0;
+	if (tagged && len < ETHER_HEADER_SIZE + VLAN_TAG_SIZE)
 		return false;
 	/* DA and SA to the front, then the tags the RTL837x delivers: the type lands where it has it */
 	for (uint8_t i = 0; i < 12; i++) {
@@ -96,7 +100,26 @@ bool nic_rx_packet(__xdata uint8_t *buffer, uint16_t ring_ptr) __reentrant
 	buffer[14] = RTL_FRAME_TAG_VERSION;
 	/* Descriptor byte 3 is the ingress port: measured per source MAC on a TL-SG108PE V5 */
 	buffer[19] = rx_hdr[3] & 0x0f;
-	buffer[20] = 0x81;	/* VID 0 802.1Q tag, so TRAP_RX_BODY() finds the type behind it */
+	if (tagged) {
+		for (uint8_t i = 0; i < VLAN_TAG_SIZE; i++)
+			buffer[20 + i] = buffer[24 + i];
+	} else {
+		buffer[20] = 0x81;
+		buffer[21] = 0;
+		buffer[22] = 0;
+		buffer[23] = 1;	/* Only VLAN 1 is untagged on the CPU port. */
+	}
+	/* DMA the tail straight into its final position; keep an existing VLAN tag only once. */
+	if (len > 16) {
+		ring_ptr += 16;
+		if (ring_ptr >= RTL836X_NIC_RX_RING_BYTES)
+			ring_ptr -= RTL836X_NIC_RX_RING_BYTES;
+		if (!nic_rx_dma(buffer + (tagged ? 24 : 28), ring_ptr, (len - 9) >> 3))
+			return false;
+	}
+	len += tagged ? RTL_TAG_SIZE : RX_TAGS_SIZE;
+	rx_headers[4] = len;
+	rx_headers[5] = len >> 8;
 	return true;
 }
 

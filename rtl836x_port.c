@@ -75,9 +75,8 @@ void port_stats_print(void) __banked
  *   1 tagged, 2 untagged, as vlan_ingress_mode_e (rtl8367c_asicdrv_vlan.c:381).
  * - Egress tag mode: PORT0_MISC_CFG 0x000e + 32 * port, bits 5:4, 0 follows the untagged set
  *   (rtl8367c_setAsicVlanEgressTagMode, rtl8367c_asicdrv_vlan.c:485).
- * The NIC on chip port 10 is the CPU_PORT of the common code. The RX path of rtl836x_nic.c
- * takes untagged frames and management_vlan is 0, so the CPU port is an untagged member of
- * every VLAN; what it sends goes out in its PVID's VLAN, 1.
+ * The NIC is chip port 10. VLAN 1 starts untagged on the CPU port; configured
+ * VLANs tag CPU traffic so the RX adapter can retain the ingress VID.
  */
 #define CHIP_PORT(p)	((p) == CPU_PORT ? RTL836X_CPU_PORT : (p))
 #define CHIP_MASK(m)	(((m) & 0xff) | (((m) & PMASK_CPU) << 1))
@@ -246,9 +245,9 @@ void vlan_create(void) __banked
 		print_string("\nInvalid VLAN: "); print_short(vlan_settings.vlan); write_char('\n');
 		return;
 	}
-	/* The CPU port is always a member, as on the RTL837x, but untagged, see above */
+	/* Preserve the VLAN identity on the CPU link, independently of front-port tagging. */
 	vlan_settings.members |= PMASK_CPU;
-	vlan_settings.tagged &= vlan_settings.members & ~PMASK_CPU;
+	vlan_settings.tagged = (vlan_settings.tagged & vlan_settings.members) | PMASK_CPU;
 
 	print_string("vlan: "); print_short(vlan_settings.vlan);
 	print_string(", members: "); print_short(vlan_settings.members);

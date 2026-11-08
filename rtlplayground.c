@@ -1021,19 +1021,19 @@ void handle_rx(void)
 			if (uip_len) {
 				tcpip_output();
 			}
+		} else if (management_vlan && management_vlan != rx_packet_vlan) {
+			uip_len = 0;	/* Keep other VLANs out of the management IP and ARP state. */
 		} else if (ETH_IN->ether_type == HTONS(0x0806)) { // ARP
 			uip_arp_arpin();
 			if (uip_len) {
 			    tcpip_output();
 			}
 		} else if (ETH_IN->ether_type == HTONS(0x0800)) { // IPv4
-			if (!management_vlan || management_vlan == rx_packet_vlan) {
-				uip_rx_ip_input();
-				if (uip_len) {
-					// Add ethernet frame
-					uip_arp_out();
-					tcpip_output();
-				}
+			uip_rx_ip_input();
+			if (uip_len) {
+				// Add ethernet frame
+				uip_arp_out();
+				tcpip_output();
 			}
 		} else {
 #ifdef RXTXDBG
@@ -1793,11 +1793,9 @@ void main(void)
 	httpd_init();
 	lldp_init();
 
-#if SOC_FAMILY == RTL836X
-	management_vlan = 0; // Untagged: the switch reaches the CPU port without a VLAN setup
-#else
 	management_vlan = 1; // Default management VLAN is 1
 
+#if SOC_FAMILY != RTL836X
 	setup_i2c();
 #endif
 	setup_sfp_gpio();

@@ -86,13 +86,32 @@ static void check_rx(uint16_t at, uint16_t len)
 	assert(!rx_headers[0] && !rx_headers[1] && !rx_headers[2] && !rx_headers[3]
 	       && !rx_headers[6] && !rx_headers[7]);
 	assert(nic_rx_packet(buf.data, at + 8));
-	/* An RTL837x-style RX tag naming ingress port 5, then a VID 0 802.1Q tag */
-	static const uint8_t tags[12] = { 0x88, 0x99, 0x04, 0, 0, 0, 0, 0x05, 0x81, 0x00, 0, 0 };
+	/* Untagged CPU traffic belongs to the CPU port's fixed PVID, VLAN 1. */
+	static const uint8_t tags[12] = { 0x88, 0x99, 0x04, 0, 0, 0, 0, 0x05, 0x81, 0x00, 0, 1 };
 	for (unsigned i = 0; i < 12; i++)
 		assert(buf.data[i] == i + 1 && buf.data[12 + i] == tags[i]);
 	assert(buf.data[24] == 0x08 && buf.data[25] == 0x00);
 	for (unsigned i = 14; i < len; i++)
 		assert(buf.data[12 + i] == (uint8_t)(i + 1));
+	for (unsigned i = 0; i < sizeof(buf.after); i++)
+		assert(buf.after[i] == 0xa5);
+}
+
+static void check_rx_vlan(uint16_t at, uint16_t len)
+{
+	static const uint8_t tag[] = { 0x81, 0x00, 0xb0, 0x64, 0x08, 0x00 };
+	memset(&buf, 0xa5, sizeof(buf));
+	put_frame(at, len, 0);
+	ring_put(at + 8 + 12, tag, sizeof(tag));
+	assert(nic_rx_header(at));
+	assert(nic_rx_packet(buf.data, at + 8));
+	assert(((uint16_t)rx_headers[5] << 8 | rx_headers[4]) == len + 8);
+	assert(buf.data[19] == 5);
+	assert(!memcmp(buf.data + 20, tag, sizeof(tag)));
+	for (unsigned i = 0; i < 12; i++)
+		assert(buf.data[i] == i + 1);
+	for (unsigned i = 18; i < len; i++)
+		assert(buf.data[8 + i] == (uint8_t)(i + 1));
 	for (unsigned i = 0; i < sizeof(buf.after); i++)
 		assert(buf.after[i] == 0xa5);
 }
@@ -111,6 +130,21 @@ int main(void)
 
 	printf("[test] RX: a frame crossing the ring end\n");
 	check_rx(RTL836X_NIC_RX_RING_BYTES - 32, 98);
+
+	printf("[test] RX: VLAN 100 and priority bits survive without a second VLAN tag\n");
+	check_rx_vlan(0x0100, 60);
+	check_rx_vlan(RTL836X_NIC_RX_RING_BYTES - 8, 1544);
+	check_rx_vlan(RTL836X_NIC_RX_RING_BYTES - 32, 98);
+
+	printf("[test] RX: a truncated VLAN header is refused\n");
+	for (uint16_t len = 14; len < 18; len++) {
+		static const uint8_t tpid[] = { 0x81, 0x00 };
+		put_frame(0x0200, len, 0);
+		ring_put(0x0200 + 8 + 12, tpid, sizeof(tpid));
+		assert(nic_rx_header(0x0200));
+		assert(!nic_rx_packet(buf.data, 0x0208));
+	}
+	check_rx(0x0100, 60);
 
 	printf("[test] RX: error bit, runt and oversize frames are dropped\n");
 	put_frame(0x0200, 60, 0x01);

@@ -53,11 +53,16 @@
     enabled; `lldp off` restores forwarding between the front ports.
     802.1Q VLANs work as on the RTL837x: the `vlan`, `pvid` and `ingress`
     commands, `/vlan.json`, `/vlanlist` and the VLANs page. At boot every port is
-    an untagged member of VLAN 1 with PVID 1. The CPU port is an untagged member
-    of every VLAN, so management stays untagged in VLAN 1 and there is no
-    management VLAN setting. On the switch, moving front port 3 alone into
-    VLAN 10 stopped all VLAN 1 traffic to it while management stayed reachable
-    on port 8, and restoring VLAN 1 brought the traffic back.
+    an untagged member of VLAN 1 with PVID 1. Configured VLANs include the CPU
+    as a tagged member, retaining the ingress VID through the native NIC.
+    Management defaults to VLAN 1 and can be changed through `vlan <VID> mgmt`
+    or the VLAN editor. The shared receive path filters both management IPv4
+    and ARP; control protocols remain independent of that filter.
+    `vlan 0 mgmt` disables receive filtering and sends management untagged in
+    the CPU port's PVID, VLAN 1. Host regressions cover RX/TX tagging, ingress
+    isolation, ring wrap, truncated tags and egress-field preservation.
+    VLAN isolation was checked on an earlier untagged-management build;
+    management VLAN support has not yet been validated on hardware.
     Port isolation works as on the RTL837x: the `isolate` command,
     `/isolation.json` and the Port isolation page.
     The maximum frame size works with the `mtu` command, `/mtu.json` and the
