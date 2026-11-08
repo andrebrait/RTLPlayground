@@ -27,6 +27,7 @@ async function remaining(response) {
             { idx: 23, pport: '4', where: '4', stat: false, mac: '02:aa:bb:cc:dd:ee', vlan: 1 }
         ],
         l2SortCol: 'pport', l2SortDir: 1, l2Key: e => e.pport,
+        l2Walk: null, requestAnimationFrame: () => {}, l2Scroll: () => {},
         t: text => text,
         $: id => id === 'l2table' ? table : id === 'l2filter' ? { value: '' } : {},
         h: (_, options) => options,
