@@ -270,8 +270,9 @@
   - Give the LLDP Name column the remaining table width and wrap long names.
   - Refuse MAC-table deletion when the requested index has aged out or is out of
     range, instead of using the next entry's data for a write.
-  - Load the complete MAC table even when responses contain fewer than 30 rows.
-    Stop at an empty page or a repeated entry, not an assumed page count.
+  - Load MAC table entries as the table is scrolled, with a Load more button for
+    keyboard access. Stop at an empty page or a repeated entry, not an assumed
+    page count. Sorting and filtering apply to loaded entries only.
 
 - Health
   - `HEALTH=1` builds no longer write past the phase timing arrays at the LLDP checkpoint, which

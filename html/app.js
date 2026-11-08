@@ -272,6 +272,8 @@ var LANG = {
         l2_loading: "loading...",
         l2_failed: "load failed",
         l2_entries: "entries",
+        l2_more: "Load more",
+        l2_partial: "Sorting and filtering apply to loaded entries only.",
         l2_del_t: "Delete entry",
         l2_flush_q: "Flush all learned MAC entries?",
         m_title: "Port mirroring",
@@ -632,6 +634,8 @@ var LANG = {
         l2_loading: "読み込み中...",
         l2_failed: "読み込み失敗",
         l2_entries: "エントリ",
+        l2_more: "さらに読み込む",
+        l2_partial: "並べ替えと絞り込みは読み込み済みのエントリにのみ適用されます。",
         l2_del_t: "エントリを削除",
         l2_flush_q: "学習した MAC エントリをすべて消去しますか?",
         m_title: "ポートミラーリング",
@@ -969,6 +973,8 @@ var LANG = {
         l2_loading: "加载中...",
         l2_failed: "加载失败",
         l2_entries: "条",
+        l2_more: "加载更多",
+        l2_partial: "排序和筛选仅适用于已加载的条目。",
         l2_del_t: "删除条目",
         l2_flush_q: "清除所有动态学习的 MAC 条目?",
         m_title: "端口镜像",
@@ -1325,6 +1331,8 @@ var LANG = {
         l2_loading: "cargando...",
         l2_failed: "error de carga",
         l2_entries: "entradas",
+        l2_more: "Cargar más",
+        l2_partial: "La ordenación y el filtro solo se aplican a las entradas cargadas.",
         l2_del_t: "Eliminar entrada",
         l2_flush_q: "¿Vaciar todas las entradas MAC aprendidas?",
         m_title: "Duplicación de puertos",
@@ -1719,6 +1727,8 @@ var LANG = {
         l2_loading: "chargement...",
         l2_failed: "chargement non réussi",
         l2_entries: "entrées",
+        l2_more: "Charger plus",
+        l2_partial: "Le tri et le filtrage s'appliquent uniquement aux entrées chargées.",
         l2_del_t: "Supprimer l'entrée",
         l2_flush_q: "Effacer toutes les entrées MAC apprises?",
         m_title: "Duplication de ports",
@@ -2095,6 +2105,8 @@ var LANG = {
         l2_loading: "lädt...",
         l2_failed: "Laden fehlgeschlagen",
         l2_entries: "Einträge",
+        l2_more: "Mehr laden",
+        l2_partial: "Sortierung und Filter gelten nur für geladene Einträge.",
         l2_del_t: "Eintrag löschen",
         l2_flush_q: "Alle gelernten MAC-Einträge löschen?",
         m_title: "Port-Spiegelung",
@@ -4559,38 +4571,33 @@ function VlanInit() {
 var l2Rows = [],
     l2SortCol = "pport",
     l2SortDir = 1,
-    l2Gen = 0;
+    l2Gen = 0,
+    l2Walk = null;
 
 function l2Load() {
-    var seen = {},
-        all = [],
-        idx = 0,
-        gen = ++l2Gen;
-
-    function step() {
-        return getJSON("/l2.json?idx=" + idx).then(function(s) {
-            if (gen !== l2Gen) throw new Error("stale");
-            if (!s.length) return all;
-            var wrapped = false;
-            s.forEach(function(e) {
-                e.idx = parseInt(e.idx, 16);
-                if (seen[e.idx]) {
-                    wrapped = true;
-                    return;
-                }
-                seen[e.idx] = 1;
-                e.vlan = parseInt(e.vlan, 16);
-                e.stat = e.type === "s";
-                e.pport = e.port === 9 ? "CPU" : S.logToPhys[e.port];
-                e.where = e.lag ? "LAG" + e.lag : String(e.pport);
-                all.push(e);
-            });
-            if (wrapped) return all;
-            idx = s[s.length - 1].idx + 1;
-            return step();
+    var walk = l2Walk;
+    if (!walk || walk.loading || walk.done) return Promise.resolve();
+    walk.loading = true;
+    return getJSON("/l2.json?idx=" + walk.idx).then(function(s) {
+        if (walk.gen !== l2Gen) throw new Error("stale");
+        if (!s.length) walk.done = true;
+        s.forEach(function(e) {
+            e.idx = parseInt(e.idx, 16);
+            if (walk.seen[e.idx]) {
+                walk.done = true;
+                return;
+            }
+            walk.seen[e.idx] = 1;
+            e.vlan = parseInt(e.vlan, 16);
+            e.stat = e.type === "s";
+            e.pport = e.port === 9 ? "CPU" : S.logToPhys[e.port];
+            e.where = e.lag ? "LAG" + e.lag : String(e.pport);
+            l2Rows.push(e);
         });
-    }
-    return step();
+        if (s.length) walk.idx = s[s.length - 1].idx + 1;
+    }).finally(function() {
+        walk.loading = false;
+    });
 }
 
 function l2Key(e) {
@@ -4604,13 +4611,27 @@ function l2Key(e) {
 }
 
 function l2Fetch() {
+    l2Rows = [];
+    l2Walk = { seen: {}, idx: 0, gen: ++l2Gen, loading: false, done: false };
+    l2Render();
+    return l2More();
+}
+
+function l2More() {
+    if (!l2Walk || l2Walk.loading || l2Walk.done) return Promise.resolve();
+    var gen = l2Gen;
+    $("l2more").disabled = true;
     $("l2count").textContent = t("l2_loading");
-    return l2Load().then(function(all) {
-        l2Rows = all;
-        l2Render();
-    }).catch(function(e) {
-        if (e.message !== "stale") $("l2count").textContent = t("l2_failed")
+    return l2Load().then(l2Render).catch(function(e) {
+        if (gen !== l2Gen) return;
+        $("l2more").disabled = false;
+        $("l2count").textContent = t("l2_failed");
     });
+}
+
+function l2Scroll() {
+    if (curTab === "l2" && $("l2more").getBoundingClientRect().top <=
+            document.querySelector("main").getBoundingClientRect().bottom + 100) l2More();
 }
 
 function l2Render() {
@@ -4654,6 +4675,10 @@ function l2Render() {
         }));
     });
     $("l2count").textContent = shown + " / " + l2Rows.length + " " + t("l2_entries");
+    $("l2more").hidden = !l2Walk || l2Walk.done;
+    $("l2more").disabled = !!l2Walk && l2Walk.loading;
+    $("l2partial").hidden = !l2Walk || l2Walk.done;
+    requestAnimationFrame(l2Scroll);
 }
 $("l2table").querySelectorAll("th[data-sort]").forEach(function(th) {
     th.addEventListener("click", function() {
@@ -4667,6 +4692,9 @@ $("l2filter").addEventListener("input", l2Render);
 $("l2refresh").addEventListener("click", function() {
     l2Fetch()
 });
+$("l2more").addEventListener("click", l2More);
+document.querySelector("main").addEventListener("scroll", l2Scroll, { passive: true });
+window.addEventListener("resize", l2Scroll);
 $("l2flush").addEventListener("click", function() {
     confirmModal(t("l2_flush_q"), "", function() {
         postCmd("l2 forget").then(function() {
@@ -4677,11 +4705,12 @@ $("l2flush").addEventListener("click", function() {
 tabHooks.l2 = {
     enter: function() {
         needPorts(function() {
-            l2Fetch()
+            if (curTab === "l2") l2Fetch()
         })
     },
     leave: function() {
-        l2Gen++
+        l2Gen++;
+        l2Walk = null;
     }
 };
 
