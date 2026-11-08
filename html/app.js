@@ -263,7 +263,6 @@ var LANG = {
         v_mgmt_q: "Set VLAN {n} as management VLAN?",
         v_vid_err: "VLAN ID already exists",
         v_mgmt_d: "The switch will start tagging its own traffic with that VLAN. If the port you are connected through does not carry it, this page becomes unreachable and the setting can only be undone over the console.",
-        v_mgmt_tt: "The management VLAN cannot be deleted, you need to assign management to another VLAN first.",
         l2_title: "MAC address table",
         l2_filter: "filter...",
         l2_flush: "Flush learned entries",
@@ -968,7 +967,6 @@ var LANG = {
         v_vid_first: "请先输入 VLAN ID",
         v_mgmt_q: "将 VLAN {n} 设为管理 VLAN?",
         v_mgmt_d: "交换机将开始为自身流量打上该 VLAN 标签。如果您所连接的端口不属于该 VLAN，本页面将无法访问，且只能通过控制台撤销此设置。",
-        v_mgmt_tt: "无法删除管理 VLAN，请先将管理功能分配给另一个 VLAN。",
         l2_title: "MAC 地址表",
         l2_filter: "筛选...",
         l2_flush: "清除学习条目",
@@ -1480,7 +1478,6 @@ var LANG = {
         v_mgmt_c: "AVISO: debes poder acceder a esta VLAN para seguir gestionando el switch.",
         v_rename: "Renombrar",
         v_rename_t: "Renombrar VLAN",
-        v_mgmt_tt: "La VLAN de gestión no se puede borrar, primero hay que asignar la gestión a otra VLAN.",
         iso_title: "Aislamiento de puertos",
         iso_from: "Desde el puerto",
         iso_to: "Hacia el puerto",
@@ -2106,7 +2103,6 @@ var LANG = {
         v_vid_first: "Zuerst eine VLAN-ID eingeben",
         v_mgmt_q: "VLAN {n} als Management-VLAN setzen?",
         v_mgmt_d: "Der Switch versieht dann seinen eigenen Verkehr mit diesem VLAN-Tag. Führt der Port, über den du verbunden bist, dieses VLAN nicht, ist diese Seite nicht mehr erreichbar und die Einstellung lässt sich nur noch über die serielle Konsole zurücknehmen.",
-        v_mgmt_tt: "Das Management-VLAN lässt sich nicht löschen. Lege zuerst ein anderes VLAN als Management-VLAN fest.",
         l2_title: "MAC-Adresstabelle",
         l2_filter: "filtern...",
         l2_flush: "Gelernte Einträge löschen",
@@ -4302,14 +4298,7 @@ function vlanRefresh() {
                         })]);
                     },
                 }));
-                if (v.id == $("vmgmtcur").dataset.id) {
-                    act.appendChild(h("span", {
-                        class: "ctl",
-                        title: t("v_mgmt_tt"),
-                        class: "hint",
-                        style: "color: var(--fg2); font-size: 150%; padding-left: 10px;"
-                    }, [document.createTextNode("\u{1F6C8}")]));
-                } else {
+                if (v.id != $("vmgmtcur").dataset.id) {
                     act.appendChild(h("button", {
                         class: "ctl",
                         text: "\u2715",
