@@ -315,8 +315,8 @@ RTL8370_DUMP_STAMP := $(BUILDDIR)/.rtl8370_dump
 $(RTL8370_DUMP_STAMP): FORCE | create_build_dir
 	@echo '$(RTL8370_DUMP)' | cmp -s - $@ 2>/dev/null || echo '$(RTL8370_DUMP)' > $@
 
-$(BUILDDIR)/phy_patch.h: $(RTL8370_DUMP_STAMP) $(RTL8370_DUMP) rtl8370n/gen_phy.py
-	$(if $(RTL8370_DUMP),python3 rtl8370n/gen_phy.py "$(RTL8370_DUMP)",echo '#define PHY_PATCH_LEN 0') > $@.tmp
+$(BUILDDIR)/phy_patch.h: $(RTL8370_DUMP_STAMP) $(RTL8370_DUMP) tools/eth_console/gen_phy.py
+	$(if $(RTL8370_DUMP),python3 tools/eth_console/gen_phy.py "$(RTL8370_DUMP)",echo '#define PHY_PATCH_LEN 0') > $@.tmp
 	mv $@.tmp $@
 
 $(BUILDDIR)/rtl8370_init.rel: $(BUILDDIR)/phy_patch.h

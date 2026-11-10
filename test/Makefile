@@ -119,7 +119,7 @@ $(BUILDDIR)/test_timer: test_timer.c support.c $(SRCROOT)/cmd_editor.c $(SRCROOT
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
 
 # The experimental console uses the same SDCC shim and a simulated SFR edge.
-$(BUILDDIR)/test_rtl8370n_console: test_rtl8370n_console.c rtl8370n_hw.h $(SRCROOT)/rtl8370n/console.c | $(BUILDDIR)
+$(BUILDDIR)/test_rtl8370n_console: test_rtl8370n_console.c rtl8370n_hw.h $(SRCROOT)/tools/eth_console/console.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) -Wno-pointer-to-int-cast -Wno-int-to-pointer-cast $< -o $@ $(LDFLAGS)
 
 # The RTL836x register primitives on a model of the RTL8370N register controller.
@@ -363,3 +363,9 @@ test_management_vlan:
 	CC="$(CC)" python3 test_management_vlan.py
 
 run: test_management_vlan
+
+.PHONY: test_eth_console
+test_eth_console:
+	python3 -m unittest -v test_eth_console
+
+run: test_eth_console
