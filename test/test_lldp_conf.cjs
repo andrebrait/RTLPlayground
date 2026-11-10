@@ -4,7 +4,8 @@ const src=fs.readFileSync('html/app.js','utf8'),context={};
 vm.createContext(context);
 vm.runInContext(src.slice(src.indexOf('var CONF_CMDS ='),src.indexOf('function setDirty(')),context);
 vm.runInContext(src.slice(src.indexOf('var CONF_OVERWRITE ='),src.indexOf('function writeConfig(')),context);
-const {mergeConf,isConfCmd}=context;
+const {isConfCmd}=context;
+const mergeConf=(base,texts)=>Array.from(context.mergeConf(base,texts)); /* the result is an array of the vm realm */
 
 assert(isConfCmd('lldp tlv portdesc off')&&isConfCmd('lldp tlv lag on')&&isConfCmd('lldp tlv mfs off'));
 assert(!isConfCmd('lldp tlv bogus on')&&!isConfCmd('lldp tlv mfs'));

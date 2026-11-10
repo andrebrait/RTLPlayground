@@ -6,6 +6,9 @@ the fast inner loop for the logic-level bugs in `../../NOTES/08-findings.md`
 (parser, line editor, HTTP header, DHCP): edit → `make` → see red/green in
 seconds instead of a minutes-long flash-and-reboot cycle.
 
+Node.js is also required for `test_config_merge.js`, which exercises the web
+interface's configuration merger using only Node's built-in modules.
+
 ## Run
 ```
 cd test
@@ -58,6 +61,8 @@ It runs the real `fileadder` executable against mixed raw and compressed files.
 | `test_l2_flush_836x` | `rtl836x_port.c`, RTL836x build | a modelled flush engine removes only the selected port's dynamic entries; static and other-port entries survive, CPU mapping, invalid ports and bounded busy/completion waits |
 | `test_fileadder.py` | `tools/fileadder.c` | Mixed compressed/raw assets, empty files, equal-size compression, already-compressed files and the root alias |
 | `test_lldp_tx` | `rtl837x_lldp.c` | emitted Port ID subtype and physical mapping, TTL 120/0, selected-port/all-port shutdown, bridge capabilities, management IPv4 bytes and omission at 0.0.0.0, optional capabilities switch |
+| `test_acl` | `rtl837x_acl.c` + `rtl837x_acl_cmd.c` + shared storm/meter modules | rule encoding, trailing ingress ports, meter ownership conflicts and rollback |
+| `test_config_merge.js` | `html/app.js` configuration merger | parent/child replay order, cascading removal, selector disables and ACL-before-storm reservation order |
 
 The L2 frontend deletion regression runs separately with `make -C test l2-delete`.
 It requires Node.js, without additional packages, and checks rejected, successful

@@ -40,6 +40,8 @@
 #include "snmp_hw.h"
 #endif
 #include "rtl836x_regs.h"
+#include "rtl837x_acl.h"
+#include "rtl837x_dhcp_snoop.h"
 
 extern __code const struct machine machine;
 extern __xdata uint32_t flash_size;
@@ -1023,6 +1025,11 @@ void handle_rx(void)
 				tcpip_output();
 			}
 		} else if (management_vlan && management_vlan != rx_packet_vlan) {
+#if SOC_FAMILY == RTL837X
+			/* Snooping covers every VLAN, the IP stack only the management VLAN */
+			if (dhcp_snoop_on && ETH_IN->ether_type == HTONS(0x0800))
+				dhcp_snoop_in();
+#endif
 			uip_len = 0;	/* Keep other VLANs out of the management IP and ARP state. */
 		} else if (ETH_IN->ether_type == HTONS(0x0806)) { // ARP
 			uip_arp_arpin();
@@ -1030,7 +1037,15 @@ void handle_rx(void)
 			    tcpip_output();
 			}
 		} else if (ETH_IN->ether_type == HTONS(0x0800)) { // IPv4
-			uip_rx_ip_input();
+#if SOC_FAMILY == RTL837X
+			if (dhcp_snoop_on)
+				dhcp_snoop_in();
+			/* ACL and snooping rules trap frames for other stations: keep those out of the IP stack */
+			if (!(uip_buf[0] & 1) && memcmp(uip_buf, uip_ethaddr.addr, 6))
+				uip_len = 0;
+			else
+#endif
+				uip_rx_ip_input();
 			if (uip_len) {
 				// Add ethernet frame
 				uip_arp_out();
@@ -1217,6 +1232,11 @@ static void handle_tick(void)
 
 		// Check for button presses once a second
 		handle_button();
+#if SOC_FAMILY == RTL837X
+		acl_poll();
+		if (dhcp_snoop_on)
+			dhcp_snoop_tick();
+#endif
 		link_irq = 1;
 		// Age the ARP cache: uip_arp_timer() expects a 10 s cadence
 		if (++arp_age_secs >= 10) {

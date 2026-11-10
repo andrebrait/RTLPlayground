@@ -13,6 +13,7 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     xxd \
     python3 \
+    nodejs \
     libjson-c-dev \
     git \
     zlib1g-dev \

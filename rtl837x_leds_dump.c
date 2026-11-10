@@ -5,8 +5,9 @@
 #include "rtl837x_leds.h"
 #include "machine.h"
 
-#pragma codeseg BANK3
-#pragma constseg BANK3
+// In BANK2 with the other CLI code; BANK3 needs the room for the ACL commands
+#pragma codeseg BANK2
+#pragma constseg BANK2
 
 extern __code const struct machine machine;
 extern __xdata uint8_t sfr_data[4];

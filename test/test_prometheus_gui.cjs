@@ -19,7 +19,8 @@ console.log('PASS Prometheus card: toggle state, scrape URL, hidden without firm
 const mc={};vm.createContext(mc);
 vm.runInContext(src.slice(src.indexOf('var CONF_CMDS ='),src.indexOf('function setDirty(')),mc);
 vm.runInContext(src.slice(src.indexOf('var CONF_OVERWRITE ='),src.indexOf('function writeConfig(')),mc);
-const once=mc.mergeConf(['ip 192.0.2.10','prometheus on'],['prometheus off\nprometheus on\nprometheus off']);
+const merge=(base,texts)=>Array.from(mc.mergeConf(base,texts)); /* the result is an array of the vm realm */
+const once=merge(['ip 192.0.2.10','prometheus on'],['prometheus off\nprometheus on\nprometheus off']);
 assert.deepEqual(once,['ip 192.0.2.10','prometheus off']);
-assert.deepEqual(mc.mergeConf(once,['prometheus on']),['ip 192.0.2.10','prometheus on']);
+assert.deepEqual(merge(once,['prometheus on']),['ip 192.0.2.10','prometheus on']);
 console.log('PASS Prometheus on/off: saves keep one line, the latest setting wins');

@@ -190,6 +190,9 @@ $(warning RTL8370_DUMP is not set: the image runs the GPHYs without the PHY patc
 endif
 else
 SRCS += \
+	rtl837x_acl.c \
+	rtl837x_acl_cmd.c \
+	rtl837x_dhcp_snoop.c \
 	rtl837x_bandwidth.c \
 	rtl837x_init.c \
 	rtl837x_nic.c \
@@ -199,7 +202,8 @@ SRCS += \
 	rtl837x_pins.c \
 	rtl837x_port.c \
 	rtl837x_pause.c \
-	rtl837x_storm.c
+	rtl837x_storm.c \
+	rtl837x_meter.c
 endif
 SRCS += \
 	rtl837x_igmp.c \

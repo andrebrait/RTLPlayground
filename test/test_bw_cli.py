@@ -80,7 +80,7 @@ int main(void) {
     hw_reset();
     storm_set(2, 0, 128, 0);
     storm_set(3, 1, 64, 1);
-    const uint8_t meter = STORM_METER(2, 0);
+    const uint8_t meter = storm_meter(2, 0);
     const unsigned long writes = hw_writes;
     const char *storm_invalid[] = {
         "storm 3 bcast 8 nope", "storm 3 nope 8 kbps",
@@ -118,5 +118,6 @@ subprocess.run(shlex.split(os.environ.get('CC', 'gcc')) + [
     '-include', str(root / 'test/sdcc_shim.h'), '-I' + str(root / 'test/stub'),
     '-I' + str(root), '-I' + str(root / 'uip'), '-I' + str(root / 'httpd'),
     str(source), str(root / 'test/hw_mock.c'), str(root / 'rtl837x_bandwidth.c'), str(root / 'rtl837x_storm.c'),
+    str(root / 'rtl837x_meter.c'),
     '-o', str(binary)], check=True)
 subprocess.run([str(binary)], check=True)

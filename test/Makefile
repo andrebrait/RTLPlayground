@@ -61,7 +61,19 @@ $(BUILDDIR)/test_trap_836x $(BUILDDIR)/test_trap_837x: test_trap.c $(SRCROOT)/rt
 # stands in for the two headers a firmware build generates.
 TABLE_ENV = support.c hw_mock.c env_tables.c $(SRCROOT)/cmd_editor.c \
             $(SRCROOT)/rtl837x_port.c $(SRCROOT)/rtl837x_pause.c $(SRCROOT)/httpd/page_impl.c \
-            $(SRCROOT)/httpd/html_out.c $(SRCROOT)/vlan.c
+            $(SRCROOT)/httpd/html_out.c $(SRCROOT)/vlan.c \
+            $(SRCROOT)/rtl837x_storm.c $(SRCROOT)/rtl837x_meter.c
+
+# rtl837x_acl.c and rtl837x_acl_cmd.c are compiled UNMODIFIED from the firmware tree.
+TESTS += $(BUILDDIR)/test_acl $(BUILDDIR)/test_dhcp_snoop $(BUILDDIR)/test_storm
+$(BUILDDIR)/test_acl: test_acl.c support.c hw_mock.c env_tables.c $(SRCROOT)/cmd_editor.c $(SRCROOT)/rtl837x_acl.c $(SRCROOT)/rtl837x_acl_cmd.c $(SRCROOT)/rtl837x_storm.c $(SRCROOT)/rtl837x_meter.c hw_mock.h | $(BUILDDIR)
+	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@ $(LDFLAGS)
+
+$(BUILDDIR)/test_dhcp_snoop: test_dhcp_snoop.c support.c hw_mock.c env_tables.c $(SRCROOT)/cmd_editor.c $(SRCROOT)/rtl837x_acl.c $(SRCROOT)/rtl837x_dhcp_snoop.c $(SRCROOT)/rtl837x_meter.c hw_mock.h | $(BUILDDIR)
+	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@ $(LDFLAGS)
+
+$(BUILDDIR)/test_storm: test_storm.c $(TABLE_ENV) hw_mock.h | $(BUILDDIR)
+	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@ $(LDFLAGS)
 
 TESTS += $(BUILDDIR)/test_rx_bounds
 
@@ -369,3 +381,9 @@ test_eth_console:
 	python3 -m unittest -v test_eth_console
 
 run: test_eth_console
+
+.PHONY: test_config_merge
+test_config_merge:
+	node test_config_merge.js
+
+run: test_config_merge

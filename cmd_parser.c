@@ -15,6 +15,8 @@
 #include "rtl837x_sfr.h"
 #include "rtl837x_stp.h"
 #include "rtl837x_lacp.h"
+#include "rtl837x_acl.h"
+#include "rtl837x_dhcp_snoop.h"
 #include "rtl837x_igmp.h"
 #include "rtl837x_bandwidth.h"
 #include "rtl837x_lldp.h"
@@ -649,6 +651,58 @@ void parse_lag_hash(void)
 err:
 	cmd_error(LAGHASH_USAGE);
 }
+
+
+#if SOC_FAMILY == RTL837X	/* ACL and DHCP snooping use the RTL837x ACL engine */
+void parse_acl(void)
+{
+	acl_cmd();
+}
+
+
+void parse_dhcp_snooping(void)
+{
+	if (cmd_words_len < 2 || !cmd_compare(1, "snooping"))
+		goto err;
+	if (cmd_words_len == 2) {
+		print_string(dhcp_snoop_on ? "DHCP snooping on, trusted ports:" : "DHCP snooping off, trusted ports:");
+		for (uint8_t p = MACHINE_MIN_PORT; p <= MACHINE_MAX_PORT; p++) {
+			if (dhcp_snoop_trust & ((uint16_t)1 << p)) {
+				write_char(' ');
+				write_char('0' + machine.log_to_phys_port[p]);
+			}
+		}
+		write_char('\n');
+		return;
+	}
+	if (cmd_words_len == 3 && cmd_compare(2, "on")) {
+		dhcp_snoop_on = 1;
+		if (save_cmd && !dhcp_snoop_trust)
+			print_string("DHCP snooping: no trusted port, replies are not filtered until one is set\n");
+	} else if (cmd_words_len == 3 && cmd_compare(2, "off")) {
+		dhcp_snoop_on = 0;
+	} else if (cmd_words_len == 3 && cmd_compare(2, "binding")) {
+		dhcp_snoop_show();
+		return;
+	} else if (cmd_words_len == 4 && cmd_compare(2, "trust") && cmd_compare(3, "none")) {
+		dhcp_snoop_trust = 0;
+	} else if (cmd_words_len >= 4 && cmd_compare(2, "trust")) {
+		uint16_t trust = 0;
+		for (uint8_t w = 3; w < cmd_words_len; w++) {
+			if (!cmd_parse_port_separator(cmd_words_b[w]))
+				goto err;
+			trust |= (uint16_t)1 << atoi_results_u8;
+		}
+		dhcp_snoop_trust = trust;
+	} else {
+		goto err;
+	}
+	dhcp_snoop_apply();
+	return;
+err:
+	cmd_error("dhcp snooping [on | off | binding | trust (none | <port>...)]\n");
+}
+#endif
 
 
 void parse_vlan(void)
@@ -1788,14 +1842,16 @@ void parse_storm(void) __reentrant
 	if (cmd_compare(4, "pps")) {
 		if (!rate || rate > 0xfffff)
 			goto err;
-		storm_set(port, type, rate, 1);
+		d = 1;
 	} else if (cmd_compare(4, "kbps")) {
 		if (!rate || rate > 10000000)
 			goto err;
-		storm_set(port, type, rate, 0);
+		d = 0;
 	} else {
 		goto err;
 	}
+	if (!storm_set(port, type, rate, d))
+		print_string("storm: no free meter\n");
 	return;
 
 err:
@@ -2233,6 +2289,10 @@ void cmd_parser(void) __banked
 		} else if (cmd_compare(0, "laghash")) {
 			parse_lag_hash();
 #if SOC_FAMILY == RTL837X
+		} else if (cmd_compare(0, "acl")) {
+			parse_acl();
+		} else if (cmd_compare(0, "dhcp")) {
+			parse_dhcp_snooping();
 		} else if (cmd_compare(0, "sds")) {
 			print_reg(RTL837X_REG_SDS_MODES);
 			write_char('\n');

@@ -22,6 +22,8 @@
 #define STORM_CTRL(t) (RTL836X_REG_STORM_CTRL0 + (t))
 #define STORM_SELECT(p, t) (RTL836X_REG_STORM_SELECT0 + ((uint16_t)(t) << 3) + ((p) >> 1))
 #define RATE_VALID(p, r) (MACHINE_PORT_VALID(p) && (r) >= RTL836X_RATE_MIN_KBPS && (r) <= RTL836X_RATE_MAX_KBPS && !((r) & 7))
+/* Each port and storm type owns one meter; nothing else allocates meters on this family */
+#define STORM_METER(port, type) (24 + (((port) << 2) | (type)))
 
 static __code const char * __code const storm_names[STORM_TYPES] = { " bcast ", " mcast ", " ucast ", " umcast " };
 
@@ -143,10 +145,14 @@ static void apply_storm(uint8_t port, uint8_t type, uint32_t count) __reentrant
 	reg_bit_set(STORM_CTRL(type), port);
 }
 
-void storm_set(uint8_t port, __xdata uint8_t type, __xdata uint32_t rate, __xdata uint8_t pps) __banked
+/* Always 1: a meter is always there, and a bad argument is already reported */
+uint8_t storm_set(uint8_t port, __xdata uint8_t type, __xdata uint32_t rate, __xdata uint8_t pps) __banked
 {
-	if (type >= STORM_TYPES || pps || !RATE_VALID(port, rate)) { bad_rate(); return; }
-	apply_storm(port, type, rate >> 3);
+	if (type >= STORM_TYPES || pps || !RATE_VALID(port, rate))
+		bad_rate();
+	else
+		apply_storm(port, type, rate >> 3);
+	return 1;
 }
 
 void storm_off(uint8_t port, __xdata uint8_t type) __banked

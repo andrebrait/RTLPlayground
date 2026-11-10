@@ -110,6 +110,11 @@ static void health_loop_start(void) {}
 static void check_links(void) {}
 static uint16_t link_changed;
 static void lacp_link_change(uint16_t bounced) { (void)bounced; }
+#if SOC_FAMILY == 2	/* the RTL836x build must not reference the ACL engine */
+static bool dhcp_snoop_on;
+static void acl_poll(void) {}
+static void dhcp_snoop_tick(void) {}
+#endif
 static void handle_rx(void) { rx_calls++; }
 static void nic_rx_ack(void) { acks++; }
 static bool nic_rx_pending(void) { return false; }

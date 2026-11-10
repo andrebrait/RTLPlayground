@@ -313,6 +313,17 @@
   - An LLDPDU with a malformed Port ID (no identifier octets, a reserved subtype, a MAC address
     that is not six octets) or a truncated TLV is ignored instead of publishing a neighbour with
     an empty Port ID or the default TTL.
+  - Saving ACL changes preserves parent/`and` replay order, removes deleted
+    chains, and retains field-selector disable commands.
+  - Explicit ACL meter reservations replay before dynamic storm-control allocation.
+
+- ACL
+  - Ports after interrupt, GPIO and S-VLAN actions remain ingress restrictions
+    instead of becoming unintended redirects.
+  - ACL meter configuration and policing use the shared meter allocator, refusing
+    storm-control collisions without changing existing rules or leaking reservations.
+  - Place the shared meter allocator in BANK2 to avoid overflowing BANK3 when
+    packaging firmware with the CI compiler.
 
 ## Breaking changes
 
