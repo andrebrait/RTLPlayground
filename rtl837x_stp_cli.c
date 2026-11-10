@@ -143,13 +143,15 @@ void stp_parse(void) __banked __reentrant
 				goto err;
 			stp_pprio[port] = atoi_results_u8;
 		} else if (cmd_compare(3, "guard")) {
-			stp_pflags[port] &= ~(STP_PF_BPDUGUARD | STP_PF_ROOTGUARD);
 			if (cmd_compare(4, "bpdu"))
-				stp_pflags[port] |= STP_PF_BPDUGUARD;
+				stp_cli_val = STP_PF_BPDUGUARD;
 			else if (cmd_compare(4, "root"))
-				stp_pflags[port] |= STP_PF_ROOTGUARD;
-			else if (!cmd_compare(4, "none"))
+				stp_cli_val = STP_PF_ROOTGUARD;
+			else if (cmd_compare(4, "none"))
+				stp_cli_val = 0;
+			else
 				goto err;
+			stp_pflags[port] = (stp_pflags[port] & ~(STP_PF_BPDUGUARD | STP_PF_ROOTGUARD)) | stp_cli_val;
 		} else if (cmd_compare(3, "filter")) {
 			if (cmd_compare(4, "on"))
 				stp_pflags[port] |= STP_PF_FILTER;

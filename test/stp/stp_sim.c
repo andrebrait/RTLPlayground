@@ -2339,16 +2339,37 @@ static void scen_cli_validation(void)
 	check(err_status == ERR_INVALID_ARGUMENT && stp_enabled,
 	      "stp status rejects an extra argument");
 
+#define EDGE_BITS (STP_PF_ADMEDGE | STP_PF_AUTOEDGE | STP_PF_OPEREDGE)
+#define GUARD_BITS (STP_PF_BPDUGUARD | STP_PF_ROOTGUARD)
 	sim_cmd("stp port 1 edge on");
+	check(err_status == ERR_OK && (stp_pflags[0] & EDGE_BITS) == (STP_PF_ADMEDGE | STP_PF_OPEREDGE),
+	      "edge on sets the administrative and operational edge flags");
 	flags = stp_pflags[0];
 	sim_cmd("stp port 1 edge invalid");
 	check(err_status == ERR_INVALID_ARGUMENT && stp_pflags[0] == flags,
 	      "an invalid edge value preserves administrative and operational edge flags");
 	sim_cmd("stp port 1 edge auto");
+	check(err_status == ERR_OK && (stp_pflags[0] & EDGE_BITS) == STP_PF_AUTOEDGE,
+	      "edge auto sets only the automatic edge flag");
 	flags = stp_pflags[0];
 	sim_cmd("stp port 1 edge invalid");
 	check(err_status == ERR_INVALID_ARGUMENT && stp_pflags[0] == flags,
 	      "an invalid edge value preserves automatic edge configuration");
+	sim_cmd("stp port 1 edge off");
+	check(err_status == ERR_OK && !(stp_pflags[0] & EDGE_BITS), "edge off clears every edge flag");
+
+	sim_cmd("stp port 1 guard bpdu");
+	check(err_status == ERR_OK && (stp_pflags[0] & GUARD_BITS) == STP_PF_BPDUGUARD,
+	      "guard bpdu sets only BPDU guard");
+	flags = stp_pflags[0];
+	sim_cmd("stp port 1 guard bdpu");
+	check(err_status == ERR_INVALID_ARGUMENT && stp_pflags[0] == flags,
+	      "an invalid guard value preserves BPDU guard");
+	sim_cmd("stp port 1 guard root");
+	check(err_status == ERR_OK && (stp_pflags[0] & GUARD_BITS) == STP_PF_ROOTGUARD,
+	      "guard root sets only root guard");
+	sim_cmd("stp port 1 guard none");
+	check(err_status == ERR_OK && !(stp_pflags[0] & GUARD_BITS), "guard none clears both guards");
 
 	sim_cmd("stp off");
 	check(err_status == ERR_OK && !stp_enabled && port_state(0) == 3,
