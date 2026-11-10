@@ -4679,7 +4679,7 @@ function l2Render() {
             title: t("l2_del_t"),
             onclick: function() {
                 getJSON("/l2_del.json?idx=" + e.idx).then(function(r) {
-                    if (r.result !== 1) return;
+                    if (r.result !== 1) return l2Fetch();
                     l2Rows = l2Rows.filter(function(x) {
                         return x !== e
                     });

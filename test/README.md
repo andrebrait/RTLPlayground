@@ -68,6 +68,11 @@ It requires Node.js without extra packages and checks incremental loading of
 4096/4160-entry tables, short pages, wrap and empty termination, overlapping
 requests, cancellation, retry and sparse indices.
 
+The L2 frontend deletion regression `test_l2_delete.cjs` runs with the suite and
+alone with `make -C test l2-delete`. It requires Node.js, without additional
+packages, and checks rejected, successful and failed deletion requests against the
+production renderer.
+
 ## Adding a test for another module
 1. Write `test_<module>.c` with `main()` driving the module's entry points and
    `CHECK(cond, msg)` assertions.
