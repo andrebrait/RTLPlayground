@@ -8,7 +8,6 @@ board with a different SFP detect pin.
 
 | Brand | Type | Managed | PCB | Flash | Chip RTL |
 |---|---|---|---|---|---|
-| XikeStor | SKS3200-8E1X | Yes | SWTG118AS-V2.1-17462 | 2MB (25Q16JVSIQ) | RTL8373 |
 | XikeStor | SKS3200M-8GPY1XF | Yes | SWTG118AS-V2.1-17462 | 2MB (25Q16JVSIQ) | RTL8373 |
 
 ## Machine target
@@ -19,11 +18,9 @@ not use the V2.0-16029 definition, which expects GPIO30.
 
 | Device | Machine target |
 | --- | --- |
-| XikeStor SKS3200-8E1X | `MACHINE=XIKESTOR_SKS3200_8E1X` |
 | XikeStor SKS3200M-8GPY1XF | `MACHINE=XIKESTOR_SKS3200M_8GPY1XF` |
 
-Both targets reuse `pcb/PCB_SWTG018AS_V2_1_0.c` and
-`pcb/PCB_SWTG018AS_V2_1_0_init.c`.
+The target use `pcb/PCB_SWTG118AS_V2_1_17462.c`.
 
 Build example:
 
@@ -34,12 +31,10 @@ make MACHINE=XIKESTOR_SKS3200M_8GPY1XF
 ## Status
 
 - Build verified for `XIKESTOR_SKS3200M_8GPY1XF` with `make ... CI=1`.
-- SFP detection with the GPIO38 detect pin was confirmed for the SKS3200-8E1X
-  in #781.
 
 ## PCB
 
-PCB silkscreen: `SWTG118AS-V2.1-17462`.
+PCB silkscreen: `PCB-SWTG118AS-V2.1-17462`.
 
 ## Photos
 

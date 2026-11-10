@@ -21,6 +21,19 @@ extern __xdata uint16_t vlan_ptr;
 extern __xdata uint8_t vlan_names[VLAN_NAMES_SIZE];
 
 
+uint16_t port_link_mask(void) __banked
+{
+	uint16_t links = 0;
+
+	for (uint8_t i = MACHINE_MIN_PORT; i <= MACHINE_MAX_PORT; i++) {
+		reg_read(RTL836X_REG_PORT0_STATUS + i);
+		if (SFR_DATA_0 & PORT_STATUS_LINK)
+			links |= PORT_BIT(i);
+	}
+	return links;
+}
+
+
 void port_stats_print(void) __banked
 {
 	__xdata uint8_t value[8];

@@ -98,6 +98,7 @@ uint8_t lldp_tlv_mask;
 
 uip_ipaddr_t uip_hostaddr, uip_draddr, uip_netmask;
 struct uip_eth_addr uip_ethaddr = { .addr = { 0x02, 0x11, 0x22, 0x33, 0x44, 0x55 } };
+uint32_t uptime_secs;
 
 /* ---- leaf calls into subsystems not under test ---- */
 void     flash_read_bulk(uint8_t *dst) { (void)dst; }

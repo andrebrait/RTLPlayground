@@ -263,6 +263,9 @@ int main(void)
 	regfile[RTL836X_REG_RMA_CTRL00 + TRAP_RMA_LACP] = 0x7465;	/* unrelated bits that must survive */
 	GROUP_MASK = 0x0300;		/* chip ports 8 and 9 are not ours */
 	TRUNK_CTRL = 0x0100;		/* reset: dumb mode on, no hash field */
+	for (uint8_t p = MACHINE_MIN_PORT; p <= MACHINE_MAX_PORT; p++)
+		regfile[RTL836X_REG_PORT0_STATUS + p] = PORT_STATUS_LINK;	/* carrier on every port */
+	CHECK(port_link_mask() == 0x00ff, "T0a the link mask follows the PORTn_STATUS link bits");
 	trap_init();
 	lacp_init();
 

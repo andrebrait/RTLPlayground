@@ -108,6 +108,8 @@ static void lldp_tick(void) {}
 static void cabletest_tick(void) {}
 static void health_loop_start(void) {}
 static void check_links(void) {}
+static uint16_t link_changed;
+static void lacp_link_change(uint16_t bounced) { (void)bounced; }
 static void handle_rx(void) { rx_calls++; }
 static void nic_rx_ack(void) { acks++; }
 static bool nic_rx_pending(void) { return false; }

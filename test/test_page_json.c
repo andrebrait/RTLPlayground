@@ -23,6 +23,7 @@ extern uint16_t slen;
 extern uint8_t  vlan_names[VLAN_NAMES_SIZE];
 extern uint16_t vlan_ptr;
 extern uint16_t management_vlan;
+extern uint32_t uptime_secs;
 extern const struct machine machine;
 
 /* The response body: what follows the blank line after the header. */
@@ -351,7 +352,9 @@ static void t_info_mapping(void)
 {
 	printf("[test] /information.json lists the chip port of every front-panel port\n");
 	hw_reset(); out_reset();
+	uptime_secs = 0x00012345;
 	send_basic_info();
+	CHECK(has("\"uptime\":\"0x00012345\""), "uptime in seconds as eight hex digits");
 	CHECK(has("\"logPort\":[0,1,2,3,4,5,6,7,8]}"), "front-panel order, closing the object");
 	CHECK(balanced(), "valid JSON");
 }
