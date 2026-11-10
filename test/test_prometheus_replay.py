@@ -34,6 +34,7 @@ void print_string(const char *s) { (void)s; }
 void print_string_x(char *s) { (void)s; }
 void write_char(char c) { (void)c; }
 uint16_t strtox(uint8_t *d, const char *s) { strcpy((char *)d, s); return strlen(s); }
+void mtu_defaults(void) {} /* register access, covered by test_startup_crlf.py */
 '''
 code += function('uint8_t cmd_compare(') + function('void cmd_tokenize(')
 code += 'void cmd_parser(void){cmd_tokenize();err_status=ERR_OK;if(0){}else if (cmd_compare(0, "prometheus")) {' + branch + '}\n'

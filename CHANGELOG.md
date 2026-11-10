@@ -327,6 +327,11 @@
 
 ## Breaking changes
 
+- Frame sizes
+  - RTL837x ports start with an RX maximum frame length of 1522 bytes, set before
+    the saved configuration is replayed. Larger-frame setups that relied on the
+    inherited startup limit must save explicit `mtu <port> <size>` commands.
+
 - Config
   - VLAN don't accept port `u`-suffix anymore.
     So `vlan 1 4u` is not valid anymore.

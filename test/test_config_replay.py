@@ -37,6 +37,7 @@ void print_string_x(uint8_t *s){(void)s;}
 void write_char(char c){(void)c;}
 void clear_command_history(void){}
 void cmd_parser(void){assert(calls<8);strcpy(seen[calls++],(char*)cmd_buffer);}
+void mtu_defaults(void){} /* register access, covered by test_startup_crlf.py */
 '''
 code+=function('void cmd_tokenize(')+function('void execute_config(')+r'''
 static void boot(const char *text){memset(image,0,sizeof image);strcpy(image,text);calls=0;execute_config();assert(save_cmd==1&&!strcmp(passwd,PASSWORD));}

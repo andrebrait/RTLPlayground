@@ -2413,10 +2413,26 @@ void clear_command_history(void) __banked
 
 #define FLASH_READ_BURST_SIZE 0x100
 #define PASSWORD "1234"
+#define DEFAULT_MTU 1522
 
 #if CONFIG_LEN % FLASH_READ_BURST_SIZE
 	#error "CONFIG_LEN not a multiple of FLASH_READ_BURST_SIZE"
 #endif
+
+#if SOC_FAMILY == RTL837X	/* RTL836x shares two frame lengths between all ports and keeps its reset value */
+static void mtu_defaults(void)
+{
+	for (uint8_t p = MACHINE_MIN_PORT; p <= MACHINE_MAX_PORT; p++) {
+		uint16_t reg = RTL8373_REG_MAC_L2_PORT_MAX_LEN + ((uint16_t)p << 8);
+		reg_read_m(reg);
+		REG_WRITE(reg, (sfr_data[0] & 0xf0) | ((DEFAULT_MTU >> 10) & 0xf),
+			  (DEFAULT_MTU >> 2) & 0xff,
+			  ((DEFAULT_MTU & 0x3) << 6) | ((DEFAULT_MTU >> 8) & 0x3f),
+			  DEFAULT_MTU & 0xff);
+	}
+}
+#endif
+
 void execute_config(void) __banked
 {
 	__xdata uint32_t pos = CONFIG_START;
@@ -2425,6 +2441,10 @@ void execute_config(void) __banked
 	// Set default password, it can be overwritten in the configuration file
 	strtox(passwd, PASSWORD);
 	save_cmd = 0;
+
+#if SOC_FAMILY == RTL837X
+	mtu_defaults();	// before the replay, so explicit mtu commands override the default
+#endif
 
 	uint8_t cmd_idx = 0;
 	uint8_t skipping = 0;

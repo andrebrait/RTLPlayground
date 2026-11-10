@@ -387,3 +387,9 @@ test_config_merge:
 	node test_config_merge.js
 
 run: test_config_merge
+
+.PHONY: startup-config
+startup-config:
+	python3 test_startup_crlf.py
+
+run: startup-config

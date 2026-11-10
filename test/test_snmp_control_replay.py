@@ -20,6 +20,7 @@ code=cli+'''
 #define PASSWORD "test-default"
 uint8_t replay_image[CONFIG_LEN];extern char passwd[21];
 void cmd_error(const char *s){(void)s;err_status=ERR_SYNTAX;}
+void mtu_defaults(void){} /* register access, covered by test_startup_crlf.py */
 '''.replace('ERR_SYNTAX','3')+function('uint8_t cmd_compare(')+function('void cmd_tokenize(')
 code+='void cmd_parser(void){if(cmd_compare(0,"snmp")){'+branch+'}}\n'+function('void execute_config(')
 code+='''
