@@ -10,9 +10,9 @@ int main(void)
 {
 	prometheus_enabled = 1;
 	send_basic_info();
-	CHECK(has("\"prometheus\":1") && balanced(), "enabled exporter is reported as 1");
+	CHECK(has("\"prometheus\":true") && balanced(), "enabled exporter is reported as true");
 	prometheus_enabled = 0;
 	send_basic_info();
-	CHECK(has("\"prometheus\":0") && balanced(), "disabled exporter is reported as 0");
+	CHECK(has("\"prometheus\":false") && balanced(), "disabled exporter is reported as false");
 	return tests_failed ? 1 : 0;
 }

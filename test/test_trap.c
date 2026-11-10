@@ -78,7 +78,7 @@ int main(void) {
     assert((regs[0x080e]&0x180)==0x80 && (regs[0x0832]&0x180)==0x80);
 #else
     trap_init();
-    assert(regs[0x6724]==CPU_PORT);
+    assert(regs[0x6724]==CPU_LOGICAL_PORT);
 #endif
     puts("PASS RMA forward/trap/drop fields, unrelated bits, protocol isolation and boot state");
 }

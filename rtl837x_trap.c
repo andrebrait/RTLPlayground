@@ -21,7 +21,7 @@ void trap_init(void) __banked
 	trap_rma_set(TRAP_RMA_LACP, TRAP_ACT_FORWARD);
 	trap_rma_set(TRAP_RMA_LLDP, lldp_enabled ? TRAP_ACT_TRAP : TRAP_ACT_FORWARD);
 #else
-	REG_SET(RTL837X_EXT_CPU_CTRL, CPU_PORT);
+	REG_SET(RTL837X_EXT_CPU_CTRL, CPU_LOGICAL_PORT);
 	/* Use the common destination selector and normalized action on this port. */
 	trap_rma_set(TRAP_RMA_LLDP, MACHINE_DEFAULT_LLDP ? TRAP_ACT_TRAP : TRAP_ACT_FORWARD);
 #endif

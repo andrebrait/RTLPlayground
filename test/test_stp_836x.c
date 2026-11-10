@@ -205,7 +205,7 @@ int main(void) {
           "per-port STP off restores ordinary forwarding");
     registers[0x0a00] = 0xbfff;
     CHECK(stp_port_state(7) == 2, "port 8 learning state uses bits 15:14");
-    CHECK(stp_port_state(CPU_PORT) == ((0xa5a5 >> 4) & 3), "logical CPU 9 reads chip port 10");
+    CHECK(stp_port_state(CPU_LOGICAL_PORT) == ((0xa5a5 >> 4) & 3), "logical CPU 9 reads chip port 10");
     CHECK(registers[0x0a01] == 0xa5a5, "front-port changes leave CPU and reserved bits alone");
     lifecycle();
     aggregation();

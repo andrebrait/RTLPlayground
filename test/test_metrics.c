@@ -19,7 +19,7 @@
 __xdata uint8_t outbuf[TCP_OUTBUF_SIZE];
 __xdata uint16_t slen;
 
-/* copied verbatim from rtlplayground.c: html_out.c's string_to_html() calls it */
+/* copied verbatim from rtlplayground.c: html_out.c's str_code_to_html() calls it */
 uint16_t strtox(__xdata uint8_t *dst, __code const char *s)
 {
 	__xdata uint8_t *b = dst;

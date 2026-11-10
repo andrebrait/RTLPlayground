@@ -16,8 +16,7 @@ extern __xdata uint8_t sfr_data[4];
 static __xdata uint32_t storm_w;
 static __xdata uint8_t storm_shift;
 
-static __code const char * __code const storm_names[STORM_TYPES] = { " bcast ", " mcast ", " ucast ", " umcast " };
-
+__code const char * __code const storm_names[STORM_TYPES] = { " bcast ", " mcast ", " ucast ", " umcast " };
 
 static void storm_midx_read(uint8_t port, __xdata uint8_t type)
 {

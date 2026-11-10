@@ -493,7 +493,7 @@ static uint8_t acl_fwd_action(void)
 	else if (acl_eq("cpu"))
 		acl_variant = ACL_FWD_REDIRECT;
 	if (acl_eq("cpu"))
-		acl_pm = 1 << CPU_PORT;
+		acl_pm = 1 << CPU_LOGICAL_PORT;
 	if (acl_variant != ACL_BAD)
 		return acl_fwd();
 	if (acl_eq("redirect"))

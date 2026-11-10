@@ -24,7 +24,7 @@
 #endif
 
 /* Register names and masks are the contract; the values are restated here, not taken from the header */
-_Static_assert(MACHINE_MAX_PORT == 7 && CPU_PORT == 9, "front ports 0-7, the NIC at logical port 9");
+_Static_assert(MACHINE_MAX_PORT == 7 && CPU_LOGICAL_PORT == 9, "front ports 0-7, the NIC at logical port 9");
 _Static_assert(RTL836X_REG_VLAN_MSTI0_CTRL0 == 0x0a00 && RTL836X_REG_VLAN_MSTI0_CTRL1 == 0x0a01,
 	       "MSTI0 port state registers");
 _Static_assert(RTL836X_REG_FORCE_FLUSH1 == 0x0a35 && RTL836X_REG_FORCE_FLUSH == 0x0a36 &&
@@ -260,7 +260,7 @@ static void scenario_cpu_port(void)
 	unsigned cpu_static = l2_add(10, false);
 	unsigned front = l2_add(0, true);
 
-	port_l2_forget_port(CPU_PORT);
+	port_l2_forget_port(CPU_LOGICAL_PORT);
 
 	CHECK(!l2[cpu_dyn].valid && l2[cpu_static].valid && l2[front].valid,
 	      "C1 logical CPU port 9 flushes the dynamic entries of chip port 10 only");
@@ -310,7 +310,7 @@ static void scenario_busy_cpu_port_blocks(void)
 	stuck[RTL836X_REG_FORCE_FLUSH1] = 0x0010;	/* chip port 9 busy, never clears */
 	unsigned target = l2_add(10, true);
 
-	port_l2_forget_port(CPU_PORT);
+	port_l2_forget_port(CPU_LOGICAL_PORT);
 
 	CHECK(reg_writes == 0 && l2[target].valid && status_reads <= STATUS_READS_MAX && diagnostics >= 1,
 	      "E3 an extended-port flush busy: nothing written, bounded wait, reported");

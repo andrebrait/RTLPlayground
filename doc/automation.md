@@ -22,11 +22,13 @@ You can automate upload of the firmware via WEB with curl:
 
 ## Port status
 
-In similar way to upload, you can fetch the json status of the ports.
+In similar way to upload, you can fetch the configuration and state of the
+ports, and their link and counters. [The HTTP API](api.md) lists every endpoint.
 
 1. Get the session cookie as for upload.
-2. Hit the `/status.json` with cookie:
+2. Hit `/ports.json` or `/traffic.json` with the cookie:
 
     ```bash
-    curl -b cookies.txt http://${SWITCH_IP}/status.json
+    curl -b cookies.txt http://${SWITCH_IP}/ports.json
+    curl -b cookies.txt http://${SWITCH_IP}/traffic.json
     ```

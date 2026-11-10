@@ -43,7 +43,7 @@ configuration is saved.
 
 ## Data
 
-`/status.json` carries both features as one number per port:
+`/ports.json` carries both features as one number per port:
 
 | Field | Bits |
 |---|---|

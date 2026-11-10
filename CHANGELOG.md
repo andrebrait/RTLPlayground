@@ -327,6 +327,15 @@
 
 ## Breaking changes
 
+- HTTP API
+  - The JSON API is reshaped, see [doc/api.md](doc/api.md). `/status.json` is split into
+    `/ports.json` and `/traffic.json`, `/mtu.json` and `/lacp.json` are folded into
+    `/ports.json` and `/lag.json`, and `/vlanlist` is now `/vlanlist.json`.
+  - Every port number is the number on the front panel, with 0 for the CPU port. Port
+    masks are lists of port numbers, on/off values are booleans, and
+    `/information.json` no longer carries `logPort`.
+  - Scripts that read the old endpoints must be updated; there are no compatibility routes.
+
 - Frame sizes
   - RTL837x ports start with an RX maximum frame length of 1522 bytes, set before
     the saved configuration is replayed. Larger-frame setups that relied on the

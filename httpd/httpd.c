@@ -627,19 +627,19 @@ static void handle_firmware_fragment(__xdata uint8_t *p)
 
 static void run_cmd_body(__xdata uint8_t *body)
 {
-	uint16_t hdr_len = strtox(outbuf, HTTP_RESPONCE_TXT);
+	uint16_t hdr_len = strtox(outbuf, HTTP_RESPONSE_TXT);
 
 	slen = hdr_len;
 	cmd_capture = 1;
 	execute_commands(body);
 	if (cmd_capture == 2)
-		string_to_html(CMD_TRUNCATED);
+		str_code_to_html(CMD_TRUNCATED);
 	cmd_capture = 0;
 	/* Commands that configure something print nothing at all. Saying
 	 * so beats an empty body, which reads the same as "nothing ran".
 	 * Only on success: a silent failure must not answer with "OK". */
 	if (err_status == ERR_OK && slen == hdr_len)
-		string_to_html("OK\n");
+		str_code_to_html("OK\n");
 	/* On a parse error keep what the parser printed, because that text
 	 * is the explanation, and only restate the status. "400 NO" is as
 	 * long as "200 OK", so the header does not have to be rebuilt. */
@@ -661,7 +661,7 @@ static void run_login_body(__xdata uint8_t *body)
 		slen = strtox(outbuf, "HTTP/1.1 302 Found\r\nConnection: close\r\nLocation: index.html\r\n" \
 				      "Set-Cookie: session=");
 		session_new();
-		string_to_html("; SameSite=Strict\r\n\r\n");
+		str_code_to_html("; SameSite=Strict\r\n\r\n");
 	} else {
 		dbg_string("Password invalid!\n");
 		slen = strtox(outbuf, "HTTP/1.1 302 Found\r\nConnection: close\r\nLocation: login.html\r\n\r\n");
@@ -1052,8 +1052,10 @@ void httpd_appcall(void)
 				goto do_send;
 			}
 			dbg_string("Not file entry\n");
-			if (!strcmp(q, "/status.json")) {
-				send_status();
+			if (!strcmp(q, "/ports.json")) {
+				send_ports();
+			} else if (!strcmp(q, "/traffic.json")) {
+				send_traffic();
 			} else if (!strcmp(q, "/information.json")) {
 				send_basic_info();
 			} else if (!strcmp(q, "/vlan.json")) {
@@ -1077,8 +1079,6 @@ void httpd_appcall(void)
 				send_mirror();
 			} else if (is_word(q, "/isolation.json")) {
 				send_isolation();
-			} else if (is_word(q, "/mtu.json")) {
-				send_mtu();
 			} else if (is_word(q, "/defaults.json")) {
 				send_defaults();
 			} else if (is_word(q, "/lag.json")) {
@@ -1087,11 +1087,9 @@ void httpd_appcall(void)
 				send_stp();
 			} else if (is_word(q, "/lldp.json")) {
 				send_lldp();
-			} else if (is_word(q, "/lacp.json")) {
-				send_lacp();
 			} else if (is_word(q, "/stpcnt.json")) {
 				send_stp_counters();
-			} else if (is_word(q, "/vlanlist")) {
+			} else if (is_word(q, "/vlanlist.json")) {
 				send_vlanlist();
 #ifdef SNMP
 			} else if (is_word(q, "/snmp_config")) {
@@ -1118,17 +1116,17 @@ void httpd_appcall(void)
 				goto do_send;
 			}
 			slen = strtox(outbuf, "HTTP/1.1 200 OK\r\nContent-Type: ");
-			string_to_html(mime_strings[f_data[entry].mime]);
+			str_code_to_html(mime_strings[f_data[entry].mime]);
 			/* 'unsafe-inline' is needed for the inline onclick handlers
 			 * and the inline <script> on login.html. Connection: close is
 			 * required because this httpd closes the connection after every
 			 * response; without advertising it a browser reuses the socket
 			 * from its keep-alive pool and the next request hits the already
 			 * closed connection (a POST is then dropped without a retry). */
-			string_to_html("; charset=UTF-8\r\n");
+			str_code_to_html("; charset=UTF-8\r\n");
 			if (f_data[entry].gzip)
-				string_to_html("Content-Encoding: gzip\r\n");
-			string_to_html("Cache-Control: max-age=60, must-revalidate\r\nConnection: close\r\nAccess-Control-Allow-Origin: *\r\nContent-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; form-action 'self'\r\n\r\n");
+				str_code_to_html("Content-Encoding: gzip\r\n");
+			str_code_to_html("Cache-Control: max-age=60, must-revalidate\r\nConnection: close\r\nAccess-Control-Allow-Origin: *\r\nContent-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; form-action 'self'\r\n\r\n");
 
 			len_left = f_data[entry].len;
 			if (len_left > (TCP_OUTBUF_SIZE - slen)) {

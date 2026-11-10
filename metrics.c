@@ -103,7 +103,7 @@ static void put_esc(__xdata const char *s, __xdata uint8_t max)
 		if (*s == '\\' || *s == '"')
 			put_char('\\');
 		if (*s == '\n') {
-			string_to_html("\\n");
+			str_code_to_html("\\n");
 			continue;
 		}
 		put_char(*s);
@@ -275,14 +275,14 @@ static __xdata uint8_t fam, row, typed, mib;
 static void begin_sample(void)
 {
 	if (!typed) {
-		string_to_html("# TYPE ");
-		string_to_html(families[fam].name);
+		str_code_to_html("# TYPE ");
+		str_code_to_html(families[fam].name);
 		put_char(' ');
-		string_to_html(type_names[families[fam].type]);
+		str_code_to_html(type_names[families[fam].type]);
 		put_char('\n');
 		typed = 1;
 	}
-	string_to_html(families[fam].name);
+	str_code_to_html(families[fam].name);
 }
 
 /* Logical port of this row; row 0 is the switch itself. */
@@ -290,7 +290,7 @@ static void begin_sample(void)
 
 static void put_device(void)
 {
-	string_to_html("device=\"lan");
+	str_code_to_html("device=\"lan");
 	put_fixed(machine.log_to_phys_port[PORT], 0);
 	put_char('"');
 }
@@ -385,12 +385,12 @@ static void emit_row(void)
 		if (row)
 			return;
 		begin_sample();
-		string_to_html("{sysname=\"RTLPlayground\",release=\"" VERSION_SW "\",version=\"" BUILD_DATE
+		str_code_to_html("{sysname=\"RTLPlayground\",release=\"" VERSION_SW "\",version=\"" BUILD_DATE
 			"\",machine=\"");
-		string_to_html(machine.machine_name);
-		string_to_html("\",nodename=\"");
+		str_code_to_html(machine.machine_name);
+		str_code_to_html("\",nodename=\"");
 		put_esc(hostname, sizeof(hostname));
-		string_to_html("\",domainname=\"(none)\"} 1\n");
+		str_code_to_html("\",domainname=\"(none)\"} 1\n");
 		return;
 	case K_BOOT:
 	case K_TIME:
@@ -417,25 +417,25 @@ static void emit_row(void)
 			if (s == 0xff || (f->kind == K_HWTEMP && !dom_word(s, 0, &w)))
 				return;
 			begin_sample();
-			string_to_html("{chip=\"sfp_lan");
+			str_code_to_html("{chip=\"sfp_lan");
 			put_fixed(machine.log_to_phys_port[PORT], 0);
 			if (f->kind == K_CHIP) {
-				string_to_html("\",chip_name=\"sfp_lan");
+				str_code_to_html("\",chip_name=\"sfp_lan");
 				put_fixed(machine.log_to_phys_port[PORT], 0);
-				string_to_html("\"} 1\n");
+				str_code_to_html("\"} 1\n");
 				return;
 			}
-			string_to_html("\",sensor=\"temp1\"}");
+			str_code_to_html("\",sensor=\"temp1\"}");
 			end_sample_int((int32_t)(int16_t)w * 1000 / 256, 3);
 			return;
 		}
 #if SOC_FAMILY == RTL837X
 		begin_sample();
 		if (f->kind == K_CHIP) {
-			string_to_html("{chip=\"thermal_thermal_zone0\",chip_name=\"cpu_thermal\"} 1\n");
+			str_code_to_html("{chip=\"thermal_thermal_zone0\",chip_name=\"cpu_thermal\"} 1\n");
 			return;
 		}
-		string_to_html("{chip=\"thermal_thermal_zone0\",sensor=\"temp1\"}");
+		str_code_to_html("{chip=\"thermal_thermal_zone0\",sensor=\"temp1\"}");
 		soc_temp();
 #endif
 		return;
@@ -444,7 +444,7 @@ static void emit_row(void)
 		if (row)
 			return;
 		begin_sample();
-		string_to_html("{zone=\"0\",type=\"cpu-thermal\",policy=\"step_wise\",mode=\"enabled\"}");
+		str_code_to_html("{zone=\"0\",type=\"cpu-thermal\",policy=\"step_wise\",mode=\"enabled\"}");
 		soc_temp();
 #endif
 		return;
@@ -471,17 +471,17 @@ static void emit_row(void)
 			begin_sample();
 			put_char('{');
 			put_device();
-			string_to_html(",address=\"");
+			str_code_to_html(",address=\"");
 			for (s = 0; s < 6; s++) {
 				if (s)
 					put_char(':');
 				put_hex(uip_ethaddr.addr[s]);
 			}
-			string_to_html("\",broadcast=\"ff:ff:ff:ff:ff:ff\",operstate=\"");
-			string_to_html(v ? "up" : k == 2 ? "down" : "lowerlayerdown");
-			string_to_html("\",ifalias=\"");
+			str_code_to_html("\",broadcast=\"ff:ff:ff:ff:ff:ff\",operstate=\"");
+			str_code_to_html(v ? "up" : k == 2 ? "down" : "lowerlayerdown");
+			str_code_to_html("\",ifalias=\"");
 			put_esc(port_names[PORT], PORT_NAME_SIZE);
-			string_to_html("\"} 1\n");
+			str_code_to_html("\"} 1\n");
 			return;
 		}
 		break;
@@ -497,7 +497,7 @@ static void emit_row(void)
 		begin_sample();
 		put_char('{');
 		put_device();
-		string_to_html("} ");
+		str_code_to_html("} ");
 		put_u64(&sum);
 		put_char('\n');
 		return;
@@ -508,13 +508,13 @@ static void emit_row(void)
 		begin_sample();
 		put_char('{');
 		put_device();
-		string_to_html(",vendor=\"");
+		str_code_to_html(",vendor=\"");
 		put_esc(sfp_module_vendor[s], 16);
-		string_to_html("\",model=\"");
+		str_code_to_html("\",model=\"");
 		put_esc(sfp_module_model[s], 16);
-		string_to_html("\",serial=\"");
+		str_code_to_html("\",serial=\"");
 		put_esc(sfp_module_serial[s], 16);
-		string_to_html("\"} 1\n");
+		str_code_to_html("\"} 1\n");
 		return;
 	case K_SFP_LOS:
 		s = sfp_slot();
@@ -566,7 +566,7 @@ void metrics_fill(void) __banked
 void metrics_start(__xdata bool with_mib) __banked
 {
 	slen = 0;
-	string_to_html("HTTP/1.1 200 OK\r\nConnection: close\r\n"
+	str_code_to_html("HTTP/1.1 200 OK\r\nConnection: close\r\n"
 		"Content-Type: text/plain; version=0.0.4; charset=utf-8\r\n\r\n");
 	fam = row = typed = 0;
 	mib = with_mib;

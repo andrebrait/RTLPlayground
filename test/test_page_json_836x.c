@@ -260,7 +260,7 @@ static int has(const char *needle) { return strstr(body(), needle) != 0; }
 static int port_has(uint8_t port, const char *needle)
 {
 	char key[20];
-	snprintf(key, sizeof(key), "\"portNum\":%u,", port + 1);
+	snprintf(key, sizeof(key), "{\"port\":%u,", port + 1);
 	const char *p = strstr(body(), key);
 	if (!p)
 		return 0;
@@ -342,7 +342,7 @@ static void t_mib(void)
 
 static void t_status(void)
 {
-	printf("[test] /status.json: link and speed from PORTn_STATUS\n");
+	printf("[test] /ports.json and /traffic.json: state, link and speed from PORTn_STATUS\n");
 	regfile[RTL836X_REG_PORT0_STATUS + 0] = PORT_STATUS_LINK | 2;	/* 1000M */
 	regfile[RTL836X_REG_PORT0_STATUS + 1] = PORT_STATUS_LINK | 1 | 0x40;	/* 100M, TX pause */
 	regfile[RTL836X_REG_PORT0_STATUS + 2] = PORT_STATUS_LINK;	/* 10M */
@@ -351,22 +351,27 @@ static void t_status(void)
 	phy_regs[1][4] = 0x0de0; /* pause, asymmetric pause, 100F/H and 10F/H */
 	phy_regs[1][9] = 0x0200; /* 1000F */
 	phy_regs[1][5] = 0x0400; /* the link partner offers symmetric pause */
-	send_status();
-	CHECK(port_has(0, "\"link\":3,") && port_has(0, "\"enabled\":0,"), "1000M is LINKS[3], BMCR power down is disabled");
-	CHECK(port_has(1, "\"link\":2,") && port_has(1, "\"enabled\":1,"), "100M is LINKS[2], powered up is enabled");
-	CHECK(port_has(1, "\"adv\":\"011111\""), "MII ANAR and GBCR advertise the supported speeds");
+	send_ports();
+	CHECK(port_has(0, "\"isSFP\":false,\"enabled\":false,"), "BMCR power down is disabled");
+	CHECK(port_has(1, "\"enabled\":true,"), "powered up is enabled");
+	CHECK(port_has(1, "\"adv\":[\"1G\",\"100M-FD\",\"100M-HD\",\"10M-FD\",\"10M-HD\"],"),
+	      "MII ANAR and GBCR advertise the supported speeds, never 2.5G");
 	CHECK(port_has(1, "\"fc\":23,"),
 	      "fc: both pause bits advertised, partner pause, negotiated TX pause only");
-	CHECK(port_has(2, "\"link\":1,"), "10M is LINKS[1]");
-	CHECK(port_has(3, "\"link\":0,"), "link bit clear is down, even with speed bits set");
-	CHECK(has("\"portNum\":8,") && !has("\"portNum\":9,") && !has("logPort"), "8 ports, logPort only in /information.json");
+	CHECK(has("{\"port\":8,") && !has("{\"port\":9,") && !has("logPort"), "8 ports, by physical number only");
+	CHECK(slen <= TCP_OUTBUF_SIZE, "fits the buffer");
+	CHECK(balanced(), "valid JSON");
+	send_traffic();
+	CHECK(port_has(0, "\"link\":\"1000M\",") && port_has(1, "\"link\":\"100M\",") && port_has(2, "\"link\":\"10M\","),
+	      "the link speed by name");
+	CHECK(port_has(3, "\"link\":\"DOWN\","), "link bit clear is down, even with speed bits set");
 	CHECK(port_has(0, "\"txG\":\"0x2fffffffd\"") && port_has(0, "\"rxG\":\"0x100000004\""), "real totals preserve aggregate carry");
 	CHECK(port_has(0, "\"txB\":\"0x11\"") && port_has(0, "\"rxB\":\"0x11223344\""), "explicit error semantics");
 	CHECK(port_has(0, "\"macs\":null"), "unsupported occupancy is unavailable");
 	CHECK(slen <= TCP_OUTBUF_SIZE, "fits the buffer");
 	CHECK(balanced(), "valid JSON");
 	regfile[RTL836X_REG_MIB_CTRL] = RTL836X_MIB_RESET;
-	send_status();
+	send_traffic();
 	CHECK(port_has(0, "\"txG\":null") && port_has(7, "\"rxB\":null"), "unavailable counters never become zero");
 	out_reset();
 	port_stats_print();
@@ -385,7 +390,7 @@ static void t_info(void)
 	CHECK(balanced(), "valid JSON");
 	CHECK(has("\"mib_family\":\"rtl836x\""), "native label discriminator");
 	CHECK(has("\"poe_ports\":4"), "board reports four GPIO-controlled PoE ports");
-	CHECK(has("\"logPort\":[0,1,2,3,4,5,6,7]"), "front-panel to chip port map");
+	CHECK(!has("\"logPort\""), "no chip port map: every API port number is physical");
 }
 
 static void t_counters(void)
@@ -410,18 +415,18 @@ static void t_eee(void)
 	eee_adv[7] = 6;
 	regfile[RTL836X_REG_PORT0_STATUS] = 0x0415;
 	regfile[RTL836X_REG_PORT0_STATUS + 7] = 0x0016;
-	send_status();
+	send_ports();
 	CHECK(port_has(0, "\"eee\":1025,"), "eee: 100M advertised and LPI active from native registers");
-	CHECK(port_has(7, "\"eee\":3,"), "eee: 100M and 1G advertised, not active, partner unknown");
-	CHECK(balanced(), "status JSON with eee is valid");
+	CHECK(port_has(7, "\"eee\":3}"), "eee: 100M and 1G advertised, not active, partner unknown");
+	CHECK(balanced(), "ports JSON with eee is valid");
 }
 
 static void t_poe(void)
 {
 	regfile[RTL836X_REG_GPIO_67C_O_X0] = 0x0386; /* only front port 2 is disabled */
-	send_status();
-	CHECK(port_has(0, "\"poe_admin\":1") && port_has(1, "\"poe_admin\":0") &&
-	      port_has(2, "\"poe_admin\":1") && port_has(3, "\"poe_admin\":1"),
+	send_ports();
+	CHECK(port_has(0, "\"poe_admin\":true") && port_has(1, "\"poe_admin\":false") &&
+	      port_has(2, "\"poe_admin\":true") && port_has(3, "\"poe_admin\":true"),
 	      "PoE administrative state follows the GPIO map, not the Ethernet link");
 	CHECK(port_has(0, "\"poe_on\":null") && !port_has(4, "\"poe_admin\":"),
 	      "power delivery stays unknown and non-PoE ports are not presented as controllable");
@@ -466,7 +471,7 @@ static void t_vlan(void)
 	int pvid1 = 1;
 	for (unsigned p = 0; p <= 10; p++)
 		pvid1 &= pvid_index(p) == 0;
-	CHECK(pvid1 && port_pvid_get(0) == 1 && port_pvid_get(7) == 1 && port_pvid_get(CPU_PORT) == 1,
+	CHECK(pvid1 && port_pvid_get(0) == 1 && port_pvid_get(7) == 1 && port_pvid_get(CPU_LOGICAL_PORT) == 1,
 	      "every port has PVID 1");
 	CHECK((MISC_CFG(10) & PORT_MISC_CFG_VLAN_EGRESS_MODE) == 0 && (MISC_CFG(10) & 1),
 	      "egress tag mode original, the rest of PORT10_MISC_CFG kept");
@@ -501,14 +506,14 @@ static void t_vlan(void)
 	port_pvid_set(5, 0);
 	CHECK(port_pvid_get(5) == 0 && port_pvid_get(3) == 20, "PVID 0, as the VLAN page parks tagged-only ports");
 
-	CHECK(port_ingress_filter(4, VLAN_TAGGED) && port_ingress_filter(CPU_PORT, VLAN_UNTAGGED)
+	CHECK(port_ingress_filter(4, VLAN_TAGGED) && port_ingress_filter(CPU_LOGICAL_PORT, VLAN_UNTAGGED)
 	      && ACCEPT(0) == 0x0100 && ACCEPT(1) == 0x0020, "frame types: 2 bits per port, the CPU port is port 10");
-	CHECK(port_ingress_filter_get(4) == VLAN_TAGGED && port_ingress_filter_get(CPU_PORT) == VLAN_UNTAGGED
+	CHECK(port_ingress_filter_get(4) == VLAN_TAGGED && port_ingress_filter_get(CPU_LOGICAL_PORT) == VLAN_UNTAGGED
 	      && port_ingress_filter_get(0) == VLAN_ALL, "and read back");
 	CHECK(!port_ingress_filter(8, VLAN_ALL) && !port_ingress_filter(0, VLAN_INVALID)
 	      && port_ingress_filter_get(8) == VLAN_INVALID, "no port 8 and no mode 3");
 	CHECK(port_ingress_vlan_filter_set(5, false) && !port_ingress_vlan_filter_get(5)
-	      && port_ingress_vlan_filter_get(CPU_PORT) && regfile[RTL836X_REG_VLAN_INGRESS] == 0x04df,
+	      && port_ingress_vlan_filter_get(CPU_LOGICAL_PORT) && regfile[RTL836X_REG_VLAN_INGRESS] == 0x04df,
 	      "ingress filter per port");
 
 	vlan_ptr = 0;
@@ -516,18 +521,18 @@ static void t_vlan(void)
 	name_vlan(10, "lab");
 	port_pvid_set(1, 10);
 	send_vlan(10);
-	CHECK(has("\"members\":\"0x2000a02\"") && has("\"name\":\"lab\"") && has("\"pvid\":\"0x0002\"") && balanced(),
-	      "/vlan.json: native CPU membership is tagged, with name and front-port PVIDs");
+	CHECK(has("{\"untagged_members\":[2],\"tagged_members\":[],\"name\":\"lab\",\"pvid\":[2]}") && balanced(),
+	      "/vlan.json: front ports by physical number, the tagged CPU membership left out, with name and PVIDs");
 	send_vlanlist();
 	CHECK(has("{\"id\":1,\"name\":\"\"}") && has("{\"id\":10,\"name\":\"lab\"}") && !has("\"id\":20") && balanced(),
-	      "/vlanlist: the VLANs with members");
+	      "/vlanlist.json: the VLANs with members");
 	unsigned idx10 = pvid_index(1);
 	vlan_delete(10);
 	CHECK(!vlan4k[10][0] && !vlan4k[10][2] && MC(idx10, 0) == 0 && port_pvid_get(1) == 10,
 	      "a deleted VLAN loses its members, ports keep it as PVID");
 	CHECK(vlan_name(10) == 0xffff, "and its name");
 	send_vlanlist();
-	CHECK(!has("\"id\":10") && has("\"id\":1,") && balanced(), "/vlanlist drops it");
+	CHECK(!has("\"id\":10") && has("\"id\":1,") && balanced(), "/vlanlist.json drops it");
 	vlan_settings.vlan = 4095;
 	vlan_create();
 	vlan_delete(0);
@@ -544,12 +549,12 @@ static void t_isolation(void)
 	port_isolate(2, 0x0001 | PMASK_CPU);
 	CHECK(regfile[RTL836X_REG_PORT_ISOLATION_PORT0_MASK + 2] == 0x0401 && port_isolation_get(2) == (0x0001 | PMASK_CPU),
 	      "port 3 may send to port 1 and the CPU");
-	port_isolate(CPU_PORT, 0);
+	port_isolate(CPU_LOGICAL_PORT, 0);
 	port_isolate(8, 0);
 	CHECK(regfile[RTL836X_REG_PORT_ISOLATION_PORT0_MASK + 10] == 0x07ff && regfile[RTL836X_REG_PORT_ISOLATION_PORT0_MASK + 8] == 0x07ff,
 	      "the CPU port and ports past the last front port are left alone");
 	send_isolation();
-	CHECK(has("{\"portNum\":3,\"allow\":\"0201\"}") && has("{\"portNum\":4,\"allow\":\"02ff\"}") && balanced(),
+	CHECK(has("{\"port\":3,\"allow\":[1,0]}") && has("{\"port\":4,\"allow\":[1,2,3,4,5,6,7,8,0]}") && balanced(),
 	      "/isolation.json");
 }
 
@@ -569,8 +574,8 @@ static void t_mtu(void)
 	CHECK(!port_mtu_set(2, 9000), "while two ports use 1522, neither can move to a third length");
 	CHECK(port_mtu_set(4, 16368) && port_mtu_set(2, 9000) && MAX_LEN_CFG(1) == 9000 && port_mtu_get(2) == 9000
 	      && port_mtu_get(4) == 16368, "the last port on a configuration changes its length");
-	send_mtu();
-	CHECK(has("{\"portNum\":3,\"mtu\":\"0x2328\"}") && has("{\"portNum\":1,\"mtu\":\"0x3ff0\"}") && balanced(), "/mtu.json");
+	send_ports();
+	CHECK(port_has(2, "\"mtu\":\"0x2328\"") && port_has(0, "\"mtu\":\"0x3ff0\"") && balanced(), "the frame lengths in /ports.json");
 }
 
 static void t_mirror(void)
@@ -588,7 +593,7 @@ static void t_mirror(void)
 	port_mirror_get(&m);
 	CHECK(m.enabled && m.port == 1 && m.rx_pmask == PORT_BIT(2) && m.tx_pmask == PORT_BIT(2), "read back");
 	send_mirror();
-	CHECK(has("{\"enabled\":1,\"mPort\":2,\"mirror_rx\":\"0000000000000100\",\"mirror_tx\":\"0000000000000100\"}")
+	CHECK(has("{\"enabled\":true,\"mirrorPort\":2,\"mirror_rx\":[3],\"mirror_tx\":[3]}")
 	      && balanced(), "/mirror.json");
 	CHECK(!port_mirror_set(1, PORT_BIT(3), PORT_BIT(4)) && !port_mirror_set(1, PORT_BIT(1), 0)
 	      && !port_mirror_set(1, 0, 0) && regfile[RTL836X_REG_MIRROR_CTRL] == 0x0e12,
@@ -600,7 +605,7 @@ static void t_mirror(void)
 	port_mirror_get(&m);
 	CHECK(regfile[RTL836X_REG_MIRROR_CTRL] == 0x0803 && !m.enabled && !m.rx_pmask && !m.tx_pmask, "off");
 	send_mirror();
-	CHECK(has("{\"enabled\":0,\"mPort\":1,") && balanced(), "/mirror.json when off");
+	CHECK(has("{\"enabled\":false,\"mirrorPort\":1,\"mirror_rx\":[],\"mirror_tx\":[]}") && balanced(), "/mirror.json when off");
 }
 
 /*
@@ -628,7 +633,7 @@ static void t_lag(void)
 	CHECK(port_lag_members_get(0) == 0x0005 && port_lag_members_get(1) == 0x00c0 && port_lag_members_get(2) == 0,
 	      "members read back as logical masks, per group");
 	CHECK(port_lag_of(0) == 0 && port_lag_of(2) == 0 && port_lag_of(1) == PORT_LAG_NONE && port_lag_of(7) == 1
-	      && port_lag_of(5) == PORT_LAG_NONE && port_lag_of(8) == PORT_LAG_NONE && port_lag_of(CPU_PORT) == PORT_LAG_NONE,
+	      && port_lag_of(5) == PORT_LAG_NONE && port_lag_of(8) == PORT_LAG_NONE && port_lag_of(CPU_LOGICAL_PORT) == PORT_LAG_NONE,
 	      "the group of a port, none for others and the CPU port");
 
 	writes = other_writes;
@@ -655,9 +660,9 @@ static void t_lag(void)
 	      && regfile[RTL836X_REG_PORT_TRUNK_CTRL] == 0x0191, "a hash already set survives a LAG being created again");
 
 	send_lag();
-	CHECK(has("[{\"lagNum\":0,\"members\":\"0000000000001010\",\"hash\":\"00000011\"},"
-		  "{\"lagNum\":1,\"members\":\"0000000011000000\",\"hash\":\"00000011\"}]") && !has("\"lagNum\":2")
-	      && balanced(), "/lag.json: the two groups, the global hash twice");
+	CHECK(has("{\"lags\":[{\"lagNum\":0,\"type\":\"static\",\"members\":[2,4],\"range\":[1,2,3,4],\"hash\":\"00000011\"},"
+		  "{\"lagNum\":1,\"type\":\"static\",\"members\":[7,8],\"range\":[5,6,7,8],\"hash\":\"00000011\"}],\"ports\":[")
+	      && !has("\"lagNum\":2") && balanced(), "/lag.json: the two groups with their port banks, the global hash twice");
 
 	port_pvid_set(1, 1);
 	port_pvid_set(3, 1);
@@ -675,14 +680,15 @@ static void t_lag(void)
 	lacp_agg_valid[1] = 1;
 	memcpy(lacp_agg_sys[1], "\x02\xbb\xbb\xbb\xbb\x02", MAC_ADDR_LEN);
 	lacp_members_last[1] = 0x0040;
-	send_lacp();
+	send_lag();
 	unsigned lacp_groups = 0;
-	for (const char *p = body(); (p = strstr(p, "\"cfg\":")); p++)
+	for (const char *p = body(); (p = strstr(p, "\"lagNum\":")); p++)
 		lacp_groups++;
 	CHECK(lacp_groups == PORT_LAG_COUNT && lacp_groups == 2 && balanced()
-	      && has("\"lags\":[{\"cfg\":\"0000\",\"aggValid\":0,")
-	      && has("{\"cfg\":\"00c0\",\"aggValid\":1,\"agg\":\"02bbbbbbbb02\",\"members\":\"0040\"}],\"ports\":["),
-	      "/lacp.json: the chip's two groups with their candidates, aggregator and active members");
+	      && has("{\"lagNum\":0,\"type\":\"static\",")
+	      && has("{\"lagNum\":1,\"type\":\"lacp\",\"members\":[7,8],\"active_members\":[7],\"valid\":true,"
+		     "\"aggregator\":\"02bbbbbbbb02\",\"range\":[5,6,7,8],\"hash\":\"00000011\"}],\"ports\":[{\"p\":1,"),
+	      "/lag.json: the chip's two groups with their candidates, aggregator and active members");
 }
 
 static void t_l2(void)
@@ -699,14 +705,14 @@ static void t_l2(void)
 	lut_put(2, 0x103f, uip_ethaddr.addr, 1, 10, true);
 	lut[2].words[4] &= ~0x3800; /* static entries need no dynamic age */
 	send_l2(0);
-	CHECK(has("\"vlan\":\"123\",\"mac\":\"02:11:22:33:44:01\",\"type\":\"l\",\"port\":2,\"lag\":0,\"idx\":\"0010\""),
-	      "native words decode to the shared row contract");
-	CHECK(has("\"idx\":\"0815\"") && has("\"type\":\"s\",\"port\":9,\"lag\":0,\"idx\":\"103f\""),
-	      "extended SRAM/CAM indices and CPU chip10 to logical9 are retained");
+	CHECK(has("\"vlan\":\"123\",\"mac\":\"02:11:22:33:44:01\",\"type\":\"l\",\"port\":3,\"lag\":0,\"idx\":\"0010\""),
+	      "native words decode to the shared row contract, the port by its physical number");
+	CHECK(has("\"idx\":\"0815\"") && has("\"type\":\"s\",\"port\":0,\"lag\":0,\"idx\":\"103f\""),
+	      "extended SRAM/CAM indices are retained and the CPU, chip port 10, is physical port 0");
 	CHECK(balanced() && slen <= TCP_OUTBUF_SIZE, "native rows fit a valid JSON page");
 	regfile[0x08d0] = 4;
 	send_l2(0);
-	CHECK(has("\"port\":2,\"lag\":1,"), "the learned port is associated with its native LAG");
+	CHECK(has("\"port\":3,\"lag\":1,"), "the learned port is associated with its native LAG");
 	regfile[0x08d0] = 0;
 	l2_delete(0x0814);
 	CHECK(has("\"result\":0") && lut[1].present, "an absent exact index never deletes the following row");
@@ -779,10 +785,10 @@ static void t_rate_json(void)
 	regfile[0x038c + 2 * 2] = 0xe848;
 	regfile[0x038d + 2 * 2] = 0xa5f9;
 	send_bandwidth();
-	CHECK(port_has(2, "\"iLimited\":1,\"iBW\":\"000001\",\"iFC\":1,\"eLimited\":1,\"eBW\":\"01e848\""),
+	CHECK(port_has(2, "\"iLimited\":true,\"iBW\":\"0x000001\",\"iAction\":\"fc\",\"eLimited\":true,\"eBW\":\"0x01e848\""),
 	      "8-kbps ingress and 1-Gbps egress retain native count precision and flow-control mode");
-	CHECK(port_has(0, "\"iLimited\":0,\"iBW\":\"01ffff\""), "the documented native unlimited count is reported as off");
-	CHECK(port_has(7, "\"eLimited\":0,\"eBW\":\"01ffff\"") && balanced() && slen <= TCP_OUTBUF_SIZE,
+	CHECK(port_has(0, "\"iLimited\":false,\"iBW\":\"0x01ffff\","), "the documented native unlimited count is reported as off");
+	CHECK(port_has(7, "\"eLimited\":false,\"eBW\":\"0x01ffff\"") && balanced() && slen <= TCP_OUTBUF_SIZE,
 	      "all eight bandwidth rows fit valid JSON");
 	for (unsigned t = 0; t < 4; t++)
 		regfile[0x0a40 + t] = 0;
@@ -793,9 +799,10 @@ static void t_rate_json(void)
 	regfile[0x0a5f] = 55 << 8;
 	regfile[0x176e] = 0xe848; regfile[0x176f] = 1;
 	send_storm();
-	CHECK(port_has(2, "\"en\":\"1000\",\"pps\":\"0000\",\"rate\":\"000008000000000000000000\""),
+	CHECK(has("{\"port\":3,\"bcast\":{\"enabled\":true,\"unit\":\"kbit/s\",\"rate\":\"0x000008\"},"
+		  "\"mcast\":{\"enabled\":false,\"unit\":\"kbit/s\",\"rate\":\"0x000000\"},"),
 	      "broadcast reports 8 kbit/s, not its hardware count, and never claims PPS support");
-	CHECK(port_has(7, "\"en\":\"0001\",\"pps\":\"0000\",\"rate\":\"0000000000000000000f4240\""),
+	CHECK(has("\"umcast\":{\"enabled\":true,\"unit\":\"kbit/s\",\"rate\":\"0x0f4240\"}}]"),
 	      "the last native meter reports a 1-Gbit/s unknown-multicast limit");
 	CHECK(balanced() && slen <= TCP_OUTBUF_SIZE, "native storm rows fit the response buffer");
 }

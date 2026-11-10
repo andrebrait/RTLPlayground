@@ -71,20 +71,11 @@ extern __xdata uint8_t sfp_options[2];
 #include "rtl837x_lldp.h"
 extern __xdata bool lldp_enabled;
 
-__code const uint8_t * __code const HTTP_RESPONCE_TXT = "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: text/plain\r\n\r\n";
-
 // Convert uint8_t to ascii HEX char push on html-buffer.
 void charhex_to_html(char c)
 {
 	outbuf[slen++] = itohex(c);
 }
-
-
-void char_to_html(char c)
-{
-	outbuf[slen++] = c;
-}
-
 
 static void str_x_to_html(__xdata const char *s)
 {
@@ -99,6 +90,20 @@ void json_char_to_html(uint8_t c)
 		c = '.';
 	outbuf[slen++] = c;
 }
+
+/* A mask of logical ports as a JSON array of physical port numbers; the CPU port is physical port 0 */
+static void pmask_to_json(__xdata uint16_t m)
+{
+	char_to_html('[');
+	for (__xdata uint8_t i = MACHINE_MIN_PORT; i <= MACHINE_MAX_PORT; i++) {
+		if ((m >> i) & 1)
+			json_add_array_uint_item(machine.log_to_phys_port[i]);
+	}
+	if ((m >> CPU_LOGICAL_PORT) & 1)
+		json_add_array_uint_item(CPU_PHYSICAL_PORT);
+	char_to_html(']');
+}
+
 
 
 void itoa16_html(uint16_t v) /* up to five digits (65535) */
@@ -119,7 +124,7 @@ void itoa16_html(uint16_t v) /* up to five digits (65535) */
 static void temp_to_html(void)
 {
 #if SOC_FAMILY == RTL836X
-	string_to_html("n/a");	/* shortcut: no temperature reading on the RTL836x yet */
+	str_code_to_html("n/a");	/* shortcut: no temperature reading on the RTL836x yet */
 #else
 	int16_t v;
 
@@ -212,10 +217,10 @@ void counter_to_html(void)
 static void mib_to_html(__xdata uint8_t *value, __xdata bool available)
 {
 	if (!available) {
-		string_to_html("null");
+		str_code_to_html("null");
 		return;
 	}
-	string_to_html("\"0x");
+	str_code_to_html("\"0x");
 	uint8_t b = 0;
 	while (b < 7 && !value[b]) b++;
 	if (value[b] < 16)
@@ -258,86 +263,79 @@ void sfp_send_data(uint8_t slot, uint8_t reg, uint8_t len)
 
 void send_basic_info(void)
 {
-	slen = strtox(outbuf, HTTP_RESPONCE_JSON);
+	slen = strtox(outbuf, HTTP_RESPONSE_JSON);
 	dbg_string("send_basic_info called\n");
-	string_to_html("{\"ip_address\":\"");
+	str_code_to_html("{\"ip_address\":\"");
 	itoa_html(uip_hostaddr[0]); char_to_html('.');
 	itoa_html(uip_hostaddr[0] >> 8); char_to_html('.');
 	itoa_html(uip_hostaddr[1]); char_to_html('.');
 	itoa_html(uip_hostaddr[1] >> 8);
-	string_to_html("\",\"ip_gateway\":\"");
+	str_code_to_html("\",\"ip_gateway\":\"");
 	itoa_html(uip_draddr[0]); char_to_html('.');
 	itoa_html(uip_draddr[0] >> 8); char_to_html('.');
 	itoa_html(uip_draddr[1]); char_to_html('.');
 	itoa_html(uip_draddr[1] >> 8);
-	string_to_html("\",\"ip_netmask\":\"");
+	str_code_to_html("\",\"ip_netmask\":\"");
 	itoa_html(uip_netmask[0]); char_to_html('.');
 	itoa_html(uip_netmask[0] >> 8); char_to_html('.');
 	itoa_html(uip_netmask[1]); char_to_html('.');
 	itoa_html(uip_netmask[1] >> 8);
-	string_to_html("\",\"syslog_server\":\"");
+	str_code_to_html("\",\"syslog_server\":\"");
 	itoa_html(syslog_state.server_ip[0]); char_to_html('.');
 	itoa_html(syslog_state.server_ip[1]); char_to_html('.');
 	itoa_html(syslog_state.server_ip[2]); char_to_html('.');
 	itoa_html(syslog_state.server_ip[3]); char_to_html(':');
 	itoa16_html(syslog_state.server_port);
-	string_to_html("\",\"session_timeout\":");
+	str_code_to_html("\",\"session_timeout\":");
 	itoa16_html(session_timeout);
-	string_to_html(dhcp_state.state == DHCP_OFF ? ",\"ip_source\":\"static\"" : ",\"ip_source\":\"dhcp\"");
-	string_to_html(",\"mac_address\":\"");
+	str_code_to_html(dhcp_state.state == DHCP_OFF ? ",\"ip_source\":\"static\"" : ",\"ip_source\":\"dhcp\"");
+	str_code_to_html(",\"mac_address\":\"");
 	byte_to_html(uip_ethaddr.addr[0]); char_to_html(':');
 	byte_to_html(uip_ethaddr.addr[1]); char_to_html(':');
 	byte_to_html(uip_ethaddr.addr[2]); char_to_html(':');
 	byte_to_html(uip_ethaddr.addr[3]); char_to_html(':');
 	byte_to_html(uip_ethaddr.addr[4]); char_to_html(':');
 	byte_to_html(uip_ethaddr.addr[5]);
-	string_to_html("\",\"hostname\":\"");
+	str_code_to_html("\",\"hostname\":\"");
 	{
 		__xdata char *hp = hostname;	/* sanitized on ingest, emit verbatim */
 		while (*hp)
 			char_to_html(*hp++);
 	}
-	string_to_html("\",\"sw_ver\":\"");
-	string_to_html(VERSION_SW);
-	string_to_html("\",\"build_date\":\"");
-	string_to_html(BUILD_DATE);
-	string_to_html("\",\"uptime\":\"0x");
+	str_code_to_html("\",\"sw_ver\":\"");
+	str_code_to_html(VERSION_SW);
+	str_code_to_html("\",\"build_date\":\"");
+	str_code_to_html(BUILD_DATE);
+	str_code_to_html("\",\"uptime\":\"0x");
 	byte_to_html(uptime_secs >> 24);
 	byte_to_html(uptime_secs >> 16);
 	byte_to_html(uptime_secs >> 8);
 	byte_to_html(uptime_secs);
-	string_to_html("\",\"hw_ver\":\"");
-	string_to_html(machine.machine_name);
-	string_to_html("\",\"pcb_ver\":\"");
-	string_to_html(MACHINE_PCB_INFO);
-	string_to_html("\",\"chip_temp\":\"");
+	str_code_to_html("\",\"hw_ver\":\"");
+	str_code_to_html(machine.machine_name);
+	str_code_to_html("\",\"pcb_ver\":\"");
+	str_code_to_html(MACHINE_PCB_INFO);
+	str_code_to_html("\",\"chip_temp\":\"");
 	temp_to_html();
-	string_to_html("\",\"flash_size\":\"");
-	string_to_html(get_flash_size_str());
+	str_code_to_html("\",\"flash_size\":\"");
+	str_code_to_html(get_flash_size_str());
 
 	if (machine.n_sfp) {
-		string_to_html("\",\"sfp_slot_0\":\"");
+		str_code_to_html("\",\"sfp_slot_0\":\"");
 		send_sfp_info(0);
 		if (machine.n_sfp == 2) {
-			string_to_html("\",\"sfp_slot_1\":\"");
+			str_code_to_html("\",\"sfp_slot_1\":\"");
 			send_sfp_info(1);
 		}
 	}
-	// Chip (logical) port of each front-panel port, in front-panel order
-	string_to_html("\",\"logPort\":[");
-	for (__xdata uint8_t i = 0; i <= MACHINE_MAX_PORT - MACHINE_MIN_PORT; i++) {
-		if (i)
-			char_to_html(',');
-		itoa_html(machine.phys_to_log_port[i]);
-	}
-	char_to_html(']');
+	char_to_html('"');
 
 #ifdef SNMP
     {
         static __xdata uint8_t status[SNMP_STATUS_SIZE];
         __xdata volatile uint8_t i;
         snmp_get_status(status);
-        string_to_html(",\"snmp\":[");
+        str_code_to_html(",\"snmp\":[");
         for (i = 0; i < SNMP_STATUS_SIZE; ++i) {
             if (i) char_to_html(',');
             itoa_html(status[i]);
@@ -346,14 +344,14 @@ void send_basic_info(void)
     }
 #endif
 #ifdef PROMETHEUS
-	string_to_html(",\"prometheus\":");
-	itoa_html(prometheus_enabled);
+	str_code_to_html(",\"prometheus\":");
+	bool_to_json(prometheus_enabled);
 #endif
 #if SOC_FAMILY == RTL836X
-	string_to_html(",\"mib_family\":\"rtl836x\"");
+	str_code_to_html(",\"mib_family\":\"rtl836x\"");
 #endif
 #ifdef MACHINE_POE_PORTS
-	string_to_html(",\"poe_ports\":");
+	str_code_to_html(",\"poe_ports\":");
 	itoa_html(MACHINE_POE_PORTS);
 #endif
 	char_to_html('}');
@@ -362,13 +360,18 @@ void send_basic_info(void)
 
 void send_vlan(uint16_t vlan)
 {
-	slen = strtox(outbuf, HTTP_RESPONCE_JSON);
+	slen = strtox(outbuf, HTTP_RESPONSE_JSON);
 	dbg_string("sending VLAN\n");
-	//{"members":"0x00060011"}
-	string_to_html("{\"members\":\"0x");
 	vlan_get(vlan);
-	sfr_data_to_html();
-	string_to_html("\",\"name\":\"");
+	/* xdata: internal RAM is full in RTL836x SNMP builds */
+	__xdata uint16_t members = (((uint16_t)sfr_data[2] << 8) | sfr_data[3]) & 0x3ff;
+	__xdata uint16_t untagged = ((((uint16_t)sfr_data[1] << 8) | sfr_data[2]) >> 2) & members;
+	members &= ~PMASK_CPU;	/* the arrays list the front-panel ports only */
+	str_code_to_html("{\"untagged_members\":");
+	pmask_to_json(untagged & members);
+	str_code_to_html(",\"tagged_members\":");
+	pmask_to_json(~untagged & members);
+	str_code_to_html(",\"name\":\"");
 	__xdata uint16_t n = vlan_name(vlan);
 	if (n== 0xffff) {
 		dbg_string("VLAN has no name\n");
@@ -376,15 +379,14 @@ void send_vlan(uint16_t vlan)
 		while(vlan_names[n] && vlan_names[n] != ' ')
 			json_char_to_html(vlan_names[n++]);
 	}
-	string_to_html("\",\"pvid\":\"0x");
-	__xdata uint16_t pvid_mask = 0;	/* xdata: internal RAM is full in RTL836x SNMP builds */
+	str_code_to_html("\",\"pvid\":");
+	members = 0;
 	for (uint8_t i = MACHINE_MIN_PORT; i <= MACHINE_MAX_PORT; i++) {
 		if (port_pvid_get(i) == vlan)
-			pvid_mask |= (1 << i);
-}
-	byte_to_html(pvid_mask >> 8);
-	byte_to_html(pvid_mask);
-	string_to_html("\"}");
+			members |= (1 << i);
+	}
+	pmask_to_json(members);
+	char_to_html('}');
 }
 
 #if SOC_FAMILY == RTL837X
@@ -400,13 +402,13 @@ bool send_counters(uint8_t phys_port)
 	uint8_t log_port = machine.phys_to_log_port[phys_port_idx];
 
 	dbg_string("send_counters called: "); dbg_byte(phys_port_idx); dbg_char('\n');
-	slen = strtox(outbuf, HTTP_RESPONCE_JSON);
+	slen = strtox(outbuf, HTTP_RESPONSE_JSON);
 	dbg_string("sending counters\n"); dbg_byte(phys_port_idx);
 
 	char_to_html('[');
 	for (uint8_t counter = 0; counter < 0x37; counter++) {
 		STAT_GET(counter, log_port);
-		string_to_html("\"0x");
+		str_code_to_html("\"0x");
 		counter_to_html();
 		char_to_html('\"');
 		if (counter != 0x36)
@@ -424,7 +426,7 @@ err:
 
 void send_l2(uint16_t idx)
 {
-	slen = strtox(outbuf, HTTP_RESPONCE_JSON);
+	slen = strtox(outbuf, HTTP_RESPONSE_JSON);
 	dbg_string("sending L2\n");
 	dbg_short(idx);
 	__xdata uint8_t entries_left = L2_MAX_TRANSFER;
@@ -472,12 +474,12 @@ void send_l2(uint16_t idx)
 			first = false;
 
 			// VLAN, taken from the read above instead of reading the register twice
-			string_to_html("{\"vlan\":\"");
+			str_code_to_html("{\"vlan\":\"");
 			charhex_to_html(sfr_data[0] & 0x0f);
 			byte_to_html(sfr_data[1]);
 
 			// MAC
-			string_to_html("\",\"mac\":\"");
+			str_code_to_html("\",\"mac\":\"");
 			byte_to_html(sfr_data[2]); char_to_html(':');
 			byte_to_html(sfr_data[3]); char_to_html(':');
 			port = (sfr_data[0] >> 6) & 0x3;
@@ -490,13 +492,13 @@ void send_l2(uint16_t idx)
 			// type
 			reg_read_m(RTL837x_L2_DATA_OUT_C);
 			if (sfr_data[1] & 0x1)
-				string_to_html("\",\"type\":\"s\",\"port\":");
+				str_code_to_html("\",\"type\":\"s\",\"port\":");
 			else
-				string_to_html("\",\"type\":\"l\",\"port\":");
+				str_code_to_html("\",\"type\":\"l\",\"port\":");
 
 			port |= (sfr_data[3] & 0x3) << 2;
-			itoa_html(port);
-			string_to_html(",\"lag\":");
+			itoa_html(port == CPU_LOGICAL_PORT ? CPU_PHYSICAL_PORT : machine.log_to_phys_port[port]);
+			str_code_to_html(",\"lag\":");
 			lag = port_lag_of(port);
 			itoa_html(lag == PORT_LAG_NONE ? 0 : lag + 1);
 		}
@@ -505,7 +507,7 @@ void send_l2(uint16_t idx)
 		reg_read_m(RTL837x_TBL_DATA_0);
 		entry = (((uint16_t)sfr_data[2] & 0x0f) << 8) | sfr_data[3];
 		if (valid) {
-			string_to_html(",\"idx\":\"");
+			str_code_to_html(",\"idx\":\"");
 			byte_to_html(entry >> 8);
 			byte_to_html(entry);
 			char_to_html('"');
@@ -524,13 +526,13 @@ void send_l2(uint16_t idx)
 
 void l2_delete(uint16_t idx)
 {
-	slen = strtox(outbuf, HTTP_RESPONCE_JSON);
+	slen = strtox(outbuf, HTTP_RESPONSE_JSON);
 	dbg_string("L2 DELETE\n");
 	dbg_short(idx);
 	do {
 		reg_read(RTL837X_TBL_CTRL);
 	} while (SFR_DATA_0 & TBL_EXECUTE);
-	string_to_html("{\"result\":");
+	str_code_to_html("{\"result\":");
 	// First, search for the entry based on the index
 	reg_read_m(RTL837x_TBL_DATA_0);
 	sfr_data[1] &= 0xfc;
@@ -587,7 +589,7 @@ void l2_delete(uint16_t idx)
 #else
 static void send_json(__code const char *s)
 {
-	slen = strtox(outbuf, HTTP_RESPONCE_JSON);
+	slen = strtox(outbuf, HTTP_RESPONSE_JSON);
 	slen += strtox(outbuf + slen, s);
 }
 
@@ -597,7 +599,7 @@ bool send_counters(uint8_t phys_port)
 		return true;
 	uint8_t port = machine.phys_to_log_port[phys_port - 1];
 	__xdata uint8_t value[8];
-	slen = strtox(outbuf, HTTP_RESPONCE_JSON);
+	slen = strtox(outbuf, HTTP_RESPONSE_JSON);
 	char_to_html('[');
 	for (uint8_t counter = 0; counter < RTL836X_MIB_COUNT; counter++) {
 		bool available = rtl836x_mib_read(port, counter, value);
@@ -656,7 +658,7 @@ void send_l2(uint16_t idx)
 	__xdata int8_t found;
 	if (idx >= RTL836X_LUT_SIZE)
 		idx = 0;
-	slen = strtox(outbuf, HTTP_RESPONCE_JSON);
+	slen = strtox(outbuf, HTTP_RESPONSE_JSON);
 	char_to_html('[');
 	for (n = 0; n < L2_MAX_TRANSFER && slen + 96 <= TCP_OUTBUF_SIZE; n++) {
 		found = lut_read(idx, TABLE_ACCESS_LUT_NEXT_UC);
@@ -668,27 +670,27 @@ void send_l2(uint16_t idx)
 			break;
 		if (n)
 			char_to_html(',');
-		string_to_html("{\"vlan\":\"");
+		str_code_to_html("{\"vlan\":\"");
 		charhex_to_html((lut_words[3] >> 8) & 0x0f);
 		byte_to_html(lut_words[3]);
-		string_to_html("\",\"mac\":\"");
+		str_code_to_html("\",\"mac\":\"");
 		for (b = 0; b < 6; b++) {
 			if (b)
 				char_to_html(':');
 			byte_to_html(lut_words[2 - b / 2] >> (b & 1 ? 0 : 8));
 		}
-		string_to_html(lut_words[5] & 0x0020 ? "\",\"type\":\"s\",\"port\":" : "\",\"type\":\"l\",\"port\":");
+		str_code_to_html(lut_words[5] & 0x0020 ? "\",\"type\":\"s\",\"port\":" : "\",\"type\":\"l\",\"port\":");
 		port = ((lut_words[4] >> 8) & 7) | ((lut_words[3] >> 12) & 8);
 		if (port == RTL836X_CPU_PORT)
-			port = CPU_PORT;
-		itoa_html(port);
-		string_to_html(",\"lag\":");
+			port = CPU_LOGICAL_PORT;
+		itoa_html(port == CPU_LOGICAL_PORT ? CPU_PHYSICAL_PORT : machine.log_to_phys_port[port]);
+		str_code_to_html(",\"lag\":");
 		lag = port_lag_of(port);
 		itoa_html(lag == PORT_LAG_NONE ? 0 : lag + 1);
-		string_to_html(",\"idx\":\"");
+		str_code_to_html(",\"idx\":\"");
 		byte_to_html(lut_entry >> 8);
 		byte_to_html(lut_entry);
-		string_to_html("\"}");
+		str_code_to_html("\"}");
 		idx = lut_entry + 1;
 		if (idx >= RTL836X_LUT_SIZE)
 			break;
@@ -724,103 +726,86 @@ done:
 void send_lag(void)
 {
 	/* xdata: internal RAM is full in RTL836x SNMP builds */
-	__xdata uint8_t l, i;
-	__xdata uint16_t ports;
+	__xdata uint8_t l, i, j;
 
 	dbg_string("send_lag called\n");
-	slen = strtox(outbuf, HTTP_RESPONCE_JSON);
+	slen = strtox(outbuf, HTTP_RESPONSE_JSON);
 
-	char_to_html('[');
+	str_code_to_html("{\"lags\":[");
 	for (l = 0; l < PORT_LAG_COUNT; l++) {
-		string_to_html("{\"lagNum\":");
+		str_code_to_html("{\"lagNum\":");
 		itoa_html(l);
-		string_to_html(",\"members\":\"");
-		ports = port_lag_members_get(l);
-		for (i = 0; i < 16; i++) {
-			bool_to_html(ports >> 15);
-			ports <<= 1;
+		if (lacp_lag_ports[l]) {
+			str_code_to_html(",\"type\":\"lacp\",\"members\":");
+			pmask_to_json(lacp_lag_ports[l]);
+			str_code_to_html(",\"active_members\":");
+			pmask_to_json(lacp_members_last[l]);
+			str_code_to_html(",\"valid\":");
+			bool_to_json(lacp_agg_valid[l]);
+			str_code_to_html(",\"aggregator\":\"");
+			for (j = 0; j < MAC_ADDR_LEN; j++)
+				byte_to_html(lacp_agg_sys[l][j]);
+			char_to_html('"');
+		} else {
+			str_code_to_html(",\"type\":\"static\",\"members\":");
+			pmask_to_json(port_lag_members_get(l));
 		}
-		string_to_html("\",\"hash\":\"000000");
+#if SOC_FAMILY == RTL836X
+		/* A fixed group takes the ports of its own bank only, as port_lag_members_valid() has it */
+		str_code_to_html(",\"range\":");
+		pmask_to_json(0x000f << (l << 2));
+#endif
+		str_code_to_html(",\"hash\":\"000000");
 		byte_to_html(port_lag_hash_get(l));
-		string_to_html("\"},");
-	}
-	slen -=1; // remove comma
-	char_to_html(']');
-}
-
-
-void send_lacp(void)
-{
-	dbg_string("send_lacp called\n");
-	slen = strtox(outbuf, HTTP_RESPONCE_JSON);
-
-	string_to_html("{\"on\":");
-	bool_to_html(lacpEnabled);
-	string_to_html(",\"lags\":[");
-	for (uint8_t l = 0; l < PORT_LAG_COUNT; l++) {
-		string_to_html("{\"cfg\":\"");
-		byte_to_html(lacp_lag_ports[l] >> 8);
-		byte_to_html(lacp_lag_ports[l]);
-		string_to_html("\",\"aggValid\":");
-		bool_to_html(lacp_agg_valid[l]);
-		string_to_html(",\"agg\":\"");
-		for (uint8_t j = 0; j < MAC_ADDR_LEN; j++)
-			byte_to_html(lacp_agg_sys[l][j]);
-		string_to_html("\",\"members\":\"");
-		byte_to_html(lacp_members_last[l] >> 8);
-		byte_to_html(lacp_members_last[l]);
-		string_to_html("\"},");
+		str_code_to_html("\"},");
 	}
 	slen -= 1; // remove comma
-	string_to_html("],\"ports\":[");
-	for (uint8_t i = MACHINE_MIN_PORT; i <= MACHINE_MAX_PORT; i++) {
-		string_to_html("{\"p\":");
+	str_code_to_html("],\"ports\":[");
+	for (i = MACHINE_MIN_PORT; i <= MACHINE_MAX_PORT; i++) {
+		str_code_to_html("{\"p\":");
 		itoa_html(machine.log_to_phys_port[i]);
-		string_to_html(",\"lag\":");
+		str_code_to_html(",\"lag\":");
 		itoa_html(lacp_port_lag[i]);
-		string_to_html(",\"a\":\"");
+		str_code_to_html(",\"a\":\"");
 		byte_to_html(lacp_actor_state[i]);
-		string_to_html("\",\"pt\":\"");
+		str_code_to_html("\",\"pt\":\"");
 		byte_to_html(lacp_partner_state[i]);
-		string_to_html("\",\"rs\":");
+		str_code_to_html("\",\"rs\":");
 		itoa_html(lacp_rx_state[i]);
-		string_to_html(",\"rx\":\"");
+		str_code_to_html(",\"rx\":\"");
 		byte_to_html(lacp_rx_count[i] >> 8);
 		byte_to_html(lacp_rx_count[i]);
-		string_to_html("\",\"psys\":\"");
-		for (uint8_t j = 0; j < MAC_ADDR_LEN; j++)
+		str_code_to_html("\",\"psys\":\"");
+		for (j = 0; j < MAC_ADDR_LEN; j++)
 			byte_to_html(lacp_partner_sys[i][j]);
-		string_to_html("\"},");
+		str_code_to_html("\"},");
 	}
 	slen -= 1; // remove comma
-	string_to_html("]}");
+	str_code_to_html("]}");
 }
 
 void send_lldp(void)
 {
 	dbg_string("send_lldp called\n");
-	slen = strtox(outbuf, HTTP_RESPONCE_JSON);
+	slen = strtox(outbuf, HTTP_RESPONSE_JSON);
 
-	string_to_html("{\"on\":");
-	bool_to_html(lldp_enabled);
-	string_to_html(",\"tlv\":");
+	str_code_to_html("{\"on\":");
+	bool_to_json(lldp_enabled);
+	str_code_to_html(",\"tlv\":");
 	itoa_html(lldp_tlv_mask);
-	string_to_html(",\"portStatus\":[");
+	str_code_to_html(",\"portStatus\":[");
 
 	for (uint8_t i = MACHINE_MIN_PORT; i <= MACHINE_MAX_PORT; i++) {
-		string_to_html("{\"portNum\":");
+		str_code_to_html("{\"port\":");
 		itoa_html(machine.log_to_phys_port[i]);
-
-		string_to_html(",\"logPort\":");
-		itoa_html(i);
-		string_to_html(",\"name\":\"");
+		str_code_to_html(",\"name\":\"");
 		for (uint8_t j = 0; j < PORT_NAME_SIZE && port_names[i][j]; j++) {
 			json_char_to_html(port_names[i][j]);
 		}
 
-		string_to_html("\",\"permitted\":");
-		bool_to_html(1 & (lldp_logical_port_status >> i));
-		string_to_html("}");
+		str_code_to_html("\",\"permitted\":");
+		bool_to_json(1 & (lldp_logical_port_status >> i));
+		str_code_to_html("}");
 
 		if (i < MACHINE_MAX_PORT)
 			char_to_html(',');
@@ -830,6 +815,8 @@ void send_lldp(void)
 	char_to_html('}');
 }
 
+
+static __code const char * __code const storm_json_names[STORM_TYPES] = { "\"bcast\":{\"enabled\":", ",\"mcast\":{\"enabled\":", ",\"ucast\":{\"enabled\":", ",\"umcast\":{\"enabled\":" };
 
 #if SOC_FAMILY == RTL837X
 /* EEE_* bits of a copper port; eee_ablty is RTL8373_PHY_EEE_ABLTY, read once per reply */
@@ -865,33 +852,23 @@ static uint16_t port_eee_state(__xdata uint8_t port, __xdata uint16_t eee_ablty)
 void send_bandwidth(void)
 {
 	dbg_string("send_bandwidth called\n");
-	slen = strtox(outbuf, HTTP_RESPONCE_JSON);
+	slen = strtox(outbuf, HTTP_RESPONSE_JSON);
 	char_to_html('[');
 	for (uint8_t i = MACHINE_MIN_PORT; i <= MACHINE_MAX_PORT; i++) {
-		string_to_html("{\"portNum\":");
+		str_code_to_html("{\"port\":");
 		itoa_html(machine.log_to_phys_port[i]);
-		string_to_html(",\"iLimited\":");
+		str_code_to_html(",\"iLimited\":");
 		reg_read_m(RTL837X_IGBW_PORT_CTRL + i * 4);
-		if (sfr_data[1] & 0x10)
-			char_to_html('1');
-		else
-			char_to_html('0');
-		string_to_html(",\"iBW\":\"");
+		bool_to_json(sfr_data[1] & 0x10);
+		str_code_to_html(",\"iBW\":\"0x");
 		byte_to_html(sfr_data[1] & 0x0f);
 		byte_to_html(sfr_data[2]);
 		byte_to_html(sfr_data[3]);
-		string_to_html("\",\"iFC\":");
-		if (reg_bit_test(RTL837X_IGBW_PORT_FC_CTRL, i))
-			char_to_html('1');
-		else
-			char_to_html('0');
+		str_code_to_html(reg_bit_test(RTL837X_IGBW_PORT_FC_CTRL, i) ? "\",\"iAction\":\"fc\"" : "\",\"iAction\":\"drop\"");
 		reg_read_m(RTL837X_EGBW_PORT_CTRL + i * 1024);
-		string_to_html(",\"eLimited\":");
-		if (sfr_data[1] & 0x10)
-			char_to_html('1');
-		else
-			char_to_html('0');
-		string_to_html(",\"eBW\":\"");
+		str_code_to_html(",\"eLimited\":");
+		bool_to_json(sfr_data[1] & 0x10);
+		str_code_to_html(",\"eBW\":\"0x");
 		byte_to_html(sfr_data[1] & 0x0f);
 		byte_to_html(sfr_data[2]);
 		byte_to_html(sfr_data[3]);
@@ -908,27 +885,24 @@ void send_storm(void)
 {
 	__xdata uint8_t i, t, idx;
 
-	slen = strtox(outbuf, HTTP_RESPONCE_JSON);
+	slen = strtox(outbuf, HTTP_RESPONSE_JSON);
 	char_to_html('[');
 	for (i = MACHINE_MIN_PORT; i <= MACHINE_MAX_PORT; i++) {
-		string_to_html("{\"portNum\":");
+		str_code_to_html("{\"port\":");
 		itoa_html(machine.log_to_phys_port[i]);
-		string_to_html(",\"en\":\"");
-		for (t = 0; t < STORM_TYPES; t++)
-			char_to_html(reg_bit_test(RTL837X_STORM_CTRL + (t << 2), i) ? '1' : '0');
-		string_to_html("\",\"pps\":\"");
+		char_to_html(',');
 		for (t = 0; t < STORM_TYPES; t++) {
+			str_code_to_html(storm_json_names[t]);
+			bool_to_json(reg_bit_test(RTL837X_STORM_CTRL + (t << 2), i));
 			idx = storm_meter(i, t);
-			char_to_html(reg_bit_test(RTL837X_METER_MODE + ((idx >> 5) << 2), idx & 0x1f) ? '1' : '0');
-		}
-		string_to_html("\",\"rate\":\"");
-		for (t = 0; t < STORM_TYPES; t++) {
-			reg_read_m(RTL837X_METER_RATE + (storm_meter(i, t) << 2));
+			str_code_to_html(reg_bit_test(RTL837X_METER_MODE + ((idx >> 5) << 2), idx & 0x1f)
+					 ? ",\"unit\":\"pps\",\"rate\":\"0x" : ",\"unit\":\"kbit/s\",\"rate\":\"0x");
+			reg_read_m(RTL837X_METER_RATE + (idx << 2));
 			byte_to_html(sfr_data[1]);
 			byte_to_html(sfr_data[2]);
 			byte_to_html(sfr_data[3]);
+			str_code_to_html("\"}");
 		}
-		char_to_html('"');
 		char_to_html('}');
 		if (i < MACHINE_MAX_PORT)
 			char_to_html(',');
@@ -955,24 +929,24 @@ void send_bandwidth(void)
 {
 	__xdata uint8_t i;
 	__xdata uint32_t count;
-	slen = strtox(outbuf, HTTP_RESPONCE_JSON);
+	slen = strtox(outbuf, HTTP_RESPONSE_JSON);
 	char_to_html('[');
 	for (i = MACHINE_MIN_PORT; i <= MACHINE_MAX_PORT; i++) {
-		string_to_html("{\"portNum\":");
+		str_code_to_html("{\"port\":");
 		itoa_html(machine.log_to_phys_port[i]);
 		count = rtl836x_bw_get(i, 1);
-		string_to_html(",\"iLimited\":");
-		bool_to_html(count != RTL836X_RATE_OFF);
-		string_to_html(",\"iBW\":\"");
+		str_code_to_html(",\"iLimited\":");
+		bool_to_json(count != RTL836X_RATE_OFF);
+		str_code_to_html(",\"iBW\":\"0x");
 		byte_to_html(count >> 16); byte_to_html(count >> 8); byte_to_html(count);
-		string_to_html("\",\"iFC\":");
-		bool_to_html(reg_bit_test(RTL836X_REG_PORT0_MISC_CFG + ((uint16_t)i << 5), 11));
+		str_code_to_html(reg_bit_test(RTL836X_REG_PORT0_MISC_CFG + ((uint16_t)i << 5), 11)
+				 ? "\",\"iAction\":\"fc\"" : "\",\"iAction\":\"drop\"");
 		count = rtl836x_bw_get(i, 0);
-		string_to_html(",\"eLimited\":");
-		bool_to_html(count != RTL836X_RATE_OFF);
-		string_to_html(",\"eBW\":\"");
+		str_code_to_html(",\"eLimited\":");
+		bool_to_json(count != RTL836X_RATE_OFF);
+		str_code_to_html(",\"eBW\":\"0x");
 		byte_to_html(count >> 16); byte_to_html(count >> 8); byte_to_html(count);
-		string_to_html("\"}");
+		str_code_to_html("\"}");
 		if (i < MACHINE_MAX_PORT) char_to_html(',');
 	}
 	char_to_html(']');
@@ -982,20 +956,21 @@ void send_storm(void)
 {
 	__xdata uint8_t i, t;
 	__xdata uint32_t rate;
-	slen = strtox(outbuf, HTTP_RESPONCE_JSON);
+	slen = strtox(outbuf, HTTP_RESPONSE_JSON);
 	char_to_html('[');
 	for (i = MACHINE_MIN_PORT; i <= MACHINE_MAX_PORT; i++) {
-		string_to_html("{\"portNum\":");
+		str_code_to_html("{\"port\":");
 		itoa_html(machine.log_to_phys_port[i]);
-		string_to_html(",\"en\":\"");
-		for (t = 0; t < STORM_TYPES; t++)
-			bool_to_html(reg_bit_test(RTL836X_REG_STORM_CTRL0 + t, i));
-		string_to_html("\",\"pps\":\"0000\",\"rate\":\"");
+		char_to_html(',');
 		for (t = 0; t < STORM_TYPES; t++) {
+			str_code_to_html(storm_json_names[t]);
+			bool_to_json(reg_bit_test(RTL836X_REG_STORM_CTRL0 + t, i));
+			str_code_to_html(",\"unit\":\"kbit/s\",\"rate\":\"0x");	/* this family has no packet-rate meters */
 			rate = rtl836x_storm_get(i, t);
 			byte_to_html(rate >> 16); byte_to_html(rate >> 8); byte_to_html(rate);
+			str_code_to_html("\"}");
 		}
-		string_to_html("\"}");
+		char_to_html('}');
 		if (i < MACHINE_MAX_PORT) char_to_html(',');
 	}
 	char_to_html(']');
@@ -1005,56 +980,28 @@ void send_storm(void)
 /* Build-time defaults shared with boot initialization. */
 void send_defaults(void)
 {
-	slen = strtox(outbuf, HTTP_RESPONCE_JSON);
-	string_to_html("{\"lldp\":");
-	bool_to_html(MACHINE_DEFAULT_LLDP);
-	string_to_html(",\"ports\":[");
+	slen = strtox(outbuf, HTTP_RESPONSE_JSON);
+	str_code_to_html("{\"lldp\":");
+	bool_to_json(MACHINE_DEFAULT_LLDP);
+	str_code_to_html(",\"ports\":[");
 	for (__xdata uint8_t i = MACHINE_MIN_PORT; i <= MACHINE_MAX_PORT; i++) {
-		string_to_html("{\"portNum\":");
+		str_code_to_html("{\"port\":");
 		itoa_html(machine.log_to_phys_port[i]);
-		string_to_html(",\"lldp\":");
-		bool_to_html((MACHINE_DEFAULT_LLDP_PORTS >> i) & 1);
+		str_code_to_html(",\"lldp\":");
+		bool_to_json((MACHINE_DEFAULT_LLDP_PORTS >> i) & 1);
 		if (!machine.is_sfp[i]) {
-			string_to_html(",\"en\":1");
+			str_code_to_html(",\"en\":true");
 			// Mixed-speed boards use different EEE speed defaults at boot and in the CLI.
 			if (!machine.n_10g) {
-				string_to_html(",\"eee\":");
-				bool_to_html(MACHINE_DEFAULT_EEE);
+				str_code_to_html(",\"eee\":");
+				bool_to_json(MACHINE_DEFAULT_EEE);
 			}
 		}
 		char_to_html('}');
 		if (i < MACHINE_MAX_PORT)
 			char_to_html(',');
 	}
-	string_to_html("]}");
-}
-
-void send_mtu(void)
-{
-	dbg_string("send_mtu called\n");
-	slen = strtox(outbuf, HTTP_RESPONCE_JSON);
-	char_to_html('[');
-	for (__xdata uint8_t i = MACHINE_MIN_PORT; i <= MACHINE_MAX_PORT; i++) {
-		string_to_html("{\"portNum\":");
-		itoa_html(machine.log_to_phys_port[i]);
-		string_to_html(",\"mtu\":\"0x");
-		__xdata uint16_t mtu = port_mtu_get(i);
-		byte_to_html(mtu >> 8);
-		byte_to_html(mtu & 0xff);
-		char_to_html('"');
-		char_to_html('}');
-		if (i < MACHINE_MAX_PORT)
-			char_to_html(',');
-	}
-	char_to_html(']');
-}
-
-static void pmask_to_html(__xdata uint16_t m)
-{
-	for (__xdata uint8_t i = 0; i < 16; i++) {
-		bool_to_html(m >> 15);	/* no !!: that takes one of the few bit variables */
-		m <<= 1;
-	}
+	str_code_to_html("]}");
 }
 
 void send_mirror(void)
@@ -1062,37 +1009,27 @@ void send_mirror(void)
 	__xdata struct port_mirror m;
 
 	dbg_string("send_mirror called\n");
-	slen = strtox(outbuf, HTTP_RESPONCE_JSON);
+	slen = strtox(outbuf, HTTP_RESPONSE_JSON);
 	port_mirror_get(&m);
-	if (m.enabled) {
-		string_to_html("{\"enabled\":1,\"mPort\":");
-	} else {
-		string_to_html("{\"enabled\":0,\"mPort\":");
-	}
+	str_code_to_html(m.enabled ? "{\"enabled\":true,\"mirrorPort\":" : "{\"enabled\":false,\"mirrorPort\":");
 	itoa_html(machine.log_to_phys_port[m.port]);
-	string_to_html(",\"mirror_rx\":\"");
-	pmask_to_html(m.rx_pmask);
-	string_to_html("\",\"mirror_tx\":\"");
-	pmask_to_html(m.tx_pmask);
-	char_to_html('\"');
+	str_code_to_html(",\"mirror_rx\":");
+	pmask_to_json(m.rx_pmask);
+	str_code_to_html(",\"mirror_tx\":");
+	pmask_to_json(m.tx_pmask);
 	char_to_html('}');
 }
 
 void send_isolation(void)
 {
-	__xdata uint16_t allow;
-
 	dbg_string("send_isolation called\n");
-	slen = strtox(outbuf, HTTP_RESPONCE_JSON);
+	slen = strtox(outbuf, HTTP_RESPONSE_JSON);
 	char_to_html('[');
 	for (uint8_t i = MACHINE_MIN_PORT; i <= MACHINE_MAX_PORT; i++) {
-		string_to_html("{\"portNum\":");
+		str_code_to_html("{\"port\":");
 		itoa_html(machine.log_to_phys_port[i]);
-		string_to_html(",\"allow\":\"");
-		allow = port_isolation_get(i);
-		byte_to_html(allow >> 8);
-		byte_to_html(allow & 0xff);
-		char_to_html('"');
+		str_code_to_html(",\"allow\":");
+		pmask_to_json(port_isolation_get(i));
 		char_to_html('}');
 		if (i < MACHINE_MAX_PORT)
 			char_to_html(',');
@@ -1101,10 +1038,10 @@ void send_isolation(void)
 }
 
 
-void send_status(void)
+void send_ports(void)
 {
-	slen = strtox(outbuf, HTTP_RESPONCE_JSON);
-	dbg_string("sending status\n");
+	slen = strtox(outbuf, HTTP_RESPONSE_JSON);
+	dbg_string("sending ports\n");
 #if SOC_FAMILY == RTL837X
 	reg_read_m(RTL8373_PHY_EEE_ABLTY);
 	__xdata uint16_t eee_ablty = ((uint16_t)sfr_data[2] << 8) | sfr_data[3];
@@ -1115,171 +1052,200 @@ void send_status(void)
 #endif
 
 	for (uint8_t i = MACHINE_MIN_PORT; i <= MACHINE_MAX_PORT; i++) {
-		string_to_html("{\"portNum\":");
+		str_code_to_html("{\"port\":");
 		itoa_html(machine.log_to_phys_port[i]);
-		string_to_html(",\"name\":\"");
+		str_code_to_html(",\"name\":\"");
 		for (uint8_t j = 0; j < PORT_NAME_SIZE && port_names[i][j]; j++) {
 			json_char_to_html(port_names[i][j]);
 		}
-		string_to_html("\"");
+		char_to_html('"');
 
 		if (machine.is_sfp[i]) {
 			uint8_t sfp = machine.is_sfp[i] - 1;
-			string_to_html(",\"isSFP\":1,\"enabled\":");
+			str_code_to_html(",\"isSFP\":true,\"enabled\":");
 			if (!(sfp_pins_last & (0x1 << (sfp << 2)))) {
-				bool_to_html(1);
-				string_to_html(",\"sfp_options\":\"0x");
+				bool_to_json(1);
+				str_code_to_html(",\"sfp_options\":\"0x");
 				byte_to_html(sfp_options[sfp]);
 				if (sfp_options[sfp] & 0x40) {
-					string_to_html("\",\"sfp_temp\":\"0x");
+					str_code_to_html("\",\"sfp_temp\":\"0x");
 					sfp_send_data(sfp, 224, 2);
-					string_to_html("\",\"sfp_vcc\":\"0x");
+					str_code_to_html("\",\"sfp_vcc\":\"0x");
 					sfp_send_data(sfp, 226, 2);
-					string_to_html("\",\"sfp_txbias\":\"0x");
+					str_code_to_html("\",\"sfp_txbias\":\"0x");
 					sfp_send_data(sfp, 228, 2);
-					string_to_html("\",\"sfp_txpower\":\"0x");
+					str_code_to_html("\",\"sfp_txpower\":\"0x");
 					sfp_send_data(sfp, 230, 2);
-					string_to_html("\",\"sfp_rxpower\":\"0x");
+					str_code_to_html("\",\"sfp_rxpower\":\"0x");
 					sfp_send_data(sfp, 232, 2);
 					if (sfp_options[sfp] & 0x10) {
-						string_to_html("\",\"sfp_temp_cal\":\"0x");
+						str_code_to_html("\",\"sfp_temp_cal\":\"0x");
 						sfp_send_data(sfp, 212, 4);
-						string_to_html("\",\"sfp_vcc_cal\":\"0x");
+						str_code_to_html("\",\"sfp_vcc_cal\":\"0x");
 						sfp_send_data(sfp, 216, 4);
-						string_to_html("\",\"sfp_txbias_cal\":\"0x");
+						str_code_to_html("\",\"sfp_txbias_cal\":\"0x");
 						sfp_send_data(sfp, 204, 4);
-						string_to_html("\",\"sfp_txpower_cal\":\"0x");
+						str_code_to_html("\",\"sfp_txpower_cal\":\"0x");
 						sfp_send_data(sfp, 208, 4);
-						string_to_html("\",\"sfp_rxpower_cal\":\"0x");
+						str_code_to_html("\",\"sfp_rxpower_cal\":\"0x");
 						sfp_send_data(sfp, 184, 16);
 						sfp_send_data(sfp, 200, 4);
 					}
-					string_to_html("\",\"sfp_state\":\"0x");
+					str_code_to_html("\",\"sfp_state\":\"0x");
 					sfp_send_data(sfp, 238, 1);
 				}
-				string_to_html("\",\"sfp_vendor\":\"");
+				str_code_to_html("\",\"sfp_vendor\":\"");
 				str_x_to_html(sfp_module_vendor[sfp]);
-				string_to_html("\",\"sfp_model\":\"");
+				str_code_to_html("\",\"sfp_model\":\"");
 				str_x_to_html(sfp_module_model[sfp]);
-				string_to_html("\",\"sfp_serial\":\"");
+				str_code_to_html("\",\"sfp_serial\":\"");
 				str_x_to_html(sfp_module_serial[sfp]);
-				string_to_html("\",\"sfp_los\":");
+				str_code_to_html("\",\"sfp_los\":");
 				if (machine.sfp_port[sfp].pin_los == GPIO_NA) {
-					string_to_html("null");
+					str_code_to_html("null");
 				} else {
-					bool_to_html(sfp_pins_last & (0x2 << (sfp << 2)));
+					bool_to_json(sfp_pins_last & (0x2 << (sfp << 2)));
 				}
 			} else {
-				bool_to_html(0);
+				bool_to_json(0);
 			}
 		} else {
-			string_to_html(",\"isSFP\":0,\"enabled\":");
+			str_code_to_html(",\"isSFP\":false,\"enabled\":");
+			uint16_t w;
 #if SOC_FAMILY == RTL836X
 			phy_read(i, 0, 0);			// MII BMCR
-			bool_to_html(!(SFR_DATA_8 & 0x08));	// not powered down
-			string_to_html(",\"adv\":\"0");	// no 2500Base
-			uint16_t w;
+			bool_to_json(!(SFR_DATA_8 & 0x08));	// not powered down
+			str_code_to_html(",\"adv\":[");		// no 2500Base
 #else
 			phy_read(i, PHY_MMD31, 0xa610);
-			bool_to_html(SFR_DATA_8 == 0x20);
-			string_to_html(",\"adv\":\"");
+			bool_to_json(SFR_DATA_8 == 0x20);
+			str_code_to_html(",\"adv\":[");
 			phy_read(i, PHY_MMD_AN, PHY_ANEG_MGBASE_CTRL);
-			uint16_t w = SFR_DATA_U16;
-			bool_to_html(!!(w & 0x80));		// 2500BaseN-Full
+			w = SFR_DATA_U16;
+			if (w & 0x80)				// 2500BaseN-Full
+				json_add_array_string_item("\"2.5G\"");
 #endif
 			phy_read(i, PHY_MMD31, PHY_MMD31_GBCR);
 			w = SFR_DATA_U16;
-			bool_to_html(!!(w & 0x0200));		// 1000Base-Full
+			if (w & 0x0200)				// 1000Base-Full
+				json_add_array_string_item("\"1G\"");
 #if SOC_FAMILY == RTL836X
 			phy_read(i, 0, 4);			// MII ANAR
 #else
 			phy_read(i, PHY_MMD_AN, PHY_ANEG_ADV);
 #endif
 			w = SFR_DATA_U16;
-			bool_to_html(!!(w & 0x0100));		// 100Base-Full
-			bool_to_html(!!(w & 0x80));		// 100Base-Half
-			bool_to_html(!!(w & 0x40));		// 10Base-Full
-			bool_to_html(!!(w & 0x20));		// 10Base-Half
-			char_to_html('"');
+			if (w & 0x0100)
+				json_add_array_string_item("\"100M-FD\"");
+			if (w & 0x80)
+				json_add_array_string_item("\"100M-HD\"");
+			if (w & 0x40)
+				json_add_array_string_item("\"10M-FD\"");
+			if (w & 0x20)
+				json_add_array_string_item("\"10M-HD\"");
+			char_to_html(']');
 		}
 
-		string_to_html(",\"link\":");
+		str_code_to_html(",\"mtu\":\"0x");
+		__xdata uint16_t mtu = port_mtu_get(i);
+		byte_to_html(mtu >> 8);
+		byte_to_html(mtu & 0xff);
+		// Pause and EEE flags: the FC_* and EEE_* bits of rtl837x_pause.h and page_impl.h
+		str_code_to_html("\",\"fc\":");
+		itoa_html(port_pause_state(i));
+#if SOC_FAMILY == RTL836X
+		str_code_to_html(",\"eee\":");
+		itoa16_html(port_eee_state(i));
+#else
+		if (!machine.is_sfp[i]) {
+			str_code_to_html(",\"eee\":");
+			itoa16_html(port_eee_state(i, eee_ablty));
+		}
+#endif
+#ifdef MACHINE_POE_PORTS
+		uint8_t phys_port = machine.log_to_phys_port[i];
+		if (phys_port && phys_port <= MACHINE_POE_PORTS) {
+			str_code_to_html(",\"poe_admin\":");
+			bool_to_json(poe_enabled & (1 << (phys_port - 1)));
+			str_code_to_html(",\"poe_on\":null");	// no delivery telemetry yet
+		}
+#endif
+		char_to_html('}');
+		if (i < MACHINE_MAX_PORT)
+			char_to_html(',');
+	}
+	char_to_html(']');
+}
+
+
+#if SOC_FAMILY == RTL837X
+static __code const char * __code const link_names[7] = { "10M", "100M", "1000M", "500M", "10G", "2.5G", "5G" };
+#else
+static __code const char * __code const link_names[3] = { "10M", "100M", "1000M" };
+#endif
+
+void send_traffic(void)
+{
+	slen = strtox(outbuf, HTTP_RESPONSE_JSON);
+	dbg_string("sending port counters\n");
+	char_to_html('[');
+
+	for (uint8_t i = MACHINE_MIN_PORT; i <= MACHINE_MAX_PORT; i++) {
+		str_code_to_html("{\"port\":");
+		itoa_html(machine.log_to_phys_port[i]);
+		str_code_to_html(",\"link\":\"");
 #if SOC_FAMILY == RTL836X
 		reg_read(RTL836X_REG_PORT0_STATUS + i);
 		uint16_t status = SFR_DATA_U16;
-		char_to_html(status & PORT_STATUS_LINK ? '1' + (status & PORT_STATUS_SPEED_MASK) : '0');
-		string_to_html(",\"fc\":");
-		itoa_html(port_pause_state(i));
-		string_to_html(",\"eee\":");
-		itoa16_html(port_eee_state(i));
+		if ((status & PORT_STATUS_LINK) && (status & PORT_STATUS_SPEED_MASK) < 3)
+			str_code_to_html(link_names[status & PORT_STATUS_SPEED_MASK]);
+		else
+			str_code_to_html("DOWN");
+		char_to_html('"');
 		__xdata uint8_t value[8];
 		for (uint8_t metric = 0; metric < 4; metric++) {
 			switch (metric) {
-			case 0: string_to_html(",\"txG\":"); break;
-			case 1: string_to_html(",\"txB\":"); break;
-			case 2: string_to_html(",\"rxG\":"); break;
-			default: string_to_html(",\"rxB\":"); break;
+			case 0: str_code_to_html(",\"txG\":"); break;
+			case 1: str_code_to_html(",\"txB\":"); break;
+			case 2: str_code_to_html(",\"rxG\":"); break;
+			default: str_code_to_html(",\"rxB\":"); break;
 			}
 			bool available = rtl836x_mib_summary(i, metric, value);
 			mib_to_html(value, available);
 		}
-#ifdef MACHINE_POE_PORTS
-		uint8_t phys_port = machine.log_to_phys_port[i];
-		if (phys_port && phys_port <= MACHINE_POE_PORTS) {
-			string_to_html(",\"poe_admin\":");
-			bool_to_html(poe_enabled & (1 << (phys_port - 1)));
-			string_to_html(",\"poe_on\":null");
-		}
-#endif
-		string_to_html(",\"macs\":null}");
+		str_code_to_html(",\"macs\":null}");
 #else
-		
-		uint8_t b = 0;
-		// Determine link state
+		uint8_t b = 7;	// link down
 		reg_read_m(RTL837X_REG_LINKS_STS);
-		if(!((sfr_data[(i / 8) + 1] >> (i % 8 ) & 1)))
-		{
-			b = 0; //link down
+		if ((sfr_data[(i / 8) + 1] >> (i % 8)) & 1) {
+			if (i < 8)
+				reg_read_m(RTL837X_REG_LINKS);
+			else
+				reg_read_m(RTL837X_REG_LINKS_89);
+			b = sfr_data[3 - ((i & 7) >> 1)];
+			b = (i & 1) ? b >> 4 : b & 0xf;
 		}
-		else
-		{
-				//Determine link speed
-				if (i < 8)
-					reg_read_m(RTL837X_REG_LINKS);
-				else
-					reg_read_m(RTL837X_REG_LINKS_89);
-				
-				b = sfr_data[3 - ((i & 7) >> 1)];
-				b = ((i & 1) ? b >> 4 : b & 0xf) + 1;
-		}
-		char_to_html('0' + b);
-
-		string_to_html(",\"fc\":");
-		itoa_html(port_pause_state(i));
-		if (!machine.is_sfp[i]) {
-			string_to_html(",\"eee\":");
-			itoa16_html(port_eee_state(i, eee_ablty));
-		}
+		str_code_to_html(b < 7 ? link_names[b] : "DOWN");
 
 		STAT_GET(STAT_COUNTER_TX_PKTS, i);
-		string_to_html(",\"txG\":\"0x");
+		str_code_to_html("\",\"txG\":\"0x");
 		counter_to_html();
 
-		string_to_html("\",\"txB\":\"0x");
+		str_code_to_html("\",\"txB\":\"0x");
 		STAT_GET(STAT_COUNTER_ERR_PKTS, i);
 		reg_to_html(RTL837X_STAT_V_LOW);	// 32 bit Tx Packet errors
 
-		string_to_html("\",\"rxG\":\"0x");
+		str_code_to_html("\",\"rxG\":\"0x");
 		STAT_GET(STAT_COUNTER_RX_PKTS, i);
 		counter_to_html();
 
-		string_to_html("\",\"rxB\":\"0x");
+		str_code_to_html("\",\"rxB\":\"0x");
 		STAT_GET(STAT_COUNTER_ERR_PKTS, i);
 		reg_to_html(RTL837X_STAT_V_HIGH);	// 32bit RX packet errors
 
-		string_to_html("\",\"macs\":\"0x");
+		str_code_to_html("\",\"macs\":\"0x");
 		reg_to_html(RTL837X_L2_LRN_PORT_CONSTRT_CNT + (i << 2));
-		string_to_html("\"}");
+		str_code_to_html("\"}");
 #endif
 		if (i < MACHINE_MAX_PORT)
 			char_to_html(',');
@@ -1296,7 +1262,7 @@ void send_config(void)
 	__xdata uint16_t len_left = CONFIG_LEN;
 	__xdata uint8_t flash_buf[256];
 	
-	slen = strtox(outbuf, HTTP_RESPONCE_TXT);
+	slen = strtox(outbuf, HTTP_RESPONSE_TXT);
 	
 	// Scan through config to find the end of valid data (null terminator)
 	do {
@@ -1335,7 +1301,7 @@ found_end:
 void send_cmd_log(void)
 {
 	dbg_string("send_cmd_log called\n");
-	slen = strtox(outbuf, HTTP_RESPONCE_TXT);
+	slen = strtox(outbuf, HTTP_RESPONSE_TXT);
 	__xdata uint16_t p = (cmd_history_ptr + 1) & CMD_HISTORY_MASK;
 	__xdata uint8_t found_begin = 0;
 	dbg_string("History ptr: ");
@@ -1359,10 +1325,10 @@ void send_vlanlist(void)
 	__xdata uint16_t n;
 	uint8_t first = 1;
 
-	slen = strtox(outbuf, HTTP_RESPONCE_JSON);
-	string_to_html("{\"mgmt\":");
+	slen = strtox(outbuf, HTTP_RESPONSE_JSON);
+	str_code_to_html("{\"mgmt\":");
 	itoa16_html(management_vlan);
-	string_to_html(",\"vlan\":[");
+	str_code_to_html(",\"vlan\":[");
 
 	for (i = 1; i < 4095; i++) {
 		vlan_get(i);
@@ -1376,9 +1342,9 @@ void send_vlanlist(void)
 			char_to_html(',');
 		first = 0;
 
-		string_to_html("{\"id\":");
+		str_code_to_html("{\"id\":");
 		itoa16_html(i);
-		string_to_html(",\"name\":\"");
+		str_code_to_html(",\"name\":\"");
 
 		n = vlan_name(i);
 		if (n != 0xffff) {
@@ -1386,7 +1352,7 @@ void send_vlanlist(void)
 				json_char_to_html(vlan_names[n++]);
 		}
 
-		string_to_html("\"}");
+		str_code_to_html("\"}");
 
 	}
 

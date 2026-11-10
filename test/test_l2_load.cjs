@@ -9,7 +9,7 @@ const loader = source.slice(start, source.indexOf('\n}\n', start) + 2);
 
 function fixture(getJSON) {
     const context = vm.createContext({
-        S: { logToPhys: [1, 2, 3, 4, 5, 6, 7, 8] }, l2Gen: 1, l2Rows: [],
+        l2Gen: 1, l2Rows: [],
         l2Walk: { seen: {}, idx: 0, gen: 1, loading: false, done: false }, getJSON
     });
     vm.runInContext(loader, context);

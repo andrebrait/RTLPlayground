@@ -8,8 +8,8 @@
 #pragma codeseg BANK4
 #pragma constseg BANK4
 
-#define ACL_PORTS	((uint16_t)((1 << CPU_PORT) - 1))
-#define ACL_ALL		((uint16_t)((1 << (CPU_PORT + 1)) - 1))
+#define ACL_PORTS	((uint16_t)((1 << CPU_LOGICAL_PORT) - 1))
+#define ACL_ALL		((uint16_t)((1 << (CPU_LOGICAL_PORT + 1)) - 1))
 #define ACL_NONE	0xff
 #define ACL_TBL_Y	0x80
 #define ACL_ACT_CTRL_OFF	0xff

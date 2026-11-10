@@ -44,7 +44,6 @@ IMAGE_MAGIC = b"\x00\x40\x02"
 IMAGE_CRC = 0xB001
 DEFAULT_HOST = "192.168.10.247"
 DEFAULT_WAIT_TIMEOUT = 180
-LINK_SPEEDS = ("down", "10M", "100M", "1000M", "500M", "10G", "2.5G", "5G")
 
 
 class Failure(Exception):
@@ -189,24 +188,32 @@ def describe(info):
             f"hardware {info.get('hw_ver', '?')})")
 
 
-def fetch_status(host, port, timeout, cookie):
-    """Return the port list from /status.json."""
+def fetch_list(host, port, timeout, cookie, path):
+    """Return the port list an API endpoint replies with."""
     status, _, _, body = http_request(
-        host, port, timeout, "GET", "/status.json", cookie=cookie)
+        host, port, timeout, "GET", path, cookie=cookie)
     if status != 200:
-        raise Failure(f"/status.json returned HTTP {status}", 4)
+        raise Failure(f"{path} returned HTTP {status}", 4)
     try:
         ports = json.loads(body.decode("utf-8", "replace"))
     except ValueError:
-        raise Failure("/status.json is not valid JSON", 4)
+        raise Failure(f"{path} is not valid JSON", 4)
     if not isinstance(ports, list):
-        raise Failure("/status.json did not return a port list", 4)
+        raise Failure(f"{path} did not return a port list", 4)
     return ports
+
+
+def fetch_status(host, port, timeout, cookie):
+    """Return /ports.json with the /traffic.json fields of the same port."""
+    traffic = {entry.get("port"): entry
+               for entry in fetch_list(host, port, timeout, cookie, "/traffic.json")}
+    return [{**entry, **traffic.get(entry.get("port"), {})}
+            for entry in fetch_list(host, port, timeout, cookie, "/ports.json")]
 
 
 def print_health(host, port, timeout, password, cookie,
                  label="Post-update health"):
-    """Print the port health from /status.json (best effort).
+    """Print the port health from /ports.json and /traffic.json (best effort).
 
     Returns True when the summary was printed, False when the read failed.
     """
@@ -231,14 +238,11 @@ def print_health(host, port, timeout, password, cookie,
     rows = []
     up = tx_errors = rx_errors = learned = 0
     for entry in ports:
-        link = number(entry, "link")
-        speed = (LINK_SPEEDS[link] if 0 <= link < len(LINK_SPEEDS)
-                 else f"link {link}")
-        if link:
+        speed = str(entry.get("link", "?"))
+        if speed not in ("DOWN", "?"):
             up += 1
         enabled = entry.get("enabled")
-        enabled = ("?" if enabled is None
-                   else ("yes" if number(entry, "enabled") else "no"))
+        enabled = "?" if enabled is None else ("yes" if enabled else "no")
         tx_good = number(entry, "txG", 16)
         tx_bad = number(entry, "txB", 16)
         rx_good = number(entry, "rxG", 16)
@@ -247,11 +251,11 @@ def print_health(host, port, timeout, password, cookie,
         tx_errors += tx_bad
         rx_errors += rx_bad
         learned += macs
-        rows.append((entry.get("portNum", "?"), entry.get("name", ""), speed,
+        rows.append((entry.get("port", "?"), entry.get("name", ""), speed,
                      enabled, tx_good, tx_bad, rx_good, rx_bad, macs))
 
     print()
-    print(f"{label} (/status.json): {len(ports)} ports, {up} up, "
+    print(f"{label} (/ports.json, /traffic.json): {len(ports)} ports, {up} up, "
           f"{learned} MACs learned, TX bad pkts {tx_errors}, "
           f"RX bad pkts {rx_errors}")
     print(f"{'Port':>4} {'Name':<12} {'Link':>6} {'En':>3} "
@@ -439,10 +443,10 @@ def parse_args(argv):
     parser.add_argument("--no-wait", action="store_true",
                         help="do not wait for the switch to reboot")
     parser.add_argument("--health", action="store_true",
-                        help="after the reboot, fetch /status.json and print "
-                             "a port health summary")
+                        help="after the reboot, fetch /ports.json and "
+                             "/traffic.json and print a port health summary")
     parser.add_argument("--check", action="store_true",
-                        help="read-only: print the version and /status.json "
+                        help="read-only: print the version and the port "
                              "health, then exit without uploading; give the "
                              "host as the only positional "
                              f"(default: {DEFAULT_HOST})")
@@ -462,7 +466,7 @@ def resolve_password(args, host):
 
 
 def check_switch(args, target):
-    """Read-only mode: print the running version and /status.json health."""
+    """Read-only mode: print the running version and the port health."""
     host, port = parse_target(target, args.port)
     password = resolve_password(args, host)
     cookie = login(host, port, args.timeout, password)

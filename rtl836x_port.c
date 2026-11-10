@@ -91,7 +91,7 @@ void port_stats_print(void) __banked
  * The NIC is chip port 10. VLAN 1 starts untagged on the CPU port; configured
  * VLANs tag CPU traffic so the RX adapter can retain the ingress VID.
  */
-#define CHIP_PORT(p)	((p) == CPU_PORT ? RTL836X_CPU_PORT : (p))
+#define CHIP_PORT(p)	((p) == CPU_LOGICAL_PORT ? RTL836X_CPU_PORT : (p))
 #define CHIP_MASK(m)	(((m) & 0xff) | (((m) & PMASK_CPU) << 1))
 #define LOG_MASK(m)	(((m) & 0xff) | (((m) >> 1) & PMASK_CPU))
 #define VLAN1_MEMBERS	((PORT_BIT(MACHINE_MAX_PORT + 1) - PORT_BIT(MACHINE_MIN_PORT)) | PMASK_CPU)
@@ -214,7 +214,7 @@ void port_pvid_set(uint8_t port, __xdata uint16_t pvid) __banked
 
 	if (lag != PORT_LAG_NONE)
 		members = port_lag_members_get(lag);
-	for (i = 0; i <= CPU_PORT; i++, members >>= 1) {
+	for (i = 0; i <= CPU_LOGICAL_PORT; i++, members >>= 1) {
 		if (!(members & 1))
 			continue;
 		chip = CHIP_PORT(i);
@@ -283,7 +283,7 @@ void vlan_delete(uint16_t vlan) __banked
 
 bool port_ingress_filter(__xdata uint8_t port, __xdata vlan_ingress_mode_t type) __banked
 {
-	if ((!MACHINE_PORT_VALID(port) && port != CPU_PORT) || type >= VLAN_INVALID) {
+	if ((!MACHINE_PORT_VALID(port) && port != CPU_LOGICAL_PORT) || type >= VLAN_INVALID) {
 		print_string("Invalid port or ingress filter type\n");
 		return false;
 	}
@@ -295,7 +295,7 @@ bool port_ingress_filter(__xdata uint8_t port, __xdata vlan_ingress_mode_t type)
 
 vlan_ingress_mode_t port_ingress_filter_get(__xdata uint8_t port) __banked
 {
-	if (!MACHINE_PORT_VALID(port) && port != CPU_PORT)
+	if (!MACHINE_PORT_VALID(port) && port != CPU_LOGICAL_PORT)
 		return VLAN_INVALID;
 	port = CHIP_PORT(port);
 	reg_read(RTL836X_REG_VLAN_ACCEPT_FRAME_TYPE_CTRL0 + (port >> 3));
@@ -305,7 +305,7 @@ vlan_ingress_mode_t port_ingress_filter_get(__xdata uint8_t port) __banked
 
 bool port_ingress_vlan_filter_set(uint8_t port, __xdata bool enabled) __banked
 {
-	if (!MACHINE_PORT_VALID(port) && port != CPU_PORT)
+	if (!MACHINE_PORT_VALID(port) && port != CPU_LOGICAL_PORT)
 		return false;
 	if (enabled)
 		reg_bit_set(RTL836X_REG_VLAN_INGRESS, CHIP_PORT(port));
@@ -317,7 +317,7 @@ bool port_ingress_vlan_filter_set(uint8_t port, __xdata bool enabled) __banked
 
 bool port_ingress_vlan_filter_get(uint8_t port) __banked
 {
-	if (!MACHINE_PORT_VALID(port) && port != CPU_PORT)
+	if (!MACHINE_PORT_VALID(port) && port != CPU_LOGICAL_PORT)
 		return false;
 	return reg_bit_test(RTL836X_REG_VLAN_INGRESS, CHIP_PORT(port));
 }
@@ -341,7 +341,7 @@ void vlan_setup(void) __banked
 	vlan_write(1, VLAN1_MEMBERS, VLAN1_MEMBERS);
 	for (i = 0; i <= RTL836X_CPU_PORT / 2; i++)
 		REG_SET(RTL836X_REG_VLAN_PVID_CTRL0 + i, 0);
-	for (i = MACHINE_MIN_PORT; i <= CPU_PORT; i++) {
+	for (i = MACHINE_MIN_PORT; i <= CPU_LOGICAL_PORT; i++) {
 		reg_bits(RTL836X_REG_PORT0_MISC_CFG + (CHIP_PORT(i) << 5), PORT_MISC_CFG_VLAN_EGRESS_MODE, 0);
 		port_ingress_vlan_filter_set(i, true);
 	}
@@ -529,7 +529,7 @@ void port_l2_forget_port(uint8_t port) __banked
 	__xdata uint8_t chip;
 	__xdata uint16_t busy_low = 0, busy_ext = 0;
 
-	if (!MACHINE_PORT_VALID(port) && port != CPU_PORT)
+	if (!MACHINE_PORT_VALID(port) && port != CPU_LOGICAL_PORT)
 		return;
 	chip = CHIP_PORT(port);
 	if (!flush_idle(FORCE_FLUSH_BUSY_MASK, FORCE_FLUSH1_BUSY_MASK)) {

@@ -105,8 +105,9 @@ Each group on the LAG page has a Static/LACP mode next to its member ports;
 for an LACP group it shows the elected aggregator and the active members. Below
 the groups a table has one row per LACP port with its group, actor and partner
 state, receive state, LACPDU count and partner system. The page reads
-`/lacp.json` every three seconds while it is open. The member checkboxes of a
-static group come from the hardware registers in `/lag.json`.
+`/lag.json` every three seconds while it is open. The member checkboxes of a
+static group come from the hardware registers, those of an LACP group from its
+configured candidates.
 
 ## A test with a Linux 802.3ad bond
 
@@ -156,8 +157,9 @@ The same state machines run over the two fixed groups of the chip, see
   the LACP state, the static trunk or any register changes (`port_lag_members_valid()`).
 * A group has no trunk members in the chip until its ports have negotiated: the
   machines write the members' mask to the group's nibble of `PORT_TRUNK_GROUP_MASK`
-  only for ports whose actor and partner both are in sync. `/lag.json` reads that
-  register, so it lists negotiated members, `/lacp.json` the candidates.
+  only for ports whose actor and partner both are in sync. For an LACP group
+  `/lag.json` lists the candidates as `members` and the negotiated ports as
+  `active_members`; for a static group `members` is that register.
 * The reserved multicast action of `01:80:C2:00:00:02` is set with `trap_rma_set()`,
   as on the RTL837x. The native NIC inserts the ingress port in the synthetic RTL
   tag and a VID 0 VLAN tag for the shared receive parser. LACPDUs go out with the

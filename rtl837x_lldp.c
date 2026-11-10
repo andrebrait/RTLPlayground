@@ -612,7 +612,7 @@ void lldp_neighbors_to_html(void) __banked __reentrant
     uint8_t i;
     bool first = true;
 
-    string_to_html(",\"neighbors\":[");
+    str_code_to_html(",\"neighbors\":[");
     for (i = 0; i < LLDP_NB_MAX; i++) {
         if (!lldp_nb[i].ttl)
             continue;
@@ -621,53 +621,53 @@ void lldp_neighbors_to_html(void) __banked __reentrant
         if (!first)
             lldp_put(',', true);
         first = false;
-        string_to_html("{\"port\":");
+        str_code_to_html("{\"port\":");
         lldp_put_dec(machine.log_to_phys_port[lldp_nb[i].port], true);
-        string_to_html(",\"chassis\":\"");
+        str_code_to_html(",\"chassis\":\"");
         lldp_put_chassis(&lldp_nb[i], true);
-        string_to_html("\",\"portId\":\"");
+        str_code_to_html("\",\"portId\":\"");
         lldp_put_port_id(i, true);
-        string_to_html("\",\"sysName\":\"");
+        str_code_to_html("\",\"sysName\":\"");
         lldp_put_string(lldp_nb[i].sys_name, true);
-        string_to_html("\",\"sysDesc\":\"");
+        str_code_to_html("\",\"sysDesc\":\"");
         lldp_put_string(lldp_nb[i].sys_desc, true);
-        string_to_html("\",\"portDesc\":\"");
+        str_code_to_html("\",\"portDesc\":\"");
         lldp_put_string(lldp_nb[i].port_desc, true);
-        string_to_html("\",\"mgmtAddr\":\"");
+        str_code_to_html("\",\"mgmtAddr\":\"");
         lldp_put_addr(lldp_nb[i].mgmt_addr, true);
-        string_to_html("\",\"caps\":");
+        str_code_to_html("\",\"caps\":");
         lldp_put_dec(lldp_nb[i].caps, true);
-        string_to_html(",\"pvid\":");
+        str_code_to_html(",\"pvid\":");
         lldp_put_dec(lldp_nb[i].pvid, true);
-        string_to_html(",\"mtu\":");
+        str_code_to_html(",\"mtu\":");
         lldp_put_dec(lldp_nb[i].mtu, true);
-        string_to_html(",\"agg\":");
+        str_code_to_html(",\"agg\":");
         lldp_put_dec((lldp_nb[i].agg & LLDP_AGG_ANNOUNCED) ? ((lldp_nb[i].agg & LLDP_AGG_ACTIVE) ? 2 : 1) : 0, true);
-        string_to_html(",\"mau\":");
+        str_code_to_html(",\"mau\":");
         lldp_put_dec(lldp_nb[i].mau, true);
-        string_to_html(",\"aneg\":");
+        str_code_to_html(",\"aneg\":");
         lldp_put_dec((lldp_nb[i].aneg & LLDP_ANEG_ANNOUNCED) ? ((lldp_nb[i].aneg & LLDP_AUTONEG_ENABLED) ? 2 : 1) : 0, true);
-        string_to_html(",\"warn\":");
+        str_code_to_html(",\"warn\":");
         lldp_put_dec(lldp_warnings(&lldp_nb[i]), true);
-        string_to_html(",\"poe\":");
+        str_code_to_html(",\"poe\":");
         if (lldp_poe_std(i)) {
             lldp_put('"', true);
             lldp_put('a', true);
             lldp_put(lldp_poe_std(i) == 2 ? 't' : 'f', true);
             lldp_put('"', true);
         } else
-            string_to_html("null");
-        string_to_html(",\"poeClass\":");
+            str_code_to_html("null");
+        str_code_to_html(",\"poeClass\":");
         if (lldp_nb[i].poe_class)
             lldp_put_dec(lldp_nb[i].poe_class - 1, true);
         else
-            string_to_html("null");
-        string_to_html(",\"poeReq\":");
+            str_code_to_html("null");
+        str_code_to_html(",\"poeReq\":");
         if (lldp_nb[i].poe_req)
             lldp_put_dec(lldp_nb[i].poe_req, true);
         else
-            string_to_html("null");
-        string_to_html(",\"ttl\":");
+            str_code_to_html("null");
+        str_code_to_html(",\"ttl\":");
         lldp_put_dec(lldp_nb[i].ttl, true);
         lldp_put('}', true);
     }

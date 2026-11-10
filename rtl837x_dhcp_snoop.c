@@ -15,7 +15,7 @@
 #define DS_BOOTP_MIN	240
 #define DS_IP_PROTO_UDP	17
 #define DS_FWD_DROP	ACL_FWD_QOS(ACL_FWD_REDIRECT, 0)
-#define DS_FWD_COPY_CPU	ACL_FWD_QOS(ACL_FWD_COPY, 1 << CPU_PORT)
+#define DS_FWD_COPY_CPU	ACL_FWD_QOS(ACL_FWD_COPY, 1 << CPU_LOGICAL_PORT)
 
 extern __xdata uint8_t uip_buf[];
 extern __code const struct machine machine;

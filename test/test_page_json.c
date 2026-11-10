@@ -87,11 +87,10 @@ static void t_vlan(void)
 	port_pvid_set(2, 10);
 	port_pvid_set(4, 20);
 	send_vlan(10);
-	char want[32];
-	snprintf(want, sizeof want, "\"members\":\"0x%x\"", hw_vlan_word(10));
-	CHECK(has(want), "members is the entry word");
+	/* The test machine maps logical port N to physical port N + 1 */
+	CHECK(has("{\"untagged_members\":[1,5],\"tagged_members\":[3],"), "members as physical ports, split by tagging");
 	CHECK(has("\"name\":\"lab\""), "name comes from the name table");
-	CHECK(has("\"pvid\":\"0x0005\""), "pvid mask has ports 1 and 3, not 5");
+	CHECK(has("\"pvid\":[1,3]}"), "pvid lists ports 1 and 3, not 5");
 	CHECK(balanced(), "valid JSON");
 }
 
@@ -133,13 +132,13 @@ static void t_l2(void)
 	printf("[test] /l2.json walks the table\n");
 	hw_reset(); out_reset();
 	put(0x010, 0x01, 1, 4, false);
-	put(0x020, 0x02, 2, CPU_PORT, true);
+	put(0x020, 0x02, 2, CPU_LOGICAL_PORT, true);
 	put(0x8f0, 0x03, 1, 7, false);
 	send_l2(0);
 	CHECK(count("\"mac\":") == 4, "three entries, and the first one again: that repeat is how the page sees the wrap");
 	CHECK(count("\"idx\":\"0010\"") == 2 && strstr(body(), "\"idx\":\"0010\"}]"), "the repeat closes the list");
-	CHECK(has("{\"vlan\":\"001\",\"mac\":\"00:11:22:33:44:01\",\"type\":\"l\",\"port\":4,\"lag\":0,\"idx\":\"0010\"}"), "learned entry, VLAN, port and index");
-	CHECK(has("\"mac\":\"00:11:22:33:44:02\",\"type\":\"s\",\"port\":9"), "static entry on the CPU port");
+	CHECK(has("{\"vlan\":\"001\",\"mac\":\"00:11:22:33:44:01\",\"type\":\"l\",\"port\":5,\"lag\":0,\"idx\":\"0010\"}"), "learned entry, VLAN, physical port and index");
+	CHECK(has("\"mac\":\"00:11:22:33:44:02\",\"type\":\"s\",\"port\":0"), "static entry on the CPU port, physical port 0");
 	CHECK(has("\"idx\":\"08f0\""), "an index above 0x800 keeps its high bit");
 	CHECK(balanced(), "valid JSON");
 
@@ -220,15 +219,16 @@ static void t_status_macs(void)
 {
 	const char *p1, *end, *mac;
 
-	printf("[test] /status.json reports the MAC addresses learned on each port\n");
+	printf("[test] /traffic.json reports the MAC addresses learned on each port\n");
 	hw_reset(); out_reset();
 	hw_reg_set(RTL837X_L2_LRN_PORT_CONSTRT_CNT + (1 << 2), 0x21);
-	send_status();
-	p1 = strstr(body(), "{\"portNum\":2,");	// logical port 1
+	send_traffic();
+	p1 = strstr(body(), "{\"port\":2,");	// logical port 1
 	end = p1 ? strchr(p1, '}') : NULL;
 	mac = p1 ? strstr(p1, "\"macs\":\"0x21\"") : NULL;
 	CHECK(mac && mac < end, "port 1 shows its learned count");
 	CHECK(has("\"macs\":\"0x0\""), "a port without learned addresses shows 0");
+	CHECK(count("\"link\":\"DOWN\"") == 9, "every port of the idle mock is down, by name");
 	CHECK(slen <= TCP_OUTBUF_SIZE, "fits the buffer");
 	CHECK(balanced(), "valid JSON");
 }
@@ -238,11 +238,11 @@ extern uint16_t phy_mock_mod[5];
 extern uint16_t phy_pause_off;
 extern int phy_mock_writes, phy_mock_resets;
 
-/* The numeric value of key inside the port's own object of /status.json, or -1. */
+/* The numeric value of key inside the port's own object of /ports.json, or -1. */
 static int field_of(int port, const char *key)
 {
 	char pk[16], k[16];
-	snprintf(pk, sizeof pk, "{\"portNum\":%d,", port);
+	snprintf(pk, sizeof pk, "{\"port\":%d,", port);
 	snprintf(k, sizeof k, "\"%s\":", key);
 	const char *p = strstr(body(), pk);
 	const char *end = p ? strchr(p, '}') : NULL;
@@ -252,7 +252,7 @@ static int field_of(int port, const char *key)
 
 static void t_status_fc(void)
 {
-	printf("[test] /status.json reports advertised, offered and negotiated pause per port\n");
+	printf("[test] /ports.json reports advertised, offered and negotiated pause per port\n");
 	hw_reset(); out_reset();
 	memset(phy_mock_an, 0, sizeof phy_mock_an);
 	phy_mock_an[1][0x10] = 0x15e1;	// logical port 1 advertises pause
@@ -262,8 +262,8 @@ static void t_status_fc(void)
 	phy_mock_an[6][0x10] = 0x0800;	// port 6 asymmetric pause only
 	hw_reg_set(RTL837X_MAC_TX_PAUSE_STS, (1 << 2) | (1 << 3) | (1 << 8));	// logical ports 2, 3 and 8: TX
 	hw_reg_set(RTL837X_MAC_RX_PAUSE_STS, (1 << 3) | (1 << 7));		// logical ports 3 and 7: RX
-	send_status();
-	/* The test machine maps logical port N to portNum N + 1 */
+	send_ports();
+	/* The test machine maps logical port N to physical port N + 1 */
 	CHECK(field_of(2, "fc") == (PAUSE_ADV | PAUSE_LP | PAUSE_LP_ASYM), "port 1: our pause, the partner's pause and asymmetric pause");
 	CHECK(field_of(6, "fc") == PAUSE_LP_ASYM, "port 5: no pause from us, asymmetric from the partner");
 	CHECK(field_of(7, "fc") == PAUSE_ADV_ASYM, "port 6: our asymmetric pause");
@@ -272,18 +272,20 @@ static void t_status_fc(void)
 	CHECK(field_of(8, "fc") == PAUSE_NEG_RX, "port 7 only RX");
 	CHECK(field_of(9, "fc") == PAUSE_NEG_TX, "port 8, in the second byte, only TX");
 	CHECK(field_of(1, "fc") == 0 && field_of(5, "fc") == 0, "the others nothing");
+	CHECK(count("\"isSFP\":false,\"enabled\":") == 9 && count(",\"adv\":[") == 9 && count(",\"mtu\":\"0x") == 9,
+	      "every copper port carries its state, its advertised modes as a list and its MTU");
 	CHECK(slen <= TCP_OUTBUF_SIZE, "fits the buffer");
 	CHECK(balanced(), "valid JSON");
 	out_reset();
 	hw_reg_set(RTL837X_MAC_TX_PAUSE_STS, 0);
 	hw_reg_set(RTL837X_MAC_RX_PAUSE_STS, 1 << 8);
-	send_status();
+	send_ports();
 	CHECK(field_of(9, "fc") == PAUSE_NEG_RX, "port 8, in the second byte, only RX");
 }
 
 static void t_status_eee(void)
 {
-	printf("[test] /status.json reports advertised, offered and active EEE per copper port\n");
+	printf("[test] /ports.json reports advertised, offered and active EEE per copper port\n");
 	hw_reset(); out_reset();
 	memset(phy_mock_an, 0, sizeof phy_mock_an);
 	phy_mock_an[2][0x3c] = 0x0006;	// logical port 2 advertises 100M and 1G
@@ -293,7 +295,7 @@ static void t_status_eee(void)
 	phy_mock_an[4][0x3c] = 0x0002;	// port 4 only 100M, partner nothing
 	phy_mock_an[8][0x3c] = 0x0004;	// external PHY on logical port 8 advertises 1G
 	hw_reg_set(RTL8373_PHY_EEE_ABLTY, (1 << 2) | (1 << 8));	// EEE in use on ports 2 and 8
-	send_status();
+	send_ports();
 	CHECK(field_of(3, "eee") == (EEE_ADV_100M | EEE_ADV_1G | EEE_ADV_2G5 | EEE_LP_1G | EEE_LP_2G5 | EEE_ACTIVE),
 	      "port 2: all three speeds, partner 1G and 2.5G, active");
 	CHECK(field_of(5, "eee") == EEE_ADV_100M, "port 4: only 100M, idle");
@@ -307,7 +309,7 @@ static void t_status_eee(void)
 	CHECK(strstr(out_buf, " ACTIVE ") != NULL, "CLI reports EEE active on port 8");
 	hw_reg_set(RTL8373_PHY_EEE_ABLTY, 1 << 2);
 	out_reset();
-	send_status();
+	send_ports();
 	CHECK(field_of(9, "eee") == EEE_ADV_1G, "port 8: port 2's active bit does not make it active");
 	out_reset();
 	port_eee_status(8);
@@ -319,18 +321,18 @@ static void t_defaults(void)
 	printf("[test] /defaults.json reports the machine_defaults.h values\n");
 	out_reset();
 	send_defaults();
-	CHECK(has("{\"lldp\":0,\"ports\":[{\"portNum\":") && has(",\"lldp\":1,\"en\":1"),
+	CHECK(has("{\"lldp\":false,\"ports\":[{\"port\":") && has(",\"lldp\":true,\"en\":true"),
 	      "LLDP off, every port permitted, copper ports up");
 	if (machine.n_10g)
 		CHECK(!has("\"eee\":"), "mixed-speed EEE defaults stay unknown: CLI and boot use different advertisements");
 	else
-		CHECK(has("\"eee\":1"), "EEE-on default may be pruned when CLI and boot advertise the same speeds");
+		CHECK(has("\"eee\":true"), "EEE-on default may be pruned when CLI and boot advertise the same speeds");
 	CHECK(slen <= TCP_OUTBUF_SIZE && balanced(), "valid JSON that fits the buffer");
 }
 
 static void t_status_eee_multigig(void)
 {
-	printf("[test] /status.json preserves independent 5G and 10G EEE abilities\n");
+	printf("[test] /ports.json preserves independent 5G and 10G EEE abilities\n");
 	hw_reset(); out_reset();
 	memset(phy_mock_an, 0, sizeof phy_mock_an);
 	phy_mock_an[3][0x3c] = 0x0008;	// port 3 advertises only 10G
@@ -340,7 +342,7 @@ static void t_status_eee_multigig(void)
 	phy_mock_an[1][0x3c] = phy_mock_an[1][0x3d] = 0x000e;
 	phy_mock_an[1][0x3e] = phy_mock_an[1][0x3f] = 0x0003;	// all five speeds on both sides
 	hw_reg_set(RTL8373_PHY_EEE_ABLTY, (1 << 1) | (1 << 3) | (1 << 8));
-	send_status();
+	send_ports();
 	CHECK(field_of(4, "eee") == 1296, "port 3: 10G advertised, partner 5G, active");
 	CHECK(field_of(9, "eee") == 1544, "port 8: 5G advertised, partner 10G, active");
 	CHECK(field_of(2, "eee") == 2047, "all five speeds and active fit without truncation");
@@ -350,12 +352,12 @@ static void t_status_eee_multigig(void)
 
 static void t_info_mapping(void)
 {
-	printf("[test] /information.json lists the chip port of every front-panel port\n");
+	printf("[test] /information.json carries the uptime and no chip port mapping\n");
 	hw_reset(); out_reset();
 	uptime_secs = 0x00012345;
 	send_basic_info();
 	CHECK(has("\"uptime\":\"0x00012345\""), "uptime in seconds as eight hex digits");
-	CHECK(has("\"logPort\":[0,1,2,3,4,5,6,7,8]}"), "front-panel order, closing the object");
+	CHECK(!has("\"logPort\""), "every API port number is physical: the chip port mapping is gone");
 	CHECK(balanced(), "valid JSON");
 }
 
@@ -409,12 +411,12 @@ static void t_eee_set(void)
 
 static void t_status_counters(void)
 {
-	printf("[test] /status.json prints 64-bit packet counters in full\n");
+	printf("[test] /traffic.json prints 64-bit packet counters in full\n");
 	hw_reset(); out_reset();
 	hw_counter_set(0, STAT_COUNTER_TX_PKTS, 0x100000005ULL);
 	hw_counter_set(0, STAT_COUNTER_RX_PKTS, 0x00000000000000ffULL);
 	hw_counter_set(1, STAT_COUNTER_TX_PKTS, 0x00000001ffffffffULL);
-	send_status();
+	send_traffic();
 	CHECK(has("\"txG\":\"0x100000005\""), "a counter past 2^32 keeps the zeros of its low word");
 	CHECK(has("\"rxG\":\"0xff\""), "a small counter stays short");
 	CHECK(has("\"txG\":\"0x1ffffffff\""), "a low word of all ones");

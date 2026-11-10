@@ -485,7 +485,7 @@ static uint8_t stp_state_get(uint8_t port) __reentrant
 #else
 /* MSTI 0, rtl8367c_setAsicSpanningTreeStatus: two bits per chip port, 0 disabled, 1 blocking,
  * 2 learning, 3 forwarding. Chip ports 0-7, which are the logical ports 0-7, are in CTRL0;
- * CTRL1 holds chip ports 8-10, and the NIC, the logical CPU_PORT, is chip port 10. The ports of
+ * CTRL1 holds chip ports 8-10, and the NIC, the logical CPU_LOGICAL_PORT, is chip port 10. The ports of
  * an entity are changed in one write, and what is not theirs keeps its value. */
 #define STP_STATES_REG	RTL836X_REG_VLAN_MSTI0_CTRL0
 #define STP_MSTI_NIC	0x0030
@@ -516,7 +516,7 @@ static uint8_t stp_state_get(uint8_t port) __reentrant
 	if (port >= STP_ENTITIES || stp_first(stp_members(port)) == 0xff)
 		return 0;
 	/* stp_first() left the entity's first port in stp_ss_i */
-	if (stp_ss_i == CPU_PORT) {
+	if (stp_ss_i == CPU_LOGICAL_PORT) {
 		reg_read(RTL836X_REG_VLAN_MSTI0_CTRL1);
 		return (SFR_DATA_U16 >> 4) & 0b11;
 	}
@@ -1537,7 +1537,7 @@ void stp_setup(void) __banked
 	/* The NIC stays forwarding. The front ports are not cleared first: stp_ent_reset() sets
 	 * each one once, a port that is off or admin edge straight to forwarding, so only a port
 	 * that takes part in the tree is ever blocked. */
-	stp_state_set(CPU_PORT, 0b11);
+	stp_state_set(CPU_LOGICAL_PORT, 0b11);
 #endif
 	stp_lag_map();
 	stp_links_read();
@@ -1580,7 +1580,7 @@ void stp_off(void) __banked
 	/* CTRL0 is chip ports 0-7, all the front ports: forwarding again, and the NIC with them.
 	 * The RMA action is matched on the destination address, so no L2 entry is needed. */
 	REG_SET(RTL836X_REG_VLAN_MSTI0_CTRL0, 0xffff);
-	stp_state_set(CPU_PORT, 0b11);
+	stp_state_set(CPU_LOGICAL_PORT, 0b11);
 	trap_rma_set(TRAP_RMA_STP, stp_bpdu_filter ? TRAP_ACT_DROP : TRAP_ACT_FORWARD);
 #endif
 }

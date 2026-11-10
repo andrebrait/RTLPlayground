@@ -2340,8 +2340,6 @@ function i18nApply() {
 var S = {
     ports: [],
     n: 0,
-    physToLog: [],
-    logToPhys: [],
     sfpSlot: [],
     info: {},
     detail: null,
@@ -2352,8 +2350,20 @@ var S = {
     rates: [],
     mtu: [],
 };
-var LINKS = ["Down", "10M", "100M", "1000M", "500M", "10G", "2.5G", "5G"];
-var LINKC = [null, "--s10", "--s100", "--s1000", "--s5g", "--s10g", "--s2g5", "--s5g"];
+var LINKS = ["10M", "100M", "1000M", "500M", "10G", "2.5G", "5G"];
+var LINKC = {
+    "10M": "--s10m",
+    "100M": "--s100m",
+    "500M": "--s500m",
+    "1000M": "--s1000m",
+    "2.5G": "--s2g5",
+    "5G": "--s5g",
+    "10G": "--s10g"
+};
+
+function linkUp(p) {
+    return p.link !== "DOWN"
+}
 var $ = function(id) {
     return document.getElementById(id)
 };
@@ -2390,9 +2400,9 @@ function badge(txt, cls) {
 // Link state as on the Ports page: Off (port disabled), Down (no link), or the speed in its port strip colour
 function linkBadge(p) {
     if (!p.enabled) return offBadge();
-    if (!(p.link > 0)) return stBadge(t("st_down"), "st-in");
-    var c = "var(" + (LINKC[p.link] || "--s1000") + ")";
-    return '<span class="badge fit" style="color:' + c + ';background:color-mix(in srgb,' + c + ' 10%,var(--panel2))">' + esc(LINKS[p.link]) + "</span>";
+    if (!linkUp(p)) return stBadge(t("st_down"), "st-in");
+    var c = "var(" + (LINKC[p.link] || "--s1000m") + ")";
+    return '<span class="badge fit" style="color:' + c + ';background:color-mix(in srgb,' + c + ' 10%,var(--panel2))">' + esc(p.link) + "</span>";
 }
 
 function applyTheme() {
@@ -2810,14 +2820,25 @@ Poller.prototype.tick = function() {
 
 function byPort(a) {
     return a.sort(function(x, y) {
-        return x.portNum - y.portNum
+        return x.port - y.port
     })
 }
 
 function pollStatus() {
-    return getJSON("/status.json").then(function(s) {
-        byPort(s);
+    return Promise.all([getJSON("/ports.json"), getJSON("/traffic.json")]).then(function(r) {
+        var traffic = {};
+        r[1].forEach(function(p) {
+            traffic[p.port] = p
+        });
+        // Joined by port number: a short or reordered reply must not attach counters to another port
+        var s = byPort(r[0]).map(function(p) {
+            return Object.assign({}, p, traffic[p.port])
+        });
         S.ports = s;
+        // Refreshed with every poll, so an MTU changed on the console shows while the Ports page is open
+        s.forEach(function(p) {
+            S.mtu[p.port - 1] = parseInt(p.mtu, 16)
+        });
         var now = Date.now();
         if (!S.n) {
             S.n = s.length;
@@ -2825,7 +2846,7 @@ function pollStatus() {
             s.forEach(function(p) {
                 if (p.isSFP) {
                     slot++;
-                    S.sfpSlot[p.portNum - 1] = slot;
+                    S.sfpSlot[p.port - 1] = slot;
                 }
             });
             buildStrip();
@@ -2834,7 +2855,7 @@ function pollStatus() {
             var dt = (now - S.prevT) / 1000;
             if (dt > 0.2) s.forEach(function(p, i) {
                 var q = S.prev[i];
-                if (q) S.rates[p.portNum - 1] = {
+                if (q) S.rates[p.port - 1] = {
                     tx: counterRate(p.txG, q.txG, dt),
                     rx: counterRate(p.rxG, q.rxG, dt),
                 };
@@ -2849,10 +2870,10 @@ function pollStatus() {
 }
 var statusPoller = new Poller(pollStatus, 2500);
 statusPoller.start();
-// Port count from /status.json, chip port mapping from /information.json: pages that decode port masks need both
+// Port list from /ports.json, firmware family and features from /information.json: the port pages need both
 function needPorts(fn) {
-    if (S.n && S.physToLog.length) return fn();
-    Promise.all([S.n ? 0 : pollStatus(), S.physToLog.length ? 0 : pollInfo()]).then(fn).catch(function() {});
+    if (S.n && S.info.sw_ver) return fn();
+    Promise.all([S.n ? 0 : pollStatus(), S.info.sw_ver ? 0 : pollInfo()]).then(fn).catch(function() {});
 }
 
 function fmtPps(v) {
@@ -2872,7 +2893,7 @@ function counterRate(v, previous, dt) {
 }
 
 function portLabel(p) {
-    return p.name ? p.portNum + " " + p.name : String(p.portNum)
+    return p.name ? p.port + " " + p.name : String(p.port)
 }
 
 function portTip(i) {
@@ -2938,15 +2959,15 @@ function buildStrip() {
 
 function updateStrip() {
     S.ports.forEach(function(p) {
-        var i = p.portNum - 1,
+        var i = p.port - 1,
             el = $("pp" + i),
             lb = $("ppl" + i);
         if (!el) return;
         el.classList.toggle("dis", !p.enabled);
-        var up = p.enabled && p.link > 0;
+        var up = p.enabled && linkUp(p);
         el.classList.toggle("up", !!up);
-        if (up) el.style.setProperty("--pc", "var(" + (LINKC[p.link] || "--s1000") + ")");
-        lb.textContent = !p.enabled ? t("c_off") : (p.link > 0 ? LINKS[p.link] : t("c_down"));
+        if (up) el.style.setProperty("--pc", "var(" + (LINKC[p.link] || "--s1000m") + ")");
+        lb.textContent = !p.enabled ? t("c_off") : (linkUp(p) ? p.link : t("c_down"));
         var poe = $("ppoeLabel" + i);
         if (poe) {
             poe.hidden = p.poe_admin == null;
@@ -2994,13 +3015,29 @@ function dBm(mw) {
     return 10 * Math.log10(Math.max(mw, 1e-4))
 }
 
+// The advertised modes of /ports.json as a mask: bit 0 is 10M half duplex, bit 5 is 2.5G
+var ADVBIT = {
+    "10M-HD": 1,
+    "10M-FD": 2,
+    "100M-HD": 4,
+    "100M-FD": 8,
+    "1G": 16,
+    "2.5G": 32
+};
+
+function advBits(p) {
+    return (p.adv || []).reduce(function(m, a) {
+        return m | ADVBIT[a]
+    }, 0)
+}
+
 function portRows(p) {
     var rows = [
-        [t("c_port"), String(p.portNum)],
+        [t("c_port"), String(p.port)],
         [t("c_type"), p.isSFP ? "SFP" : "RJ45"]
     ];
     if (p.name) rows.push([t("c_name"), p.name]);
-    rows.push([t("p_state"), !p.enabled ? t("p_disabled") : (p.link > 0 ? t("p_up") + " " + LINKS[p.link] : t("c_down"))]);
+    rows.push([t("p_state"), !p.enabled ? t("p_disabled") : (linkUp(p) ? t("p_up") + " " + p.link : t("c_down"))]);
     rows.push([t("st_txg"), counterText(p.txG) + " " + t("p_pkts")]);
     rows.push([t("st_txb"), counterText(p.txB) + " " + t("p_pkts")]);
     rows.push([t("st_rxg"), counterText(p.rxG) + " " + t("p_pkts")]);
@@ -3010,7 +3047,7 @@ function portRows(p) {
         rows.push([t("poe_delivery"), t("poe_unknown")]);
     }
     (S.lldpNb || []).forEach(function(n) {
-        if (n.port === p.portNum && n.poe) rows.push([t("poe_pd"), lldpPoe(n)]);
+        if (n.port === p.port && n.poe) rows.push([t("poe_pd"), lldpPoe(n)]);
     });
     if (p.isSFP) {
         if (p.sfp_vendor) rows.push([t("p_module"), [p.sfp_vendor, p.sfp_model, p.sfp_serial].filter(Boolean).join(" / ")]);
@@ -3034,7 +3071,7 @@ function portRows(p) {
             rows.push([t("p_rxlos"), v]);
         }
     } else if (p.adv) {
-        var bits = parseInt(p.adv, 2),
+        var bits = advBits(p),
             names = ["10M " + t("c_half"), "10M " + t("c_full"), "100M " + t("c_half"), "100M " + t("c_full"), "1G", "2.5G"];
         var on = names.filter(function(_, b) {
             return bits & (1 << b)
@@ -3128,10 +3165,6 @@ function pollInfo() {
         var familyChanged = S.info.mib_family !== j.mib_family;
         S.info = j;
         if (familyChanged) i18nApply();
-        (j.logPort || []).forEach(function(l, i) {
-            S.physToLog[i] = l;
-            S.logToPhys[l] = i + 1
-        });
         renderInfo();
         renderSnmp(j.snmp);
         renderPrometheus(j.prometheus)
@@ -3148,9 +3181,9 @@ function dashStatus() {
         }
     }
     S.ports.forEach(function(p) {
-        var r = tb.rows[p.portNum - 1];
+        var r = tb.rows[p.port - 1];
         if (!r) return;
-        var rt = S.rates[p.portNum - 1];
+        var rt = S.rates[p.port - 1];
         r.cells[0].textContent = portLabel(p);
         r.cells[1].innerHTML = linkBadge(p);
         r.cells[2].textContent = rt ? fmtPps(rt.tx) : "-";
@@ -3204,12 +3237,11 @@ function speedLabel(s) {
 var PT = {
     rows: [],
     orig: [],
-    pending: 0,
-    polls: 0
+    pending: 0
 };
-// "fc" bits of /status.json, as PAUSE_* in rtl837x_pause.h
+// "fc" bits of /ports.json, as PAUSE_* in rtl837x_pause.h
 var FC_ADV = 1;
-// "eee" bits of /status.json, as EEE_* in httpd/page_impl.h
+// "eee" bits of /ports.json, as EEE_* in httpd/page_impl.h
 var EEE_ADV = 31,
     EEE_ACTIVE = 1024,
     EEE_SPEEDS = ["100M", "1G", "2.5G", "5G", "10G"];
@@ -3254,7 +3286,7 @@ function eeeState(p) {
 // Status badges of a column all get the width of the longest label that column can show
 function fitBadges() {
     var sets = {
-        pfl: LINKS.slice(1).concat([t("c_offc"), t("st_down")]),
+        pfl: LINKS.concat([t("c_offc"), t("st_down")]),
         pff: ["TX", "RX", "TX/RX", t("st_inactive"), t("c_offc"), t("e_na")],
         pfe: [t("e_active"), t("st_inactive"), t("c_offc"), t("e_na")]
     };
@@ -3285,15 +3317,10 @@ function linkInfo(p) {
         text: t("pt_sfp_adv")
     });
     // One row per speed, duplex merged like the port strip: adv bits 0-1 10M, 2-3 100M, 4 1G, 5 2.5G
-    var a = parseInt(p.adv, 2),
+    var a = advBits(p),
         adv = [a & 3, a & 12, a & 16, a & 32],
-        cur = {
-            1: 0,
-            2: 1,
-            3: 2,
-            6: 3
-        } [p.link];
-    var c = "var(" + (LINKC[p.link] || "--s1000") + ")";
+        cur = ["10M", "100M", "1000M", "2.5G"].indexOf(p.link);
+    var c = "var(" + (LINKC[p.link] || "--s1000m") + ")";
     var tb = h("table", {
             class: "t"
         }),
@@ -3340,7 +3367,7 @@ function pairInfo(p, adv, lp) {
 }
 
 function pTitle(p, what) {
-    return t("c_port") + " " + p.portNum + ": " + what
+    return t("c_port") + " " + p.port + ": " + what
 }
 // Switch, live status and the info button of one feature; SFP ports get n/a in the switch's place
 function featCell(td, cls, ctl, info) {
@@ -3370,11 +3397,11 @@ function cellL(tr, key) {
 }
 // The settings the switch reports for a port, in the form of the controls
 function portCfg(p) {
-    var i = p.portNum - 1;
+    var i = p.port - 1;
     return {
         en: !!p.enabled,
         name: p.name || "",
-        spd: p.isSFP ? null : (ADVSEL[parseInt(p.adv, 2)] || (S.info.mib_family === "rtl836x" ? "custom" : "auto")),
+        spd: p.isSFP ? null : (ADVSEL[advBits(p)] || (S.info.mib_family === "rtl836x" ? "custom" : "auto")),
         mtu: S.mtu[i] != null ? String(S.mtu[i]) : "",
         fc: !!(p.fc & FC_ADV),
         eee: !!(p.eee & EEE_ADV),
@@ -3411,7 +3438,7 @@ function buildPorts() {
     PT.rows = [];
     PT.orig = [];
     S.ports.forEach(function(p) {
-        var i = p.portNum - 1,
+        var i = p.port - 1,
             r = {
                 p: p
             };
@@ -3449,7 +3476,7 @@ function buildPorts() {
         var tr = r.row = tb.insertRow();
         var pc = cellL(tr, "c_port");
         pc.className = "pn";
-        pc.textContent = p.portNum + (p.isSFP ? " (SFP)" : "");
+        pc.textContent = p.port + (p.isSFP ? " (SFP)" : "");
         cellL(tr, "c_enabled").appendChild(r.en.parentNode);
         cellL(tr, "c_name").appendChild(r.name);
         var lk = cellL(tr, "c_link");
@@ -3506,14 +3533,6 @@ function buildPorts() {
     portsStatus();
 }
 
-function loadMtu() {
-    return getJSON("/mtu.json").then(function(s) {
-        s.forEach(function(m) {
-            S.mtu[m.portNum - 1] = parseInt(m.mtu, 16)
-        });
-        portsSync();
-    });
-}
 // Controls the user has not touched follow the switch; edited ones keep the draft
 function portsSync() {
     PT.rows.forEach(function(r, i) {
@@ -3551,7 +3570,7 @@ function portsSync() {
 function portsStatus() {
     buildPorts();
     S.ports.forEach(function(p) {
-        var r = PT.rows[p.portNum - 1];
+        var r = PT.rows[p.port - 1];
         if (!r) return;
         var c = r.row.cells;
         c[3].querySelector(".st").innerHTML = linkBadge(p);
@@ -3563,7 +3582,7 @@ function portsStatus() {
 // What Apply sends for one port: its whole state as shown, so the port ends up as displayed
 function portCmds(r, s, o) {
     var p = r.p,
-        n = p.portNum,
+        n = p.port,
         c = [];
     // Off goes first: a PHY that is off ignores the resets fc and eee would cause
     if (!s.en) c.push("port " + n + " off");
@@ -3679,16 +3698,9 @@ window.addEventListener("beforeunload", function(e) {
 });
 tabHooks.ports = {
     enter: function() {
-        needPorts(function() {
-            buildPorts();
-            loadMtu();
-        })
+        needPorts(buildPorts)
     },
-    // The MTU is not in /status.json: re-read it every 4th poll, so changes made elsewhere show
-    status: function() {
-        portsStatus();
-        if (++PT.polls % 4 === 0) loadMtu();
-    },
+    status: portsStatus,
     // and confirmModal when switching to another page
     canLeave: function(go) {
         if (!PT.pending) return true;
@@ -3750,7 +3762,7 @@ function stpKey(pt) {
 }
 
 function stpName(pt) {
-    return pt.lag ? "LAG" + pt.lag + " (" + rangeStr(maskToPorts(parseInt(pt.mbr, 16))) + ")" : String(pt.p)
+    return pt.lag ? "LAG" + pt.lag + " (" + rangeStr(sorted(pt.mbr)) + ")" : String(pt.p)
 }
 
 function stpDhms(x) {
@@ -3876,7 +3888,7 @@ function stpLoad() {
             return (a.lag - b.lag) || (a.p - b.p)
         });
         var sig = s.ports.map(function(pt) {
-            return stpKey(pt) + (pt.mbr || "")
+            return stpKey(pt) + (pt.mbr || [])
         }).join();
         if (sig !== stpSig) {
             stpSig = sig;
@@ -3903,9 +3915,9 @@ function stpLoad() {
         $("stpids").textContent = msg;
         var bc = $("stpbridge");
         if (!bc.dataset.dirty) {
-            $("stpver").value = s.rstp ? "rstp" : "stp";
-            $("stppcs").value = s.pcs ? "short" : "long";
-            $("stpbh").value = s.bh ? "filter" : "flood";
+            $("stpver").value = s.type;
+            $("stppcs").value = s.pcs;
+            $("stpbh").value = s.bh;
             $("stpprio").value = String(s.prio);
             $("stphello").value = s.hello;
             $("stpmaxage").value = s.maxage;
@@ -3922,8 +3934,8 @@ function stpLoad() {
             $("stdc" + p).textContent = s.on ? parseInt(pt.dc, 16) : "-";
             $("stoe" + p).textContent = s.on ? t((pt.f & STP_PF.OPEREDGE) ? "c_yes" : "c_no") : "-";
             $("stop" + p).textContent = s.on ? t(pt.p2 === 2 ? "c_no" : "c_yes") : "-";
-            $("stpv" + p).textContent = s.on && pt.role ? (s.rstp && !pt.lg ? "RSTP" : "STP") : "-";
-            $("stmc" + p).disabled = !(s.on && pt.role && s.rstp);
+            $("stpv" + p).textContent = s.on && pt.role ? (s.type === "rstp" && !pt.lg ? "RSTP" : "STP") : "-";
+            $("stmc" + p).disabled = !(s.on && pt.role && s.type === "rstp");
             var row = $("sten" + p).closest("tr");
             if (row.dataset.dirty) return;
             var v = stpPortVals(pt);
@@ -3979,10 +3991,10 @@ $("stpbapply").addEventListener("click", function() {
         cmds = [];
     var ver = $("stpver").value,
         prio = $("stpprio").value;
-    if (ver !== (s.rstp ? "rstp" : "stp")) cmds.push("stp version " + ver);
+    if (ver !== s.type) cmds.push("stp version " + ver);
     if (prio !== String(s.prio)) cmds.push("stp prio " + prio);
-    if ($("stppcs").value !== (s.pcs ? "short" : "long")) cmds.push("stp pathcost " + $("stppcs").value);
-    if ($("stpbh").value !== (s.bh ? "filter" : "flood")) cmds.push("stp bpdu " + $("stpbh").value);
+    if ($("stppcs").value !== s.pcs) cmds.push("stp pathcost " + $("stppcs").value);
+    if ($("stpbh").value !== s.bh) cmds.push("stp bpdu " + $("stpbh").value);
     [
         ["stphello", "hello"],
         ["stpmaxage", "maxage"],
@@ -4219,9 +4231,9 @@ function statsStatus() {
         })(i);
     }
     S.ports.forEach(function(p) {
-        var r = tb.rows[p.portNum - 1];
+        var r = tb.rows[p.port - 1];
         if (!r) return;
-        r.cells[0].textContent = p.portNum;
+        r.cells[0].textContent = p.port;
         r.cells[1].textContent = p.name || "";
         r.cells[2].innerHTML = linkBadge(p);
         r.cells[3].textContent = counterText(p.txG);
@@ -4238,11 +4250,11 @@ tabHooks.stats = {
     status: statsStatus,
 };
 
-function maskToPorts(mask) {
-    var out = [];
-    for (var p = 1; p <= S.n; p++)
-        if ((mask >> S.physToLog[p - 1]) & 1) out.push(p);
-    return out;
+// The firmware lists ports in chip order; the pages show them in front-panel order
+function sorted(list) {
+    return list.slice().sort(function(a, b) {
+        return a - b
+    })
 }
 
 function rangeStr(list) {
@@ -4264,7 +4276,7 @@ function rangeStr(list) {
 function vlanRefresh() {
     var tb = $("vtable").tBodies[0];
     tb.style = "cursor:pointer;"
-    return getJSON("/vlanlist").then(function(d) {
+    return getJSON("/vlanlist.json").then(function(d) {
         var vl = d.vlan || [];
         $("vmgmtcur").dataset.id = d.mgmt;
         $("vempty").style.display = vl.length ? "none" : "";
@@ -4292,17 +4304,14 @@ function vlanRefresh() {
                 if (!d) {
                     for (var c = 0; c < 4; c++) tr.insertCell().textContent = "?";
                 } else {
-                    var m = parseInt(d.members, 16),
-                        mem = m & 0x3ff,
-                        unt = ((m >> 10) & 0x3ff) & mem,
-                        tag = mem & ~unt;
-                    var pv = parseInt(d.pvid, 16) & 0x3ff;
-                    tr.insertCell().textContent = rangeStr(maskToPorts(mem));
-                    tr.insertCell().textContent = rangeStr(maskToPorts(tag));
-                    tr.insertCell().textContent = rangeStr(maskToPorts(unt));
-                    tr.insertCell().textContent = rangeStr(maskToPorts(pv));
-                    l.dataset.t = maskToPorts(tag);
-                    l.dataset.u = maskToPorts(unt);
+                    var tag = sorted(d.tagged_members),
+                        unt = sorted(d.untagged_members);
+                    tr.insertCell().textContent = rangeStr(sorted(tag.concat(unt)));
+                    tr.insertCell().textContent = rangeStr(tag);
+                    tr.insertCell().textContent = rangeStr(unt);
+                    tr.insertCell().textContent = rangeStr(sorted(d.pvid));
+                    l.dataset.t = tag;
+                    l.dataset.u = unt;
                 }
                 var act = tr.insertCell();
                 act.onclick = function(e) {
@@ -4396,7 +4405,7 @@ function buildVlanEdit() {
             }));
         });
         seg.children[0].classList.add("on");
-        rN.insertCell().appendChild(document.createTextNode((S.ports.filter(x => x.portNum == p)[0]).name));
+        rN.insertCell().appendChild(document.createTextNode((S.ports.filter(x => x.port == p)[0]).name));
         rM.insertCell().appendChild(seg);
         rP.insertCell().appendChild(h("span", {
             id: "vp" + p
@@ -4423,14 +4432,9 @@ function vlanLoad(vid) {
         $("vtitle").innerText = "VLAN " + vid + (d.name ? " (" + (d.name) + ")" : "");
         $("vtitle").dataset.id = vid;
         $("vtitle").dataset.name = d.name;
-        var m = parseInt(d.members, 16),
-            mem = m & 0x3ff,
-            unt = ((m >> 10) & 0x3ff) & mem;
-        var pv = parseInt(d.pvid, 16) & 0x3ff;
         for (var p = 1; p <= S.n; p++) {
-            var bit = S.physToLog[p - 1];
-            segSet(p, (mem >> bit) & 1 ? (((unt >> bit) & 1) ? 1 : 2) : 0);
-            $("vp" + p).innerText = (!!((pv >> bit) & 1)) ? "Y" : "N";
+            segSet(p, d.untagged_members.includes(p) ? 1 : (d.tagged_members.includes(p) ? 2 : 0));
+            $("vp" + p).innerText = d.pvid.includes(p) ? "Y" : "N";
         }
         $("vmgmtpromote").checked = ($("vmgmtcur").dataset.id == vid);
         toast(t("v_loaded", {
@@ -4638,7 +4642,7 @@ function l2Load() {
             walk.seen[e.idx] = 1;
             e.vlan = parseInt(e.vlan, 16);
             e.stat = e.type === "s";
-            e.pport = e.port === 9 ? "CPU" : S.logToPhys[e.port];
+            e.pport = e.port === 0 ? "CPU" : e.port;
             e.where = e.lag ? "LAG" + e.lag : String(e.pport);
             l2Rows.push(e);
         });
@@ -4804,12 +4808,9 @@ function mirrorLoad() {
     return getJSON("/mirror.json").then(function(m) {
         $("mstate").textContent = t(m.enabled ? "m_active" : "c_off");
         $("mstate").className = "badge " + (m.enabled ? "ok" : "");
-        if (m.enabled) $("mport").value = m.mPort;
-        var tx = parseInt(m.mirror_tx, 2),
-            rx = parseInt(m.mirror_rx, 2);
+        if (m.enabled) $("mport").value = m.mirrorPort;
         for (var p = 1; p <= S.n; p++) {
-            var bit = S.physToLog[p - 1];
-            var v = (((rx >> bit) & 1) ? 1 : 0) + (((tx >> bit) & 1) ? 2 : 0);
+            var v = (m.mirror_rx.includes(p) ? 1 : 0) + (m.mirror_tx.includes(p) ? 2 : 0);
             $("mm" + p).querySelectorAll("button").forEach(function(b, i) {
                 b.classList.toggle("on", i === v)
             });
@@ -4926,36 +4927,36 @@ function isoLoad() {
         isoAllow = s;
         if ($("isotbl").dataset.dirty) return;
         s.forEach(function(e) {
-            var m = parseInt(e.allow, 16);
             for (var c = 1; c <= S.n; c++) {
-                var b = isoBox(e.portNum, c);
-                if (b) b.checked = !!((m >> S.physToLog[c - 1]) & 1);
+                var b = isoBox(e.port, c);
+                if (b) b.checked = e.allow.includes(c);
             }
-            var cpu = isoBox(e.portNum, S.n + 1);
-            if (cpu) cpu.checked = !!(m & 0x200);
+            var cpu = isoBox(e.port, S.n + 1);
+            if (cpu) cpu.checked = e.allow.includes(0);
         });
         isoMark();
     });
 }
 
-function isoMask(r) {
-    var m = 0;
+// The ports row r may send to, as /isolation.json lists them: 0 is the CPU
+function isoList(r) {
+    var m = [];
     for (var c = 1; c <= S.n; c++) {
         var b = isoBox(r, c);
-        if (r === c || (b && b.checked)) m |= 1 << S.physToLog[c - 1];
+        if (r === c || (b && b.checked)) m.push(c);
     }
     var cpu = isoBox(r, S.n + 1);
-    if (cpu && cpu.checked) m |= 0x200;
-    return m;
+    if (cpu && cpu.checked) m.push(0);
+    return sorted(m).join();
 }
 $("isoapply").addEventListener("click", function() {
     var cmds = [];
     for (var r = 1; r <= S.n; r++) {
-        var cur = -1;
+        var cur = null;
         isoAllow.forEach(function(e) {
-            if (e.portNum === r) cur = parseInt(e.allow, 16)
+            if (e.port === r) cur = sorted(e.allow).join()
         });
-        if (isoMask(r) === cur) continue;
+        if (isoList(r) === cur) continue;
         var cmd = "isolate " + r;
         for (var c = 1; c <= S.n; c++) {
             var b = isoBox(r, c);
@@ -4991,7 +4992,7 @@ tabHooks.isolate = {
 
 var HASHF = ["spa", "smac", "dmac", "sip", "dip", "sport", "dport"];
 
-function buildLag() {
+function buildLag(lags) {
     var w = $("lagwrap"),
         fixed = S.info.mib_family === "rtl836x";
     if (w.children.length) return;
@@ -5031,7 +5032,7 @@ function buildLag() {
         });
         w.appendChild(hc);
     }
-    for (var g = 1; g <= (fixed ? 2 : 4); g++)(function(g) {
+    for (var g = 1; g <= lags.length; g++)(function(g) {
         var card = h("div", {
             class: "card"
         });
@@ -5074,7 +5075,8 @@ function buildLag() {
         var lo = 0,
             hi = 0;
         for (var p = 1; p <= S.n; p++) {
-            if (fixed && (S.physToLog[p - 1] >> 2) !== g - 1) continue;
+            // A fixed group of the RTL836x takes the ports of its own bank only
+            if (lags[g - 1].range && !lags[g - 1].range.includes(p)) continue;
             lo = lo || p;
             hi = p;
             pr.appendChild(h("label", null, [
@@ -5125,47 +5127,34 @@ function buildLag() {
 }
 var lacpCfg = [0, 0, 0, 0, 0];
 
-function maskPorts(m) {
-    var r = [];
-    for (var p = 1; p <= S.n; p++)
-        if ((m >> S.physToLog[p - 1]) & 1) r.push(p);
-    return r.length ? r.join(" ") : "-"
-}
-
 function lagLoad() {
-    return getJSON("/lacp.json").then(function(c) {
+    return getJSON("/lag.json").then(function(s) {
+        buildLag(s.lags);
+        var fixed = !!$("lghcard");
+        s.lags.forEach(function(l) {
+            var g = l.lagNum + 1;
+            lacpCfg[g] = l.type === "lacp";
+            if (!$("lgm" + g) || $("lgm" + g).closest(".card").dataset.dirty) return;
+            $("lgm" + g).value = l.type;
+            $("lgs" + g).textContent = lacpCfg[g] ? "LACP: " + t("lacp_agg") + " " + (l.valid ? l.aggregator : "(" + t("lacp_neg") + ")") + ", " + t("lacp_members") + " " + (sorted(l.active_members).join(" ") || "-") : "";
+            for (var p = 1; p <= S.n; p++) {
+                var cb = $("lg" + g + "p" + p);
+                if (cb) cb.checked = l.members.includes(p);
+            }
+            if (fixed && $("lghcard").dataset.dirty) return;
+            var hash = parseInt(l.hash, 16),
+                hp = fixed ? "lgh" : "lg" + g + "h";
+            HASHF.forEach(function(f, i) {
+                $(hp + f).checked = !!((hash >> i) & 1)
+            });
+        });
         var tb = $("lacptbl").tBodies[0];
         tb.innerHTML = "";
-        c.lags.forEach(function(lg, i) {
-            var g = i + 1;
-            lacpCfg[g] = parseInt(lg.cfg, 16);
-            if (!$("lgm" + g) || $("lgm" + g).closest(".card").dataset.dirty) return;
-            $("lgm" + g).value = lacpCfg[g] ? "lacp" : "static";
-            $("lgs" + g).textContent = lacpCfg[g] ? "LACP: " + t("lacp_agg") + " " + (lg.aggValid ? lg.agg : "(" + t("lacp_neg") + ")") + ", " + t("lacp_members") + " " + maskPorts(parseInt(lg.members, 16)) : "";
-        });
-        if (c.on) c.ports.forEach(function(p) {
+        s.ports.forEach(function(p) {
             if (p.lag === 255) return;
             var tr = tb.insertRow();
             [p.p, p.lag + 1, p.a, p.pt, p.rs, parseInt(p.rx, 16), p.psys].forEach(function(v) {
                 tr.insertCell().textContent = v
-            });
-        });
-        return getJSON("/lag.json");
-    }).then(function(s) {
-        s.forEach(function(l) {
-            var g = l.lagNum + 1;
-            if (!$("lgm" + g) || $("lgm" + g).closest(".card").dataset.dirty) return;
-            var members = lacpCfg[g] || parseInt(l.members, 2);
-            for (var p = 1; p <= S.n; p++) {
-                var cb = $("lg" + g + "p" + p);
-                if (cb) cb.checked = !!((members >> S.physToLog[p - 1]) & 1);
-            }
-            var hash = parseInt(l.hash, 16),
-                fixed = !!$("lghcard"),
-                hp = fixed ? "lgh" : "lg" + g + "h";
-            if (fixed && $("lghcard").dataset.dirty) return;
-            HASHF.forEach(function(f, i) {
-                $(hp + f).checked = !!((hash >> i) & 1)
             });
         });
     });
@@ -5224,7 +5213,6 @@ var lagPoller = new Poller(function() {
 tabHooks.lag = {
     enter: function() {
         needPorts(function() {
-            buildLag();
             lagPoller.start()
         })
     },
@@ -5339,29 +5327,24 @@ function lldpWarning(cell, n, bit, key, s) {
                         }) : t(n.agg === 2 ? "c_yes" : "c_no")
                     })
                 }));
-                getJSON(bit === 1 ? "/mtu.json" : "/lag.json").then(function(data) {
+                getJSON(bit === 1 ? "/ports.json" : "/lag.json").then(function(data) {
                     var value = unavailable;
                     if (bit === 1) {
                         var port = data.filter(function(p) {
-                            return p.portNum === n.port
+                            return p.port === n.port
                         })[0];
                         if (port && /^0x[0-9a-f]+$/i.test(port.mtu)) value = t("lldp_w_bytes", {
                             value: parseInt(port.mtu, 16)
                         });
-                    } else {
-                        var port = s.portStatus.filter(function(p) {
-                            return p.portNum === n.port
+                    } else if (Array.isArray(data.lags) && data.lags.every(function(g) {
+                            return Array.isArray(g.members)
+                        })) {
+                        var group = data.lags.filter(function(g) {
+                            return g.members.includes(n.port)
                         })[0];
-                        if (port && data.length === (S.info.mib_family === "rtl836x" ? 2 : 4) && data.every(function(g) {
-                                return /^[01]{16}$/.test(g.members)
-                            })) {
-                            var group = data.filter(function(g) {
-                                return (parseInt(g.members, 2) >> port.logPort) & 1
-                            })[0];
-                            value = group ? t("lldp_w_group", {
-                                group: group.lagNum + 1
-                            }) : t("c_no");
-                        }
+                        value = group ? t("lldp_w_group", {
+                            group: group.lagNum + 1
+                        }) : t("c_no");
                     }
                     local.textContent = t(bit === 1 ? "lldp_w_local_size" : "lldp_w_local_agg", {
                         value: value
@@ -5412,7 +5395,7 @@ function lldpLoad() {
         tb.innerHTML = "";
         byPort(s.portStatus).forEach(function(p) {
             var tr = tb.insertRow();
-            tr.insertCell().textContent = p.portNum;
+            tr.insertCell().textContent = p.port;
             tr.insertCell().textContent = p.name;
             var sw = h("label", {
                 class: "switch"
@@ -5420,7 +5403,7 @@ function lldpLoad() {
                 h("input", {
                     type: "checkbox",
                     onchange: function() {
-                        postCmd("port " + p.portNum + " lldp " + (this.checked ? "permit" : "block"))
+                        postCmd("port " + p.port + " lldp " + (this.checked ? "permit" : "block"))
                             .then(function() {
                                 setTimeout(lldpLoad, 300)
                             }).catch(function() {});
@@ -5491,7 +5474,7 @@ function bwLoad() {
         var tb = $("btable").tBodies[0];
         tb.innerHTML = "";
         byPort(s).forEach(function(p) {
-            var n = p.portNum;
+            var n = p.port;
             var iOn = !!Number(p.iLimited),
                 eOn = !!Number(p.eLimited);
             var iM = (parseInt(p.iBW, 16) * step / 1000),
@@ -5527,7 +5510,7 @@ function bwLoad() {
                     text: t("bw_drop")
                 }),
             ]);
-            msel.value = Number(p.iFC) === 1 ? "fc" : "drop";
+            msel.value = p.iAction;
             tr.insertCell().appendChild(msel);
             var ecb = h("input", {
                 type: "checkbox",
@@ -5594,13 +5577,13 @@ function scLoad() {
         var tb = $("sctable").tBodies[0];
         byPort(s);
         var sig = s.map(function(p) {
-            return p.portNum
+            return p.port
         }).join();
         if (sig !== scSig) {
             scSig = sig;
             tb.innerHTML = "";
             s.forEach(function(p) {
-                var n = p.portNum,
+                var n = p.port,
                     tr = tb.insertRow();
                 tr.id = "scr" + n;
                 tr.addEventListener("input", function() {
@@ -5640,12 +5623,12 @@ function scLoad() {
             });
         }
         s.forEach(function(p) {
-            var n = p.portNum;
+            var n = p.port;
             if ($("scr" + n).dataset.dirty) return;
-            SC_TYPES.forEach(function(ty, k) {
-                var on = p.en.charAt(k) === "1",
-                    pps = p.pps.charAt(k) === "1",
-                    raw = parseInt(p.rate.substr(k * 6, 6), 16);
+            SC_TYPES.forEach(function(ty) {
+                var on = p[ty].enabled,
+                    pps = p[ty].unit === "pps",
+                    raw = parseInt(p[ty].rate, 16);
                 var inp = $("scv" + ty + n),
                     sel = $("scu" + ty + n);
                 inp.value = on ? raw : "";
@@ -6368,7 +6351,7 @@ function pruneDefaults(conf, d) {
     var P = {},
         isDefault = {};
     d.ports.forEach(function(p) {
-        P[p.portNum] = p
+        P[p.port] = p
     });
     var eeeQualified = conf.some(function(l) {
         return /^eee /.test(l) && !/^eee (on|off) [1-9]\d?$/.test(l)

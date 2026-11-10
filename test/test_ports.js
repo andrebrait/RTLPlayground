@@ -57,7 +57,7 @@ console.log('Native 8-kbit rate boundaries and shared 16-kbit interface passed')
 vm.runInContext(source.slice(source.indexOf('function portCmds('), source.indexOf('function ptChanged(')), context);
 const unchangedPort = {en: true, name: 'uplink', spd: 'auto', mtu: '', fc: false, eee: false, poe: null};
 const clearedName = {...unchangedPort, name: ''};
-const clearCommands = context.portCmds({p: {portNum: 1, enabled: true, isSFP: false}}, clearedName, unchangedPort);
+const clearCommands = context.portCmds({p: {port: 1, enabled: true, isSFP: false}}, clearedName, unchangedPort);
 saved = context.mergeConf(['port 1 name uplink', 'port 2 name spare'], plain(clearCommands));
 assert.deepEqual(plain(saved).filter(line => /^port [12] name/.test(line)), ['port 2 name spare']);
 console.log('Clearing a port name removes its saved override without affecting another port');

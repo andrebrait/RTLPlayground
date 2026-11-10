@@ -336,12 +336,12 @@ int main(void)
 	lacp_lag_set(0, 0x0030);			/* group 1 with ports of group 2 */
 	lacp_lag_set(0, 0x0013);			/* one foreign port among its own */
 	lacp_lag_set(1, 0x0003);			/* group 2 with ports of group 1 */
-	lacp_lag_set(0, PORT_BIT(CPU_PORT));		/* the CPU port */
+	lacp_lag_set(0, PORT_BIT(CPU_LOGICAL_PORT));		/* the CPU port */
 	lacp_lag_set(0, 0x0100);			/* chip port 8 */
 	lacp_lag_set(2, 0x0001);			/* a third group */
 	lacp_lag_set(0xff, 0x0001);
 	CHECK(!port_lag_members_valid(0, 0x0030) && !port_lag_members_valid(0, 0x0013)
-	      && !port_lag_members_valid(1, 0x0003) && !port_lag_members_valid(0, PORT_BIT(CPU_PORT))
+	      && !port_lag_members_valid(1, 0x0003) && !port_lag_members_valid(0, PORT_BIT(CPU_LOGICAL_PORT))
 	      && !port_lag_members_valid(0, 0x0100) && !port_lag_members_valid(2, 1)
 	      && !port_lag_members_valid(0xff, 1) && same(&before),
 	      "T6 cross-bank, CPU, chip-port-8 and third-group candidates: refused, no LACP state or register changed");

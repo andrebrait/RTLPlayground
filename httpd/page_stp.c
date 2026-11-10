@@ -13,6 +13,7 @@
 #pragma codeseg BANK4
 #pragma constseg BANK4
 
+extern __code const struct machine machine;
 extern __xdata uint8_t outbuf[TCP_OUTBUF_SIZE];
 extern __xdata uint16_t slen;
 
@@ -45,81 +46,83 @@ void send_stp(void) __banked
 	static __xdata uint8_t i, j, st, dsg;
 
 	dbg_string("send_stp called\n");
-	slen = strtox(outbuf, HTTP_RESPONCE_JSON);
+	slen = strtox(outbuf, HTTP_RESPONSE_JSON);
 
-	string_to_html("{\"on\":");
-	bool_to_html(stp_enabled);
-	string_to_html(",\"rstp\":");
-	bool_to_html(stp_rstp);
-	string_to_html(",\"prio\":");
+	str_code_to_html("{\"on\":");
+	bool_to_json(stp_enabled);
+	str_code_to_html(stp_rstp ? ",\"type\":\"rstp\"" : ",\"type\":\"stp\"");
+	str_code_to_html(",\"prio\":");
 	itoa_html(stp_prio >> 4);
-	string_to_html(",\"hello\":");
+	str_code_to_html(",\"hello\":");
 	itoa_html(stp_hello_s);
-	string_to_html(",\"maxage\":");
+	str_code_to_html(",\"maxage\":");
 	itoa_html(stp_maxage_s);
-	string_to_html(",\"fwd\":");
+	str_code_to_html(",\"fwd\":");
 	itoa_html(stp_fwddelay_s);
-	string_to_html(",\"txhold\":");
+	str_code_to_html(",\"txhold\":");
 	itoa_html(stp_txhold);
-	string_to_html(",\"pcs\":");
-	itoa_html(stp_pcost_short);
-	string_to_html(",\"bh\":");
-	itoa_html(stp_bpdu_filter);
-	string_to_html(",\"tcs\":\"");
+	str_code_to_html(stp_pcost_short ? ",\"pcs\":\"short\"" : ",\"pcs\":\"long\"");
+	str_code_to_html(stp_bpdu_filter ? ",\"bh\":\"filter\"" : ",\"bh\":\"flood\"");
+	str_code_to_html(",\"tcs\":\"0x");
 	pi_u32 = stp_tc_secs; u32hex_html();
-	string_to_html("\",\"rMaxage\":");
+	str_code_to_html("\",\"rMaxage\":");
 	itoa_html(stp_root_port == 0xff ? stp_maxage_s : stp_root_maxage);
-	string_to_html(",\"rFwd\":");
+	str_code_to_html(",\"rFwd\":");
 	itoa_html(stp_root_port == 0xff ? stp_fwddelay_s : stp_root_fwd);
-	string_to_html(",\"rootPrio\":\"");
+	str_code_to_html(",\"rootPrio\":\"");
 	byte_to_html(root_bridge.prio);
 	byte_to_html(root_bridge.ext);
-	string_to_html("\",\"rootMac\":\"");
+	str_code_to_html("\",\"rootMac\":\"");
 	for (j = 0; j < 6; j++)
 		byte_to_html(root_bridge.mac[j]);
-	string_to_html("\",\"myMac\":\"");
+	str_code_to_html("\",\"myMac\":\"");
 	for (j = 0; j < 6; j++)
 		byte_to_html(uip_ethaddr.addr[j]);
-	string_to_html("\",\"cost\":\"");
+	str_code_to_html("\",\"cost\":\"0x");
 	byte_to_html(root_bridge_cost >> 24);
 	byte_to_html(root_bridge_cost >> 16);
 	byte_to_html(root_bridge_cost >> 8);
 	byte_to_html(root_bridge_cost);
-	string_to_html("\",\"weRoot\":");
-	bool_to_html(stp_root_port == 0xff ? 1 : 0);
-	string_to_html(",\"tc\":\"");
+	str_code_to_html("\",\"weRoot\":");
+	bool_to_json(stp_root_port == 0xff ? 1 : 0);
+	str_code_to_html(",\"tc\":\"0x");
 	byte_to_html(stp_tc_count >> 8);
 	byte_to_html(stp_tc_count);
-	string_to_html("\",\"ports\":[");
+	str_code_to_html("\",\"ports\":[");
 	for (i = 0; i < STP_ENTITIES; i++) {
 		j = stp_ent_id(i);
 		if (!j)
 			continue;
-		string_to_html("{\"p\":");
+		str_code_to_html("{\"p\":");
 		itoa_html(j);
-		string_to_html(",\"st\":");
+		str_code_to_html(",\"st\":");
 		st = stp_port_state(i);
 		itoa_html(st);
-		string_to_html(",\"role\":");
+		str_code_to_html(",\"role\":");
 		itoa_html(stp_port_role(i));
-		string_to_html(",\"f\":");
+		str_code_to_html(",\"f\":");
 		itoa_html(stp_pflags[i]);
-		string_to_html(",\"pc\":\"");
+		str_code_to_html(",\"pc\":\"0x");
 		pi_u32 = stp_pcost[i]; u32hex_html();
+		char_to_html('"');
 		if (i >= STP_LAG_BASE) {
-			string_to_html("\",\"mbr\":\"");
-			pi_u32 = stp_lag_mask[i - STP_LAG_BASE]; u32hex_html();
+			str_code_to_html(",\"mbr\":[");
+			for (st = MACHINE_MIN_PORT; st <= MACHINE_MAX_PORT; st++) {
+				if (stp_lag_mask[i - STP_LAG_BASE] & PORT_BIT(st))
+					json_add_array_uint_item(machine.log_to_phys_port[st]);
+			}
+			char_to_html(']');
 		}
-		string_to_html("\",\"prio\":");
+		str_code_to_html(",\"prio\":");
 		itoa_html(stp_pprio[i]);
-		string_to_html(",\"p2\":");
+		str_code_to_html(",\"p2\":");
 		itoa_html(stp_pp2p[i]);
-		string_to_html(",\"lk\":");
+		str_code_to_html(",\"lk\":");
 		itoa_html((stp_link_prev >> i) & 1);
-		string_to_html(",\"lg\":");
+		str_code_to_html(",\"lg\":");
 		itoa_html((stp_legacy >> i) & 1);
 		dsg = stp_dpid[i] && stp_info_while[i];
-		string_to_html(",\"db\":\"");
+		str_code_to_html(",\"db\":\"");
 		if (dsg) {
 			pi_prio = stp_dbridge[i].prio; pi_ext = stp_dbridge[i].ext;
 			pi_mac = stp_dbridge[i].mac;
@@ -128,7 +131,7 @@ void send_stp(void) __banked
 			pi_mac = uip_ethaddr.addr;
 		}
 		bridge_to_html();
-		string_to_html("\",\"dp\":\"");
+		str_code_to_html("\",\"dp\":\"");
 		st = i;
 		if (!dsg && ((stp_backup >> i) & 1) && stp_loop_held[i]) {
 			st = stp_loop_held[i] - 1;
@@ -136,13 +139,13 @@ void send_stp(void) __banked
 		}
 		byte_to_html(dsg ? (stp_dpid[i] >> 8) : stp_pprio[st]);
 		byte_to_html(dsg ? stp_dpid[i] : j);
-		string_to_html("\",\"dc\":\"");
+		str_code_to_html("\",\"dc\":\"0x");
 		pi_u32 = dsg ? stp_dcost[i] : root_bridge_cost; u32hex_html();
-		string_to_html("\"},");
+		str_code_to_html("\"},");
 	}
 	if (outbuf[slen - 1] == ',')	/* the RTL836x may list no ports */
 		slen--;
-	string_to_html("]}");
+	str_code_to_html("]}");
 }
 
 
@@ -150,30 +153,30 @@ void send_stp_counters(void) __banked
 {
 	uint8_t i, j;
 
-	slen = strtox(outbuf, HTTP_RESPONCE_JSON);
-	string_to_html("{\"on\":");
-	bool_to_html(stp_enabled);
-	string_to_html(",\"hz\":");
+	slen = strtox(outbuf, HTTP_RESPONSE_JSON);
+	str_code_to_html("{\"on\":");
+	bool_to_json(stp_enabled);
+	str_code_to_html(",\"hz\":");
 	itoa_html(STP_HZ);
-	string_to_html(",\"tc\":\"");
+	str_code_to_html(",\"tc\":\"");
 	byte_to_html(stp_tc_count >> 8);
 	byte_to_html(stp_tc_count);
-	string_to_html("\",\"ports\":[");
+	str_code_to_html("\",\"ports\":[");
 	for (i = 0; i < STP_ENTITIES; i++) {
 		j = stp_ent_id(i);
 		if (!j)
 			continue;
-		string_to_html("{\"p\":");
+		str_code_to_html("{\"p\":");
 		itoa_html(j);
-		string_to_html(",\"c\":\"");
+		str_code_to_html(",\"c\":\"");
 		for (j = 0; j < STP_CNT_N; j++) {
 			pi_u32 = stp_cnt[j][i]; u32hex_html();
 		}
 		byte_to_html(stp_bpdu_age[i] >> 8);
 		byte_to_html(stp_bpdu_age[i]);
-		string_to_html("\"},");
+		str_code_to_html("\"},");
 	}
 	if (outbuf[slen - 1] == ',')
 		slen--;
-	string_to_html("]}");
+	str_code_to_html("]}");
 }
