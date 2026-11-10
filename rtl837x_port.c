@@ -18,7 +18,6 @@
 #pragma codeseg BANK1
 #pragma constseg BANK1
 
-extern __code const uint8_t * __code const hex;
 extern __code const uint16_t bit_mask[16];
 extern __code const struct machine machine;
 extern __xdata uint8_t sfr_data[4];
@@ -28,8 +27,6 @@ extern __xdata struct machine_runtime machine_detected;
 
 __xdata	uint32_t l2_head;
 
-__xdata struct vlan_settings vlan_settings;
-
 // Wait for the TABLE ready
 static void wait_table_ready(void)
 {
@@ -38,7 +35,7 @@ static void wait_table_ready(void)
 	} while (SFR_DATA_0 & TBL_EXECUTE);
 }
 
-void port_mirror_set(uint8_t port, __xdata uint16_t rx_pmask, __xdata uint16_t tx_pmask) __banked
+bool port_mirror_set(__xdata uint8_t port, __xdata uint16_t rx_pmask, __xdata uint16_t tx_pmask) __banked
 {
 	print_string("Mirroring port: "); print_byte(port); print_string(" with rx-mask: ");
 	print_short(rx_pmask); print_string(", tx mask: "); print_short(tx_pmask);
@@ -46,6 +43,18 @@ void port_mirror_set(uint8_t port, __xdata uint16_t rx_pmask, __xdata uint16_t t
 
 	REG_WRITE(RTL837x_MIRROR_CONF, rx_pmask >> 8, rx_pmask, tx_pmask >> 8, tx_pmask);
 	REG_WRITE(RTL837x_MIRROR_CTRL, 0, 0, 0, (port << 1) | 0x1);
+	return true;
+}
+
+
+void port_mirror_get(__xdata struct port_mirror * __xdata m) __banked
+{
+	reg_read_m(RTL837x_MIRROR_CTRL);
+	m->enabled = sfr_data[3] & 1;
+	m->port = sfr_data[3] >> 1;
+	reg_read_m(RTL837x_MIRROR_CONF);
+	m->rx_pmask = ((uint16_t)sfr_data[0] << 8) | sfr_data[1];
+	m->tx_pmask = ((uint16_t)sfr_data[2] << 8) | sfr_data[3];
 }
 
 
@@ -144,39 +153,6 @@ void vlan_delete(uint16_t vlan) __banked
 }
 
 
-void vlan_name_remove(uint16_t vlan) __banked
-{
-	static __xdata uint16_t name_pos;
-	static __xdata uint16_t entry_start;
-	static __xdata uint16_t pos;
-	static __xdata uint16_t entry_len;
-	static __xdata uint16_t move_count;
-	static __xdata uint16_t j;
-
-	name_pos = vlan_name(vlan);
-	if (name_pos == 0xffff)
-		return;
-
-	entry_start = name_pos - 3;
-	pos = entry_start;
-
-	while (pos < vlan_ptr && vlan_names[pos] != ' ')
-		pos++;
-	if (pos >= vlan_ptr)
-		return;
-	pos++;
-
-	entry_len = pos - entry_start;
-	move_count = vlan_ptr - pos;
-
-	for (j = 0; j < move_count; j++)
-		vlan_names[entry_start + j] = vlan_names[pos + j];
-
-	vlan_ptr -= entry_len;
-	vlan_names[vlan_ptr] = 0;
-}
-
-
 /*
  * Reads VLAN information from VLAN table
  * Returns data in sfr_data
@@ -193,22 +169,6 @@ int8_t vlan_get(uint16_t vlan) __banked
 	reg_read_m(RTL837x_L2_DATA_OUT_A);
 
 	return 0;
-}
-
-
-__xdata uint16_t vlan_name(uint16_t vlan) __banked
-{
-	__xdata int16_t i = 0;
-	__xdata uint8_t begin = 1;
-	while (vlan_names[i]) {
-		if (begin && vlan_names[i] == hex[(vlan >> 8) & 0xf] && vlan_names[i + 1] == hex[(vlan >> 4) & 0xf] && vlan_names[i + 2] == hex[vlan & 0xf])
-			break;
-		begin = vlan_names[i++] == ' ' ? 1 : 0;
-	}
-	if (vlan_names[i])
-		return i + 3;
-
-	return 0xffff;
 }
 
 
@@ -608,9 +568,42 @@ uint16_t port_isolation_get(uint8_t port) __banked
 	return ((uint16_t)sfr_data[2]) << 8 | sfr_data[3];
 }
 
+uint16_t port_mtu_get(uint8_t port) __banked
+{
+	reg_read_m(RTL8373_REG_MAC_L2_PORT_MAX_LEN + ((uint16_t)port << 8));
+	return SFR_DATA_U16 & 0x3fff;
+}
+
+
+bool port_mtu_set(uint8_t port, __xdata uint16_t len) __banked
+{
+	REG_WRITE(RTL8373_REG_MAC_L2_PORT_MAX_LEN + ((uint16_t)port << 8), (len >> 10) & 0xf, (len >> 2) & 0xff,
+		  ((len & 0x3) << 6) | ((len >> 8) & 0x3f), len & 0xff);
+	return true;
+}
+
+
+
+// Changing the advertisement restarts the link, so leave a matching one alone
+static void port_eee_adv_set(__xdata uint8_t port, __xdata uint16_t adv, __xdata uint16_t adv2, __xdata bool reset)
+{
+	phy_read(port, PHY_MMD_AN, PHY_EEE_ADV);
+	if (SFR_DATA_U16 == adv) {
+		phy_read(port, PHY_MMD_AN, PHY_EEE_ADV2);
+		if (SFR_DATA_U16 == adv2)
+			return;
+	}
+	phy_write(port, PHY_MMD_AN, PHY_EEE_ADV, adv);
+	phy_write(port, PHY_MMD_AN, PHY_EEE_ADV2, adv2);
+	if (reset)
+		phy_reset(port);
+}
+
 
 void port_eee_enable(__xdata uint8_t port,__xdata uint8_t speed) __banked
 {
+	// EEE Advertisement Reg (100/1000BASE-T, 10GBASE-T) and Reg 2 (2.5G/5GBASE-T)
+	uint16_t adv = PHY_EEE_BIT_1G | PHY_EEE_BIT_100M, adv2 = 0;
 
 	if (machine.is_sfp[port])
 	{
@@ -622,54 +615,24 @@ void port_eee_enable(__xdata uint8_t port,__xdata uint8_t speed) __banked
 	print_string("EEE on for "); print_phys_port(port); print_string(" speed "); 
 	// Enable all speeds up to the specified speed
 	if (speed & EEE_100) {
-			print_string("100m\n");
-			// Enable EEE advertisement for 100BASE-T via EEE Advertisement Reg
-			phy_write(port, PHY_MMD_AN, PHY_EEE_ADV, PHY_EEE_BIT_100M);
-			if (!(speed & EEE_NORESET))
-				phy_reset(port);
-			return;
+		print_string("100m\n");
+		adv = PHY_EEE_BIT_100M;
+	} else if (speed & EEE_1000) {
+		print_string("1g\n");
+	} else if (speed & EEE_2G5) {
+		print_string("2g5\n");
+		adv2 = PHY_EEE_BIT_2G5;
+	} else if (speed & EEE_5G) {
+		print_string("5g\n");
+		adv2 = PHY_EEE_BIT_2G5 | PHY_EEE_BIT_5G;
+	} else if (speed & EEE_10G) {
+		print_string("10g\n");
+		adv |= PHY_EEE_BIT_10G;
+		adv2 = PHY_EEE_BIT_2G5 | PHY_EEE_BIT_5G;
+	} else {
+		return;
 	}
-	if (speed & EEE_1000) {
-			print_string("1g\n");
-			// Disable EEE advertisement for 2.5GBASE-T via EEE Advertisement Reg 2
-			phy_write(port, PHY_MMD_AN, PHY_EEE_ADV2, 0);
-			// Enable EEE advertisement for 100/1000BASE-T via EEE Advertisement Reg
-			phy_write(port, PHY_MMD_AN, PHY_EEE_ADV, PHY_EEE_BIT_1G | PHY_EEE_BIT_100M);
-			if (!(speed & EEE_NORESET))
-				phy_reset(port);
-			return;
-	}
-	if (speed & EEE_2G5) {
-			print_string("2g5\n");
-			// Enable EEE advertisement for 100/1000BASE-T via EEE Advertisement Reg
-			phy_write(port, PHY_MMD_AN, PHY_EEE_ADV, PHY_EEE_BIT_1G | PHY_EEE_BIT_100M);
-			// Enable EEE advertisement for 2.5GBASE-T via EEE Advertisement Reg 2
-			phy_write(port, PHY_MMD_AN, PHY_EEE_ADV2, PHY_EEE_BIT_2G5);
-			if (!(speed & EEE_NORESET))
-				phy_reset(port);
-			return;
-	}
-	if (speed & EEE_5G) {
-			print_string("5g\n");
-			// Enable EEE advertisement for 100/1000BASE-T via EEE Advertisement Reg
-			phy_write(port, PHY_MMD_AN, PHY_EEE_ADV, PHY_EEE_BIT_1G | PHY_EEE_BIT_100M);
-			// Enable EEE advertisement for 2.5GBASE-T via EEE Advertisement Reg 2
-			phy_write(port, PHY_MMD_AN, PHY_EEE_ADV2, PHY_EEE_BIT_2G5 | PHY_EEE_BIT_5G);
-			if (!(speed & EEE_NORESET))
-				phy_reset(port);
-			return;
-	}
-	if (speed & EEE_10G) {
-			print_string("10g\n");
-			// Enable EEE advertisement for 100/1000BASE-T via EEE Advertisement Reg
-			phy_write(port, PHY_MMD_AN, PHY_EEE_ADV, PHY_EEE_BIT_10G | PHY_EEE_BIT_1G | PHY_EEE_BIT_100M);
-			// Enable EEE advertisement for 2.5GBASE-T via EEE Advertisement Reg 2
-			phy_write(port, PHY_MMD_AN, PHY_EEE_ADV2, PHY_EEE_BIT_2G5 | PHY_EEE_BIT_5G);
-			if (!(speed & EEE_NORESET))
-				phy_reset(port);
-			return;
-	}
-
+	port_eee_adv_set(port, adv, adv2, !(speed & EEE_NORESET));
 }
 
 
@@ -680,11 +643,7 @@ void port_eee_disable(uint8_t port) __banked
 
 	print_string("EEE off for "); print_phys_port(port); write_char('\n');
 	REG_SET(RTL837X_EEE_CTRL_BASE + (port << 8), 0);
-	// Disable EEE advertisement for 100/1000BASE-T via EEE Advertisement Reg
-	phy_write(port, PHY_MMD_AN, PHY_EEE_ADV, 0);
-	// Disable EEE advertisement for 2.5GBASE-T via EEE Advertisement Reg 2
-	phy_write(port, PHY_MMD_AN, PHY_EEE_ADV2, 0);
-	phy_reset(port);
+	port_eee_adv_set(port, 0, 0, true);
 }
 
 
@@ -764,8 +723,7 @@ void port_eee_status(uint8_t port) __banked
 	else
 		print_string("     ");
 
-	reg_read_m(RTL8373_PHY_EEE_ABLTY);
-	if (sfr_data[3] & (1 << port))
+	if (reg_bit_test(RTL8373_PHY_EEE_ABLTY, port))
 		print_string(" ACTIVE   ");
 	else
 		print_string(" INACTIVE ");
@@ -837,6 +795,13 @@ uint8_t port_lag_of(uint8_t port) __banked
 	return PORT_LAG_NONE;
 }
 
+/* Any member mask is taken, in any of the groups */
+bool port_lag_members_valid(__xdata uint8_t lag, __xdata uint16_t members) __banked
+{
+	(void)members;
+	return lag < PORT_LAG_COUNT;
+}
+
 
 /*
  * Configure LAGs
@@ -845,19 +810,20 @@ uint8_t port_lag_of(uint8_t port) __banked
  * The bitmask represents up to 10 ports
  * If currently no LAG has algorithm used, a default is applied
  */
-void port_lag_members_set(__xdata uint8_t lag, __xdata uint16_t members) __banked
+bool port_lag_members_set(__xdata uint8_t lag, __xdata uint16_t members) __banked
 {
 	print_string("port_lag_members_set, lag: "); print_byte(lag); print_string(", members: "); print_short(members);
 	write_char('\n');
 	if (lag > 3) {
 		print_string("Link aggregation group out of range\n");
-		return;
+		return false;
 	}
 	reg_read_m(RTL837X_TRK_HASH_CTRL_BASE + (lag << 2));
 	if (!(sfr_data[0] | sfr_data[1] | sfr_data[2])
 	    && (sfr_data[3] == LAG_HASH_RESET || sfr_data[3] == 0))
 		REG_SET(RTL837X_TRK_HASH_CTRL_BASE + (lag << 2), LAG_HASH_DEFAULT);
 	REG_WRITE(RTL837X_TRK_MBR_CTRL_BASE + (lag << 2), 0, 0, members >> 8, members & 0xff);
+	return true;
 }
 
 
@@ -865,60 +831,24 @@ void port_lag_members_set(__xdata uint8_t lag, __xdata uint16_t members) __banke
  * Configures the hash algorithm used for a LAG
  * lag is the Group to configure and hash is a bitmask
  */
-void port_lag_hash_set(__xdata uint8_t lag, __xdata uint8_t hash_bits) __banked
+bool port_lag_hash_set(__xdata uint8_t lag, __xdata uint8_t hash_bits) __banked
 {
 	print_string("port_lag_hash_set, lag: "); print_byte(lag); print_string(", hash: "); print_byte(hash_bits);
 	write_char('\n');
 	if (lag > 3) {
 		print_string("Link aggregation group out of range\n");
-		return;
+		return false;
 	}
 	REG_WRITE(RTL837X_TRK_HASH_CTRL_BASE + (lag << 2), 0, 0, 0, hash_bits);
+	return true;
 }
 
-void print_port_ingress_filter_mode(vlan_ingress_mode_t mode) __banked
+
+uint8_t port_lag_hash_get(__xdata uint8_t lag) __banked
 {
-	switch (mode) {
-	case VLAN_UNTAGGED:
-		print_string("Untag.");
-		break;
-	case VLAN_TAGGED:
-		print_string("Tagged");
-		break;
-	case VLAN_ALL:
-		print_string("Any");
-		break;
-	default:
-		print_string("!!err!!");
-	}
+	reg_read_m(RTL837X_TRK_HASH_CTRL_BASE + (lag << 2));
+	return sfr_data[3];
 }
-
-void print_vlan_ingress_port(uint8_t log_port) __banked
-{
-	print_phys_port(log_port);write_char('\t');
-	print_short(port_pvid_get(log_port));write_char('\t');
-	print_port_ingress_filter_mode(port_ingress_filter_get(log_port));write_char('\t');
-	port_ingress_vlan_filter_get(log_port) ? print_string("Enabled") : print_string("Disabled");
-	write_char('\n');
-}
-/*
- * Dumps the VLAN ingress configuration
- */
-void vlan_dump(void) __banked
-{
-	print_string("Ingress VLAN configuration:\n");
-	print_string("Port\tPVID\tType\tFiltering\n");
-	for (uint8_t port = MACHINE_MIN_PORT; port <= MACHINE_MAX_PORT; port++) {
-		print_vlan_ingress_port(port);
-	}
-	print_vlan_ingress_port(9);
-
-	write_char('\n');
-	print_string("Type - Which frame types are allowed: untagged, tagged or any\n");
-	print_string("Filtering - Whether packets not belonging to member VLANs on that port are dropped\n");
-	print_string("PVID - Assumed VLAN for untagged packets\n");
-}
-
 
 /** Set the ingress VLAN filtering */
 bool port_ingress_vlan_filter_set(uint8_t port, __xdata bool enabled) __banked

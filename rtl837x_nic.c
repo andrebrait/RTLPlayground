@@ -4,6 +4,7 @@
 #include "rtl837x_nic.h"
 
 extern __xdata uint8_t rx_headers[16];
+extern __xdata uint8_t sfr_data[4];
 
 
 #ifndef RTLP_HOST_TEST
@@ -87,4 +88,48 @@ void nic_tx_packet(__xdata uint8_t *buffer, uint16_t len, uint16_t ring_ptr)
 			return;
 		}
 	}
+}
+
+
+bool nic_rx_pending(void)
+{
+	reg_read(RTL837X_REG_NIC_RX_BUFF_DATA);
+	return SFR_DATA_U16 != 0;
+}
+
+
+uint16_t nic_rx_ptr(void)
+{
+	reg_read(RTL837X_REG_CPU_RX_CURR_PKT);
+	return SFR_DATA_U16 << 3;
+}
+
+
+void nic_rx_release(void)
+{
+	REG_SET(RTL837X_REG_NIC_RXCMD, 1);
+}
+
+
+void nic_rx_ack(void)
+{
+	REG_SET(RTL837X_NIC_INT_STS, NIC_INT_RXIS);
+}
+
+
+uint16_t nic_tx_ptr(uint16_t len)
+{
+	(void)len;
+	reg_read_m(RTL837X_REG_CPU_TX_CURR_PKT);
+	return ((uint16_t)sfr_data[2]) << 8 | sfr_data[3];
+}
+
+
+void nic_tx_start(void)
+{
+	// New position of the ring-pointer on the NIC-side indicates number of bytes transmitted
+	reg_read_m(RTL837X_REG_NIC_TX_CURR_PKT);
+
+	// Do actual TX of data on ASIC side
+	REG_SET(RTL837X_REG_NIC_TXCMD, 1);
 }

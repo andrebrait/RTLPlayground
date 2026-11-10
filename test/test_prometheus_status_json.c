@@ -1,0 +1,18 @@
+/* /information.json reports the exporter setting in PROMETHEUS builds. */
+#define main existing_page_json_main
+#include "test_page_json.c"
+#undef main
+#include "metrics.h"
+
+uint8_t prometheus_enabled;
+
+int main(void)
+{
+	prometheus_enabled = 1;
+	send_basic_info();
+	CHECK(has("\"prometheus\":1") && balanced(), "enabled exporter is reported as 1");
+	prometheus_enabled = 0;
+	send_basic_info();
+	CHECK(has("\"prometheus\":0") && balanced(), "disabled exporter is reported as 0");
+	return tests_failed ? 1 : 0;
+}

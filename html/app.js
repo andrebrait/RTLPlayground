@@ -10,7 +10,6 @@ var LANG = {
         nav_mirror: "Mirroring",
         nav_isolate: "Isolation",
         nav_lag: "LAG",
-        nav_eee: "EEE",
         nav_bw: "Bandwidth",
         nav_system: "System",
         nav_fw: "Firmware",
@@ -89,9 +88,27 @@ var LANG = {
         pt_conn: "Devices learned",
         pt_speed: "Speed",
         pt_mtu: "MTU",
+        pt_custom: "Custom advertisement",
+        pt_poe: "PoE",
+        poe_permitted: "PoE",
+        poe_disabled: "PoE disabled",
+        poe_delivery: "PoE power delivery",
+        poe_unknown: "Unavailable (no telemetry)",
+        poe_pd: "Powered device (LLDP)",
+        lldp_nb_poe: "PoE",
         pt_sfp_note: "SFP speed is set per slot and is not saved in the startup config.",
         pt_name_err: "Port name: 1-15 characters, no spaces",
         pt_mtu_err: "MTU must be 64-16383",
+        pt_fc: "Flow control",
+        pt_eee: "EEE",
+        st_down: "Down",
+        st_inactive: "Inactive",
+        pt_pending: "Pending changes",
+        pt_nopending: "No pending changes",
+        pt_leave_q: "Leave the Ports page?",
+        pt_leave_d: "Ports with changes that were not applied: {n}. Leaving discards these changes; the switch keeps its current settings.",
+        pt_sfp_adv: "SFP ports do not advertise this.",
+        pt_info: "Details",
         stp_title: "Spanning tree",
         stp_h: "RSTP, 802.1w",
         stp_version: "Version",
@@ -164,6 +181,42 @@ var LANG = {
         stp_ctrx: "TC received",
         stp_cttx: "TC sent",
         stp_cage: "Last BPDU [s]",
+        lldp_nb_title: "Neighbours",
+        lldp_nb_chassis: "Chassis ID",
+        lldp_nb_portid: "Port ID",
+        lldp_nb_sysname: "System Name",
+        lldp_nb_sysdesc: "System Description",
+        lldp_nb_portdesc: "Port Description",
+        lldp_nb_addr: "Address",
+        lldp_nb_caps: "Capabilities",
+        lldp_nb_pvid: "PVID",
+        lldp_nb_mtu: "MTU",
+        lldp_nb_lag: "LAG",
+        lldp_nb_link: "Link",
+        lldp_w_mtu: "Maximum frame size larger than ours",
+        lldp_w_lag: "LAG only on one side",
+        lldp_w_dup: "Same neighbour on another port",
+        lldp_nb_ttl: "TTL",
+        lldp_tlvs: "Optional TLVs",
+        lldp_t_portdesc: "Port Description",
+        lldp_t_syscap: "System Capabilities",
+        lldp_t_mgmt: "Management Address",
+        lldp_t_pvid: "Port VLAN ID",
+        lldp_t_macphy: "MAC/PHY Status",
+        lldp_t_lag: "Link Aggregation",
+        lldp_t_mfs: "Maximum Frame Size",
+        lldp_w_local: "Local switch: {name}; physical port: {port}",
+        lldp_w_unavailable: "Unavailable",
+        lldp_w_size: "The neighbour advertises a larger maximum Ethernet frame size than the local limit, so this port would drop such frames. This is not the IP MTU.",
+        lldp_w_local_size: "Local maximum frame size: {value}",
+        lldp_w_remote_size: "Neighbour advertised maximum frame size: {value}",
+        lldp_w_bytes: "{value} bytes",
+        lldp_w_aggregation: "Only one side reports active link aggregation.",
+        lldp_w_local_agg: "Local aggregation: {value}",
+        lldp_w_remote_agg: "Neighbour aggregation: {value}",
+        lldp_w_group: "Yes (LAG {group})",
+        lldp_w_duplicate: "The same chassis appears on different ports that do not belong to the same LAG.",
+        lldp_w_ports: "Ports reporting this chassis ID: {ports}",
         st_title: "Port statistics",
         st_h: "totals since boot",
         st_txg: "TX good",
@@ -211,7 +264,6 @@ var LANG = {
         v_mgmt_q: "Set VLAN {n} as management VLAN?",
         v_vid_err: "VLAN ID already exists",
         v_mgmt_d: "The switch will start tagging its own traffic with that VLAN. If the port you are connected through does not carry it, this page becomes unreachable and the setting can only be undone over the console.",
-        v_mgmt_tt: "The management VLAN cannot be deleted, you need to assign management to another VLAN first.",
         l2_title: "MAC address table",
         l2_filter: "filter...",
         l2_flush: "Flush learned entries",
@@ -220,6 +272,10 @@ var LANG = {
         l2_loading: "loading...",
         l2_failed: "load failed",
         l2_entries: "entries",
+        l2_loaded: "entries loaded",
+        l2_scroll_more: "scroll for more",
+        l2_more: "Load more",
+        l2_partial: "Sorting and filtering apply to loaded entries only.",
         l2_del_t: "Delete entry",
         l2_flush_q: "Flush all learned MAC entries?",
         m_title: "Port mirroring",
@@ -237,6 +293,9 @@ var LANG = {
         iso_legend: "The cell of the port itself is always allowed. A port number in red marks a port that is not fully open.",
         lag_hash: "Hash:",
         lag_note: "A LAG needs at least one member to be saved in the startup config; applying an empty group clears it.",
+        lag_fixed836: "This switch chip has two fixed LAGs, each taking ports from its own range only. Both use the same hash fields.",
+        lag_range836: "Ports {a} to {b}",
+        lag_hash836: "Hash fields, for both LAGs:",
         lacp_heading: "LACP (802.3ad)",
         lag_mode: "Mode",
         lag_static: "Static",
@@ -251,13 +310,9 @@ var LANG = {
         lacp_psys: "Partner system",
         lag_clear_q: "Clear LAG {n}?",
         lag_clear_d: "All member ports return to normal operation.",
-        e_title: "Energy Efficient Ethernet",
         e_adv: "Advertised",
         e_lp: "Link partner",
         e_active: "Active",
-        e_enable: "Enable",
-        e_note: "Advertised and link-partner flags per speed: 100M, 1G, 2.5G. SFP ports do not support EEE.",
-        e_idle: "idle",
         e_na: "n/a",
         bw_title: "Bandwidth limits",
         bw_h: "Mbit/s, 0.016-10000",
@@ -393,7 +448,6 @@ var LANG = {
         nav_l2: "MAC テーブル",
         nav_mirror: "ミラーリング",
         nav_lag: "LAG",
-        nav_eee: "EEE",
         nav_bw: "帯域制限",
         nav_system: "システム",
         nav_fw: "ファームウェア",
@@ -474,6 +528,16 @@ var LANG = {
         pt_sfp_note: "SFP の速度はスロット単位で設定され、起動設定には保存されません。",
         pt_name_err: "ポート名: 1〜15 文字、空白不可",
         pt_mtu_err: "MTU は 64〜16383 の範囲で指定してください",
+        pt_fc: "フロー制御",
+        pt_eee: "EEE",
+        st_down: "リンクダウン",
+        st_inactive: "非アクティブ",
+        pt_pending: "未適用の変更",
+        pt_nopending: "未適用の変更はありません",
+        pt_leave_q: "ポートページを離れますか?",
+        pt_leave_d: "適用されていない変更があるポート: {n}。離れると変更は破棄され、スイッチは現在の設定のままです。",
+        pt_sfp_adv: "SFP ポートはこれをアドバタイズしません。",
+        pt_info: "詳細",
         stp_title: "スパニングツリー",
         stp_h: "RSTP, 802.1w",
         stp_version: "バージョン",
@@ -574,6 +638,10 @@ var LANG = {
         l2_loading: "読み込み中...",
         l2_failed: "読み込み失敗",
         l2_entries: "エントリ",
+        l2_loaded: "件読み込み済み",
+        l2_scroll_more: "スクロールしてさらに読み込む",
+        l2_more: "さらに読み込む",
+        l2_partial: "並べ替えと絞り込みは読み込み済みのエントリにのみ適用されます。",
         l2_del_t: "エントリを削除",
         l2_flush_q: "学習した MAC エントリをすべて消去しますか?",
         m_title: "ポートミラーリング",
@@ -587,13 +655,9 @@ var LANG = {
         lag_note: "起動設定に保存するには LAG に 1 つ以上のメンバーが必要です。メンバーなしで適用するとグループを解除します。",
         lag_clear_q: "LAG {n} を解除しますか?",
         lag_clear_d: "すべてのメンバーポートが通常動作に戻ります。",
-        e_title: "Energy Efficient Ethernet",
         e_adv: "アドバタイズ",
         e_lp: "リンクパートナー",
-        e_active: "有効",
-        e_enable: "有効化",
-        e_note: "速度ごとのアドバタイズ/リンクパートナーのフラグ: 100M、1G、2.5G。SFP ポートは EEE に対応していません。",
-        e_idle: "アイドル",
+        e_active: "アクティブ",
         e_na: "n/a",
         bw_title: "帯域制限",
         bw_h: "Mbit/s、0.016〜10000",
@@ -699,7 +763,6 @@ var LANG = {
         nav_mirror: "端口镜像",
         nav_isolate: "端口隔离",
         nav_lag: "LAG",
-        nav_eee: "EEE",
         nav_bw: "带宽限制",
         nav_system: "系统",
         nav_fw: "固件",
@@ -781,6 +844,16 @@ var LANG = {
         pt_sfp_note: "SFP 速率按插槽设置，不会保存到启动配置。",
         pt_name_err: "端口名称: 1-15 个字符，不能包含空格",
         pt_mtu_err: "MTU 范围为 64-16383",
+        pt_fc: "流量控制",
+        pt_eee: "EEE",
+        st_down: "未连接",
+        st_inactive: "未生效",
+        pt_pending: "待应用的更改",
+        pt_nopending: "没有待应用的更改",
+        pt_leave_q: "离开端口页面?",
+        pt_leave_d: "有未应用更改的端口: {n}。离开将放弃这些更改，交换机保持当前设置。",
+        pt_sfp_adv: "SFP 端口不通告此项。",
+        pt_info: "详情",
         stp_title: "生成树",
         stp_h: "RSTP, 802.1w",
         stp_version: "版本",
@@ -899,7 +972,6 @@ var LANG = {
         v_vid_first: "请先输入 VLAN ID",
         v_mgmt_q: "将 VLAN {n} 设为管理 VLAN?",
         v_mgmt_d: "交换机将开始为自身流量打上该 VLAN 标签。如果您所连接的端口不属于该 VLAN，本页面将无法访问，且只能通过控制台撤销此设置。",
-        v_mgmt_tt: "无法删除管理 VLAN，请先将管理功能分配给另一个 VLAN。",
         l2_title: "MAC 地址表",
         l2_filter: "筛选...",
         l2_flush: "清除学习条目",
@@ -908,6 +980,10 @@ var LANG = {
         l2_loading: "加载中...",
         l2_failed: "加载失败",
         l2_entries: "条",
+        l2_loaded: "条已加载",
+        l2_scroll_more: "向下滚动加载更多",
+        l2_more: "加载更多",
+        l2_partial: "排序和筛选仅适用于已加载的条目。",
         l2_del_t: "删除条目",
         l2_flush_q: "清除所有动态学习的 MAC 条目?",
         m_title: "端口镜像",
@@ -939,13 +1015,9 @@ var LANG = {
         lacp_psys: "对端系统",
         lag_clear_q: "清除 LAG {n}?",
         lag_clear_d: "所有成员端口恢复正常工作。",
-        e_title: "节能以太网 (EEE)",
         e_adv: "本端通告",
         e_lp: "链路伙伴",
         e_active: "已生效",
-        e_enable: "启用",
-        e_note: "按速率显示本端/链路伙伴的通告标志: 100M、1G、2.5G。SFP 端口不支持 EEE。",
-        e_idle: "空闲",
         e_na: "n/a",
         bw_title: "带宽限制",
         bw_h: "Mbit/s，0.016-10000",
@@ -1081,7 +1153,6 @@ var LANG = {
         nav_l2: "Tabla MAC",
         nav_mirror: "Duplicación",
         nav_lag: "LAG",
-        nav_eee: "EEE",
         nav_bw: "Ancho de banda",
         nav_system: "Sistema",
         nav_fw: "Firmware",
@@ -1161,6 +1232,16 @@ var LANG = {
         pt_sfp_note: "La velocidad del SFP se ajusta por ranura y no se guarda en la configuración de inicio.",
         pt_name_err: "Nombre de puerto: 1-15 caracteres, sin espacios",
         pt_mtu_err: "El MTU debe estar entre 64 y 16383",
+        pt_fc: "Control de flujo",
+        pt_eee: "EEE",
+        st_down: "Caído",
+        st_inactive: "Inactivo",
+        pt_pending: "Cambios pendientes",
+        pt_nopending: "Sin cambios pendientes",
+        pt_leave_q: "¿Salir de la página Puertos?",
+        pt_leave_d: "Puertos con cambios sin aplicar: {n}. Al salir se descartan estos cambios; el switch mantiene su configuración actual.",
+        pt_sfp_adv: "Los puertos SFP no anuncian esto.",
+        pt_info: "Detalles",
         stp_title: "Árbol de expansión",
         stp_h: "RSTP, 802.1w",
         stp_version: "Versión",
@@ -1261,6 +1342,10 @@ var LANG = {
         l2_loading: "cargando...",
         l2_failed: "error de carga",
         l2_entries: "entradas",
+        l2_loaded: "entradas cargadas",
+        l2_scroll_more: "desplázate para cargar más",
+        l2_more: "Cargar más",
+        l2_partial: "La ordenación y el filtro solo se aplican a las entradas cargadas.",
         l2_del_t: "Eliminar entrada",
         l2_flush_q: "¿Vaciar todas las entradas MAC aprendidas?",
         m_title: "Duplicación de puertos",
@@ -1274,13 +1359,9 @@ var LANG = {
         lag_note: "Un LAG necesita al menos un miembro para guardarse en la configuración de inicio; aplicar un grupo vacío lo borra.",
         lag_clear_q: "¿Borrar LAG {n}?",
         lag_clear_d: "Todos los puertos miembros vuelven a la operación normal.",
-        e_title: "Ethernet de bajo consumo",
         e_adv: "Anunciado",
         e_lp: "Par de enlace",
         e_active: "Activo",
-        e_enable: "Habilitar",
-        e_note: "Banderas anunciadas y del socio de enlace por velocidad: 100M, 1G, 2.5G. Los puertos SFP no soportan EEE.",
-        e_idle: "inactivo",
         e_na: "n/d",
         bw_title: "Límites de ancho de banda",
         bw_h: "Mbit/s, 0.016-10000",
@@ -1405,7 +1486,6 @@ var LANG = {
         v_mgmt_c: "AVISO: debes poder acceder a esta VLAN para seguir gestionando el switch.",
         v_rename: "Renombrar",
         v_rename_t: "Renombrar VLAN",
-        v_mgmt_tt: "La VLAN de gestión no se puede borrar, primero hay que asignar la gestión a otra VLAN.",
         iso_title: "Aislamiento de puertos",
         iso_from: "Desde el puerto",
         iso_to: "Hacia el puerto",
@@ -1466,7 +1546,6 @@ var LANG = {
         nav_l2: "Table MAC",
         nav_mirror: "Mise en mirroir",
         nav_lag: "Aggrégation",
-        nav_eee: "Energie",
         nav_bw: "Bande passante",
         nav_system: "Système",
         nav_fw: "Micro logiciel",
@@ -1548,6 +1627,16 @@ var LANG = {
         pt_sfp_note: "La vitesse SFP est paramétrée pour le port et n'est pas enregistrée dans la configuration de démarrage.",
         pt_name_err: "Nom du port: 1 à 15 caractères, sans espaces",
         pt_mtu_err: "MTU doit être comrpis entre 64 et 16383",
+        pt_fc: "Contrôle de flux",
+        pt_eee: "EEE",
+        st_down: "Déconnecté",
+        st_inactive: "Inactif",
+        pt_pending: "Modifications en attente",
+        pt_nopending: "Aucune modification en attente",
+        pt_leave_q: "Quitter la page Ports ?",
+        pt_leave_d: "Ports avec des modifications non appliquées : {n}. Quitter abandonne ces modifications ; le commutateur garde ses réglages actuels.",
+        pt_sfp_adv: "Les ports SFP n'annoncent pas cette information.",
+        pt_info: "Détails",
         stp_title: "Arborescence",
         stp_h: "RSTP, 802.1w",
         stp_version: "Protocole",
@@ -1652,6 +1741,10 @@ var LANG = {
         l2_loading: "chargement...",
         l2_failed: "chargement non réussi",
         l2_entries: "entrées",
+        l2_loaded: "entrées chargées",
+        l2_scroll_more: "faites défiler pour en charger plus",
+        l2_more: "Charger plus",
+        l2_partial: "Le tri et le filtrage s'appliquent uniquement aux entrées chargées.",
         l2_del_t: "Supprimer l'entrée",
         l2_flush_q: "Effacer toutes les entrées MAC apprises?",
         m_title: "Duplication de ports",
@@ -1671,13 +1764,9 @@ var LANG = {
         lag_note: "Un groupe d'agrégation de Lien (LAG) nécessite au moins un membre pour être sauvegardé dans la configuration de démarrage; Utiliser un groupe vide fait office de remise à zero.",
         lag_clear_q: "Effacer l'agrégation {n}?",
         lag_clear_d: "Tous les ports membres vont redevenir normaux.",
-        e_title: "Gestion énergétique des ports",
         e_adv: "Capacités",
         e_lp: "Capacité du partenaire",
         e_active: "Actif",
-        e_enable: "Basse consommation",
-        e_note: "Capacité de l'hôte et des partenaires : 100M, 1G, 2.5G. Les ports SFP ne peuvent pas bénéficier de l'EEE.",
-        e_idle: "Inactif",
         e_na: "N/A",
         bw_title: "Limitations de bande passante",
         bw_h: "Mbit/s, 0.016-10000",
@@ -1814,7 +1903,6 @@ var LANG = {
         nav_mirror: "Spiegelung",
         nav_isolate: "Isolation",
         nav_lag: "LAG",
-        nav_eee: "EEE",
         nav_bw: "Bandbreite",
         nav_system: "System",
         nav_fw: "Firmware",
@@ -1895,6 +1983,16 @@ var LANG = {
         pt_sfp_note: "Die SFP-Geschwindigkeit wird pro Steckplatz gesetzt und nicht in der Startkonfiguration gespeichert.",
         pt_name_err: "Port-Name: 1-15 Zeichen, keine Leerzeichen",
         pt_mtu_err: "MTU muss zwischen 64 und 16383 liegen",
+        pt_fc: "Flusskontrolle",
+        pt_eee: "EEE",
+        st_down: "Getrennt",
+        st_inactive: "Inaktiv",
+        pt_pending: "Ausstehende Änderungen",
+        pt_nopending: "Keine ausstehenden Änderungen",
+        pt_leave_q: "Ports-Seite verlassen?",
+        pt_leave_d: "Ports mit nicht übernommenen Änderungen: {n}. Beim Verlassen werden diese Änderungen verworfen; der Switch behält seine aktuellen Einstellungen.",
+        pt_sfp_adv: "SFP-Ports bieten dies nicht an.",
+        pt_info: "Details",
         stp_title: "Spanning Tree",
         stp_h: "RSTP, 802.1w",
         stp_version: "Version",
@@ -2016,7 +2114,6 @@ var LANG = {
         v_vid_first: "Zuerst eine VLAN-ID eingeben",
         v_mgmt_q: "VLAN {n} als Management-VLAN setzen?",
         v_mgmt_d: "Der Switch versieht dann seinen eigenen Verkehr mit diesem VLAN-Tag. Führt der Port, über den du verbunden bist, dieses VLAN nicht, ist diese Seite nicht mehr erreichbar und die Einstellung lässt sich nur noch über die serielle Konsole zurücknehmen.",
-        v_mgmt_tt: "Das Management-VLAN lässt sich nicht löschen. Lege zuerst ein anderes VLAN als Management-VLAN fest.",
         l2_title: "MAC-Adresstabelle",
         l2_filter: "filtern...",
         l2_flush: "Gelernte Einträge löschen",
@@ -2025,6 +2122,10 @@ var LANG = {
         l2_loading: "lädt...",
         l2_failed: "Laden fehlgeschlagen",
         l2_entries: "Einträge",
+        l2_loaded: "Einträge geladen",
+        l2_scroll_more: "für weitere Einträge scrollen",
+        l2_more: "Mehr laden",
+        l2_partial: "Sortierung und Filter gelten nur für geladene Einträge.",
         l2_del_t: "Eintrag löschen",
         l2_flush_q: "Alle gelernten MAC-Einträge löschen?",
         m_title: "Port-Spiegelung",
@@ -2056,13 +2157,9 @@ var LANG = {
         lacp_rxstate: "Empfangsstatus",
         lacp_rx: "Empfangene LACPDUs",
         lacp_psys: "Partner-System",
-        e_title: "Energy Efficient Ethernet",
         e_adv: "Angeboten",
         e_lp: "Gegenstelle",
         e_active: "Aktiv",
-        e_enable: "Aktivieren",
-        e_note: "Angebotene und von der Gegenstelle unterstützte Stufen je Geschwindigkeit: 100M, 1G, 2.5G. SFP-Ports unterstützen kein EEE.",
-        e_idle: "inaktiv",
         e_na: "k. A.",
         bw_title: "Bandbreitenbegrenzung",
         bw_h: "Mbit/s, 0.016-10000",
@@ -2201,6 +2298,15 @@ var rtlLang = (function() {
 })();
 
 function t(k, v) {
+    if (S && S.info.mib_family === "rtl836x") {
+        if (k === "st_txg") return "TX U/M/B packets";
+        if (k === "st_rxg") return "RX U/M/B packets";
+        if (k === "st_txb" || k === "d_txbad") return "TX excessive collisions";
+        if (k === "st_rxb" || k === "d_rxbad") return "RX FCS errors";
+        if (k === "bw_h") return "Mbit/s, 0.008-1000 in 0.008 steps. Limits may throttle management traffic.";
+        if (k === "bw_in_err" || k === "bw_out_err") return "Limit must be 0.008-1000 Mbit/s in 0.008 steps";
+        if (k === "sc_err") return "Use 8-1000000 kbit/s in steps of 8; PPS is unsupported";
+    }
     var s = LANG[rtlLang][k] || LANG.en[k] || k;
     if (v)
         for (var x in v) s = s.split("{" + x + "}").join(v[x]);
@@ -2269,9 +2375,12 @@ function esc(s) {
 function badge(txt, cls) {
     return '<span class="badge' + (cls ? " " + cls : "") + '">' + esc(txt) + "</span>"
 }
-
+// Link state as on the Ports page: Off (port disabled), Down (no link), or the speed in its port strip colour
 function linkBadge(p) {
-    return !p.enabled ? badge(t("c_off")) : (p.link > 0 ? badge(LINKS[p.link], "ok") : badge(t("c_down")));
+    if (!p.enabled) return offBadge();
+    if (!(p.link > 0)) return stBadge(t("st_down"), "st-in");
+    var c = "var(" + (LINKC[p.link] || "--s1000") + ")";
+    return '<span class="badge fit" style="color:' + c + ';background:color-mix(in srgb,' + c + ' 10%,var(--panel2))">' + esc(LINKS[p.link]) + "</span>";
 }
 
 function applyTheme() {
@@ -2356,6 +2465,8 @@ function getText(p) {
 }
 
 var CONF_CMDS = [
+    /^snmp\s+(on|off)$/, /^snmp\s+community\s+[!-~]{1,32}$/, /^snmp\s+manager\s+(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/, /^snmp\s+changed\s+(unknown|\d{1,10})$/,
+    /^prometheus\s+(on|off)$/,
     /^ip\s+(\d{1,3}\.){3}\d{1,3}$/,
     /^ip\s+dhcp$/,
     /^gw\s+(\d{1,3}\.){3}\d{1,3}$/,
@@ -2376,9 +2487,12 @@ var CONF_CMDS = [
     /^pvid\s+\d+\s+\d+$/m,
     /^ingress(\s+\d+[tua])+$/, /^ingress\s+[tua]$/,
     /^port\s+\d+\s+(10m|100m|1g|2g5|5g|10g|auto|on|off)(\s+(half|full))?$/,
+    /^port\s+\d+\s+duplex\s+(half|full)$/,
+    /^poe\s+port\s+\d+\s+(on|off)$/,
     /^port\s+\d+\s+name(\s+\S+)?$/,
     /^port\s+\d+\s+lldp\s+(permit|block)+$/,
     /^eee\s+(on|off)(\s+\d+)?(\s+(100m|1g|2g5))?$/,
+    /^port\s+\d+\s+fc\s+(on|off)$/,
     /^mirror(\s+\d+)(\s+\d+[tr]?)+$/, /^mirror\s+off$/,
     /^lag\s+[1-4](\s+\d+)+$/, /^lag\s+[1-4]\s+d$/,
     /^lag\s+[1-4]\s+lacp(\s+\d+)+$/,
@@ -2399,6 +2513,7 @@ var CONF_CMDS = [
     /^igmp\s+(on|off)$/,
     /^mtu\s+\d+\s+\d+$/,
     /^lldp\s+(on|off)$/,
+    /^lldp\s+tlv\s+(portdesc|syscap|mgmt|pvid|macphy|lag|mfs)\s+(on|off)$/,
     /^bw\s+(in|out)\s+\d+\s+\S+$/,
     /^storm\s+\d+\s+(bcast|mcast|ucast|umcast)\s+(off|\d+\s+(pps|kbps))$/,
 ];
@@ -2416,23 +2531,32 @@ function setDirty(d) {
 }
 
 function postCmd(cmd, quiet) {
+    var safe = redactSnmp(cmd),
+        secret = safe !== cmd;
     return api("/cmd", {
         method: "POST",
         body: cmd
     }).then(function(r) {
-        if (!r.ok) throw new Error(((r.body || "").split("\n")[0]) || t("t_rejected", {
-            c: cmd
-        }));
-        if (isConfCmd(cmd.trim())) setDirty(true);
+        if (!r.ok) throw new Error(secret ? t("t_rejected", {
+            c: safe
+        }) : (((r.body || "").split("\n")[0]) || t("t_rejected", {
+            c: safe
+        })));
+        if (cmd.trim().split("\n").some(function(l) {
+                return isConfCmd(l.trim())
+            })) setDirty(true);
         if (!quiet) toast(t("t_applied", {
-            c: cmd
+            c: safe
         }), "ok");
         return r;
     }, function(e) {
-        toast(e.message || t("t_failed", {
-            c: cmd
-        }), "err");
-        throw e;
+        var message = secret ? t("t_failed", {
+            c: safe
+        }) : (e.message || t("t_failed", {
+            c: safe
+        }));
+        toast(message, "err");
+        throw secret ? new Error(message) : e;
     });
 }
 
@@ -2445,7 +2569,7 @@ function postCmds(list) {
     });
     return p.then(function() {
         toast(t("t_cmds", {
-            n: list.length
+            n: list.join("\n").split("\n").length
         }), "ok")
     });
 }
@@ -2468,6 +2592,8 @@ function toast(msg, cls) {
 function modal(title, bodyEl, buttons) {
     S.detail = null;
     portTip(); // Hide if open
+    $("modal").classList.remove("narrow");
+    if (!$("mback").classList.contains("show")) S.modalFocus = document.activeElement;
     $("mtitle").textContent = title;
     var b = $("mbody");
     b.innerHTML = "";
@@ -2478,15 +2604,36 @@ function modal(title, bodyEl, buttons) {
         f.appendChild(bt)
     });
     $("mback").classList.add("show");
+    $("mx").setAttribute("aria-label", t("c_close"));
+    $("mx").focus();
 }
 
 function closeModal() {
     S.detail = null;
-    $("mback").classList.remove("show")
+    $("mback").classList.remove("show");
+    var el = S.modalFocus;
+    if (el && !el.isConnected) el = $(el.id);
+    if (el) el.focus();
 }
 $("mx").addEventListener("click", closeModal);
 $("mback").addEventListener("click", function(e) {
     if (e.target === this) closeModal()
+});
+$("modal").addEventListener("keydown", function(e) {
+    if (e.key === "Escape") {
+        e.preventDefault();
+        closeModal()
+    }
+    if (e.key !== "Tab") return;
+    var controls = Array.prototype.filter.call(this.querySelectorAll("button,input,select,textarea,a[href],[tabindex]"), function(el) {
+        return el.tabIndex >= 0 && !el.disabled && el.offsetParent !== null
+    });
+    var first = controls[0],
+        last = controls[controls.length - 1];
+    if (e.shiftKey ? document.activeElement === first : document.activeElement === last) {
+        e.preventDefault();
+        (e.shiftKey ? last : first).focus();
+    }
 });
 
 function confirmModal(title, detail, onok) {
@@ -2553,10 +2700,6 @@ var TABS = [{
         icon: "M11 12a1 1 0 002 0 1 1 0 00-2 0M8.5 8.5a5 5 0 000 7M15.5 8.5a5 5 0 010 7M5.6 5.6a9 9 0 000 12.8M18.4 5.6a9 9 0 010 12.8"
     },
     {
-        id: "eee",
-        icon: "M13 2L4 14h6l-1 8 9-12h-6z"
-    },
-    {
         id: "bw",
         icon: "M4 18a8 8 0 0116 0M12 18l4-6"
     },
@@ -2574,6 +2717,12 @@ var tabHooks = {};
 
 function showTab(id) {
     var old = tabHooks[curTab];
+    if (id !== curTab && old && old.canLeave && !old.canLeave(function() {
+            showTab(id)
+        })) {
+        if (location.hash !== "#" + curTab) history.replaceState(null, "", "#" + curTab);
+        return;
+    }
     if (old && old.leave) old.leave();
     curTab = id;
     TABS.forEach(function(tb) {
@@ -2657,8 +2806,6 @@ function pollStatus() {
             S.n = s.length;
             var slot = 0;
             s.forEach(function(p) {
-                S.physToLog[p.portNum - 1] = p.logPort;
-                S.logToPhys[p.logPort] = p.portNum;
                 if (p.isSFP) {
                     slot++;
                     S.sfpSlot[p.portNum - 1] = slot;
@@ -2671,8 +2818,8 @@ function pollStatus() {
             if (dt > 0.2) s.forEach(function(p, i) {
                 var q = S.prev[i];
                 if (q) S.rates[p.portNum - 1] = {
-                    tx: Number(BigInt(p.txG) - BigInt(q.txG)) / dt,
-                    rx: Number(BigInt(p.rxG) - BigInt(q.rxG)) / dt,
+                    tx: counterRate(p.txG, q.txG, dt),
+                    rx: counterRate(p.rxG, q.rxG, dt),
                 };
             });
         }
@@ -2685,10 +2832,10 @@ function pollStatus() {
 }
 var statusPoller = new Poller(pollStatus, 2500);
 statusPoller.start();
-
+// Port count from /status.json, chip port mapping from /information.json: pages that decode port masks need both
 function needPorts(fn) {
-    if (S.n) return fn();
-    pollStatus().then(fn).catch(function() {});
+    if (S.n && S.physToLog.length) return fn();
+    Promise.all([S.n ? 0 : pollStatus(), S.physToLog.length ? 0 : pollInfo()]).then(fn).catch(function() {});
 }
 
 function fmtPps(v) {
@@ -2696,6 +2843,15 @@ function fmtPps(v) {
     if (v >= 1e6) return (v / 1e6).toFixed(1) + " M";
     if (v >= 1e3) return (v / 1e3).toFixed(1) + " k";
     return Math.round(v);
+}
+
+function counterText(v) {
+    return v == null ? "-" : BigInt(v).toString();
+}
+
+function counterRate(v, previous, dt) {
+    if (v == null || previous == null || BigInt(v) < BigInt(previous)) return null;
+    return Number(BigInt(v) - BigInt(previous)) / dt;
 }
 
 function portLabel(p) {
@@ -2721,6 +2877,13 @@ function portTip(i) {
         capture: true
     })
 });
+
+// PoE mark: an outline bolt in the nav icons' 24-unit stroke style, drawn in the text colour
+var BOLT = '<svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round" style="vertical-align:-1px"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg> ';
+
+function poeLabel(p) {
+    return p.poe_admin == null ? "" : t(p.poe_admin ? "poe_permitted" : "poe_disabled");
+}
 
 function buildStrip() {
     var st = $("strip");
@@ -2751,6 +2914,7 @@ function buildStrip() {
                 id: "ppl" + i,
                 text: "..."
             }),
+            h("span", {class: "poe", id: "ppoeLabel" + i}),
         ]));
     })(i);
 }
@@ -2766,6 +2930,11 @@ function updateStrip() {
         el.classList.toggle("up", !!up);
         if (up) el.style.setProperty("--pc", "var(" + (LINKC[p.link] || "--s1000") + ")");
         lb.textContent = !p.enabled ? t("c_off") : (p.link > 0 ? LINKS[p.link] : t("c_down"));
+        var poe = $("ppoeLabel" + i);
+        if (poe) {
+            poe.hidden = p.poe_admin == null;
+            poe.innerHTML = (p.poe_admin ? BOLT : "") + esc(poeLabel(p));
+        }
     });
     if (S.tip != null) portTip(S.tip);
     if (S.detail != null) {
@@ -2815,10 +2984,17 @@ function portRows(p) {
     ];
     if (p.name) rows.push([t("c_name"), p.name]);
     rows.push([t("p_state"), !p.enabled ? t("p_disabled") : (p.link > 0 ? t("p_up") + " " + LINKS[p.link] : t("c_down"))]);
-    rows.push([t("st_txg"), BigInt(p.txG) + " " + t("p_pkts")]);
-    rows.push([t("st_txb"), BigInt(p.txB) + " " + t("p_pkts")]);
-    rows.push([t("st_rxg"), BigInt(p.rxG) + " " + t("p_pkts")]);
-    rows.push([t("st_rxb"), BigInt(p.rxB) + " " + t("p_pkts")]);
+    rows.push([t("st_txg"), counterText(p.txG) + " " + t("p_pkts")]);
+    rows.push([t("st_txb"), counterText(p.txB) + " " + t("p_pkts")]);
+    rows.push([t("st_rxg"), counterText(p.rxG) + " " + t("p_pkts")]);
+    rows.push([t("st_rxb"), counterText(p.rxB) + " " + t("p_pkts")]);
+    if (p.poe_admin != null) {
+        rows.push([t("pt_poe"), poeLabel(p)]);
+        rows.push([t("poe_delivery"), t("poe_unknown")]);
+    }
+    (S.lldpNb || []).forEach(function(n) {
+        if (n.port === p.portNum && n.poe) rows.push([t("poe_pd"), lldpPoe(n)]);
+    });
     if (p.isSFP) {
         if (p.sfp_vendor) rows.push([t("p_module"), [p.sfp_vendor, p.sfp_model, p.sfp_serial].filter(Boolean).join(" / ")]);
         var ext = p.sfp_options & 0x40;
@@ -2870,6 +3046,9 @@ function portDetail(i) {
     if (!S.ports[i]) return;
     modal(t("c_port") + " " + (i + 1), detailTable(S.ports[i]));
     S.detail = i;
+    getJSON("/lldp.json").then(function(s) {
+        S.lldpNb = s.neighbors || []
+    }).catch(function() {});
 }
 
 function renderInfo() {
@@ -2912,8 +3091,16 @@ function renderInfo() {
 
 function pollInfo() {
     return getJSON("/information.json").then(function(j) {
+        var familyChanged = S.info.mib_family !== j.mib_family;
         S.info = j;
-        renderInfo()
+        if (familyChanged) i18nApply();
+        (j.logPort || []).forEach(function(l, i) {
+            S.physToLog[i] = l;
+            S.logToPhys[l] = i + 1
+        });
+        renderInfo();
+        renderSnmp(j.snmp);
+        renderPrometheus(j.prometheus)
     });
 }
 
@@ -2934,8 +3121,8 @@ function dashStatus() {
         r.cells[1].innerHTML = linkBadge(p);
         r.cells[2].textContent = rt ? fmtPps(rt.tx) : "-";
         r.cells[3].textContent = rt ? fmtPps(rt.rx) : "-";
-        r.cells[4].textContent = BigInt(p.txB).toString();
-        r.cells[5].textContent = BigInt(p.rxB).toString();
+        r.cells[4].textContent = counterText(p.txB);
+        r.cells[5].textContent = counterText(p.rxB);
     });
 }
 tabHooks.dash = {
@@ -2976,122 +3163,511 @@ function speedLabel(s) {
     if (s === "c_auto") return t("c_auto");
     return s.replace(" full", " " + t("c_full")).replace(" half", " " + t("c_half"));
 }
+/*
+ * Ports page. Every control is a draft until Apply. A port whose controls differ
+ * from the switch is highlighted, and Apply sends that port's whole state.
+ */
+var PT = {
+    rows: [],
+    orig: [],
+    pending: 0,
+    polls: 0
+};
+// "fc" bits of /status.json, as PAUSE_* in rtl837x_pause.h
+var FC_ADV = 1;
+// "eee" bits of /status.json, as EEE_* in httpd/page_impl.h
+var EEE_ADV = 31,
+    EEE_ACTIVE = 1024,
+    EEE_SPEEDS = ["100M", "1G", "2.5G", "5G", "10G"];
+
+function flagList(bits, names) {
+    return names.filter(function(s, i) {
+        return bits & (1 << i)
+    }).join(", ") || "-"
+}
+
+function infoBtn(title, body) {
+    return h("button", {
+        class: "ib",
+        title: t("pt_info"),
+        text: "\u24d8",
+        onclick: function() {
+            modal(title, body());
+            $("modal").classList.add("narrow")
+        }
+    });
+}
+
+function stBadge(txt, cls) {
+    return '<span class="badge fit' + (cls ? " " + cls : "") + '">' + esc(txt) + "</span>"
+}
+// Off: switched off. Inactive and Down: switched on, not in use. The looks follow the port strip tiles.
+function offBadge() {
+    return stBadge(t("c_offc"), "st-off")
+}
+
+function fcState(p) {
+    var n = p.fc >> 4 & 3;
+    if (!p.enabled || (!p.isSFP && !(p.fc & FC_ADV))) return offBadge();
+    return n ? stBadge(["", "TX", "RX", "TX/RX"][n], "ok") : stBadge(t("st_inactive"), "st-in");
+}
+
+function eeeState(p) {
+    if (p.isSFP) return stBadge(t("e_na"));
+    if (!p.enabled || !(p.eee & EEE_ADV)) return offBadge();
+    return p.eee & EEE_ACTIVE ? stBadge(t("e_active"), "ok") : stBadge(t("st_inactive"), "st-in");
+}
+// Status badges of a column all get the width of the longest label that column can show
+function fitBadges() {
+    var sets = {
+        pfl: LINKS.slice(1).concat([t("c_offc"), t("st_down")]),
+        pff: ["TX", "RX", "TX/RX", t("st_inactive"), t("c_offc"), t("e_na")],
+        pfe: [t("e_active"), t("st_inactive"), t("c_offc"), t("e_na")]
+    };
+    var probe = h("div", {
+            style: "position:absolute;visibility:hidden"
+        }),
+        css = "";
+    document.body.appendChild(probe);
+    for (var k in sets) {
+        probe.innerHTML = sets[k].map(function(s) {
+            return stBadge(s, "ok")
+        }).join("");
+        var w = 0;
+        [].forEach.call(probe.children, function(b) {
+            w = Math.max(w, b.offsetWidth)
+        });
+        css += "." + k + " .badge.fit{min-width:" + w + "px}";
+    }
+    probe.remove();
+    ($("pfitcss") || document.head.appendChild(h("style", {
+        id: "pfitcss"
+    }))).textContent = css;
+}
+
+function linkInfo(p) {
+    if (p.isSFP) return h("p", {
+        class: "small mut",
+        text: t("pt_sfp_adv")
+    });
+    // One row per speed, duplex merged like the port strip: adv bits 0-1 10M, 2-3 100M, 4 1G, 5 2.5G
+    var a = parseInt(p.adv, 2),
+        adv = [a & 3, a & 12, a & 16, a & 32],
+        cur = {
+            1: 0,
+            2: 1,
+            3: 2,
+            6: 3
+        } [p.link];
+    var c = "var(" + (LINKC[p.link] || "--s1000") + ")";
+    var tb = h("table", {
+            class: "t"
+        }),
+        r = tb.createTHead().insertRow(),
+        bd = tb.createTBody();
+    [t("pt_speed"), t("e_adv")].forEach(function(s) {
+        r.appendChild(h("th", {
+            text: s
+        }))
+    });
+    ["10M", "100M", "1G", "2.5G"].forEach(function(s, i) {
+        var tr = bd.insertRow(0),
+            c0 = tr.insertCell(),
+            c1 = tr.insertCell();
+        c0.textContent = s;
+        if (p.enabled && i === cur) {
+            c0.style.cssText = "font-weight:650;color:" + c;
+            c1.innerHTML = '<span class="badge" style="color:' + c + ';border:1px solid ' + c + ';background:color-mix(in srgb,' + c + ' 10%,var(--panel2))">\u2713 ' + esc(t("c_link")) + "</span>";
+        } else c1.innerHTML = adv[i] ? badge("\u2713", "ok") : '<span class="mut">-</span>';
+    });
+    return tb;
+}
+
+function pairInfo(p, adv, lp) {
+    if (p.isSFP) return h("p", {
+        class: "small mut",
+        text: t("pt_sfp_adv")
+    });
+    var tb = h("table", {
+            class: "t"
+        }),
+        bd = tb.createTBody();
+    [
+        [t("e_adv"), adv],
+        [t("e_lp"), lp]
+    ].forEach(function(x) {
+        var tr = bd.insertRow(),
+            c = tr.insertCell();
+        c.className = "mut";
+        c.textContent = x[0];
+        tr.insertCell().textContent = x[1];
+    });
+    return tb;
+}
+
+function pTitle(p, what) {
+    return t("c_port") + " " + p.portNum + ": " + what
+}
+// Switch, live status and the info button of one feature; SFP ports get n/a in the switch's place
+function featCell(td, cls, ctl, info) {
+    td.className = cls;
+    td.appendChild(h("span", {
+        class: "feat"
+    }, [ctl ? ctl.parentNode : h("span", {
+        class: "na",
+        html: badge(t("e_na"))
+    }), h("span", {
+        class: "st"
+    }), info]));
+}
+
+function swCtl() {
+    return h("label", {
+        class: "switch"
+    }, [h("input", {
+        type: "checkbox"
+    }), h("i")]).firstChild
+}
+
+function cellL(tr, key) {
+    var c = tr.insertCell();
+    c.setAttribute("data-l", t(key));
+    return c
+}
+// The settings the switch reports for a port, in the form of the controls
+function portCfg(p) {
+    var i = p.portNum - 1;
+    return {
+        en: !!p.enabled,
+        name: p.name || "",
+        spd: p.isSFP ? null : (ADVSEL[parseInt(p.adv, 2)] || (S.info.mib_family === "rtl836x" ? "custom" : "auto")),
+        mtu: S.mtu[i] != null ? String(S.mtu[i]) : "",
+        fc: !!(p.fc & FC_ADV),
+        eee: !!(p.eee & EEE_ADV),
+        poe: p.poe_admin == null ? null : !!p.poe_admin
+    };
+}
+
+function readCtl(r) {
+    return {
+        en: r.en.checked,
+        name: r.name.value.trim(),
+        spd: r.spd.value,
+        mtu: r.mtu.value.trim(),
+        fc: r.fc ? r.fc.checked : false,
+        eee: r.eee ? r.eee.checked : false,
+        poe: r.poe ? r.poe.checked : null
+    };
+}
+
+function setCtl(r, k, v) {
+    if (!r[k] || v == null) return;
+    if (r[k].type === "checkbox") r[k].checked = v;
+    else r[k].value = v
+}
 
 function buildPorts() {
     var tb = $("ptable").tBodies[0];
     if (tb.rows.length || !S.n) return;
+    fitBadges();
+    var rtl836x = S.info.mib_family === "rtl836x";
+    var ph = $("ptpoe");
+    ph.hidden = !S.info.poe_ports;
+    ph.innerHTML = BOLT + esc(t("pt_poe"));
+    PT.rows = [];
+    PT.orig = [];
     S.ports.forEach(function(p) {
-        var i = p.portNum - 1;
-        var spd = h("select", {
+        var i = p.portNum - 1,
+            r = {
+                p: p
+            };
+        r.en = swCtl();
+        r.name = h("input", {
             class: "in",
-            id: "pspd" + i
-        });
-        (p.isSFP ? SFPRATES : SPEEDS).forEach(function(o) {
-            spd.appendChild(h("option", {
-                value: o[0],
-                text: speedLabel(o[1])
-            }));
-        });
-        var tr = tb.insertRow();
-        tr.insertCell().textContent = p.portNum + (p.isSFP ? " (SFP)" : "");
-        tr.insertCell().appendChild(h("input", {
-            class: "in",
-            id: "pname" + i,
             size: "9",
             maxlength: "15",
-            value: p.name || "",
             placeholder: "-"
+        });
+        r.spd = h("select", {
+            class: "in"
+        });
+        if (rtl836x) r.spd.appendChild(h("option", {
+            value: "custom",
+            text: t("pt_custom"),
+            disabled: true
         }));
-        tr.insertCell().id = "plink" + i;
-        var mc = tr.insertCell();
-        mc.id = "pmac" + i;
-        mc.className = "mono";
-        mc.textContent = "-";
-        tr.insertCell().appendChild(spd);
-        var sw = h("label", {
-            class: "switch"
-        }, [h("input", {
-            type: "checkbox",
-            id: "pen" + i
-        }), h("i")]);
-        sw.firstChild.checked = !!p.enabled;
-        tr.insertCell().appendChild(sw);
-        tr.insertCell().appendChild(h("input", {
-            class: "in sm",
-            id: "pmtu" + i,
+        (p.isSFP ? SFPRATES : SPEEDS).forEach(function(o) {
+            if (rtl836x && o[0] === "2g5") return;
+            r.spd.appendChild(h("option", {
+                value: o[0],
+                text: speedLabel(o[1])
+            }))
+        });
+        r.mtu = h("input", {
+            class: "in mtu",
             type: "number",
             min: "64",
             max: "16383"
+        });
+        r.fc = p.isSFP ? null : swCtl();
+        r.eee = p.isSFP ? null : swCtl();
+        r.poe = p.poe_admin == null ? null : swCtl();
+        var tr = r.row = tb.insertRow();
+        var pc = cellL(tr, "c_port");
+        pc.className = "pn";
+        pc.textContent = p.portNum + (p.isSFP ? " (SFP)" : "");
+        cellL(tr, "c_enabled").appendChild(r.en.parentNode);
+        cellL(tr, "c_name").appendChild(r.name);
+        var lk = cellL(tr, "c_link");
+        lk.className = "pfl";
+        lk.appendChild(h("span", {
+            class: "feat"
+        }, [h("span", {
+            class: "st"
+        }), infoBtn(pTitle(p, t("c_link")), function() {
+            return linkInfo(S.ports[i])
+        })]));
+        cellL(tr, "pt_speed").appendChild(r.spd);
+        var mc = cellL(tr, "pt_mtu");
+        mc.appendChild(r.mtu);
+        featCell(cellL(tr, "pt_fc"), "pff", r.fc, infoBtn(pTitle(p, t("pt_fc")), function() {
+            var q = S.ports[i];
+            return pairInfo(q, flagList(q.fc, ["Pause", "Asym"]), flagList(q.fc >> 2, ["Pause", "Asym"]))
         }));
-        tr.insertCell().appendChild(h("button", {
-            class: "ctl",
-            text: t("c_apply"),
-            onclick: function() {
-                applyPort(i)
+        featCell(cellL(tr, "pt_eee"), "pfe", r.eee, infoBtn(pTitle(p, t("pt_eee")), function() {
+            var q = S.ports[i];
+            return pairInfo(q, flagList(q.eee, EEE_SPEEDS), flagList(q.eee >> 5, EEE_SPEEDS))
+        }));
+        var pc2 = cellL(tr, "pt_poe");
+        pc2.hidden = !S.info.poe_ports;
+        // Ports without PoE get n/a, as SFP ports do for flow control and EEE
+        pc2.appendChild(r.poe ? r.poe.parentNode : h("span", {
+            class: "na",
+            html: badge(t("e_na"))
+        }));
+        // The narrow layout labels each cell from CSS, which cannot draw the bolt: give PoE a real label
+        pc2.className = "ppoe";
+        pc2.insertAdjacentHTML("afterbegin", '<span class="plb">' + BOLT + esc(t("pt_poe")) + "</span>");
+        [r.en, r.name, r.spd, r.mtu, r.fc, r.eee, r.poe].forEach(function(c) {
+            if (c) {
+                c.addEventListener("input", ptUpdate);
+                c.addEventListener("change", ptUpdate)
             }
-        }));
+        });
+        var cfg = portCfg(p);
+        ["en", "name", "spd", "mtu", "fc", "eee", "poe"].forEach(function(k) {
+            setCtl(r, k, cfg[k])
+        });
+        PT.rows[i] = r;
+        PT.orig[i] = readCtl(r);
     });
-    loadMtu();
+    // Copper and SFP speed lists differ: give every Speed select the widest one's width
+    var w = 0;
+    PT.rows.forEach(function(r) {
+        w = Math.max(w, r.spd.offsetWidth)
+    });
+    PT.rows.forEach(function(r) {
+        r.spd.style.width = w + "px"
+    });
+    portsStatus();
 }
 
 function loadMtu() {
     return getJSON("/mtu.json").then(function(s) {
         s.forEach(function(m) {
-            S.mtu[m.portNum - 1] = parseInt(m.mtu, 16);
-            var el = $("pmtu" + (m.portNum - 1));
-            if (el && document.activeElement !== el) el.value = parseInt(m.mtu, 16);
+            S.mtu[m.portNum - 1] = parseInt(m.mtu, 16)
+        });
+        portsSync();
+    });
+}
+// Controls the user has not touched follow the switch; edited ones keep the draft
+function portsSync() {
+    PT.rows.forEach(function(r, i) {
+        var p = S.ports[i],
+            cfg = portCfg(p),
+            cur = readCtl(r),
+            o = PT.orig[i];
+        r.p = p;
+        ["en", "name", "spd", "mtu", "fc", "eee", "poe"].forEach(function(k) {
+            if (cfg[k] == null || cur[k] !== o[k]) return;
+            setCtl(r, k, cfg[k]);
+            o[k] = readCtl(r)[k];
+        });
+        portsSync();
+    });
+    ptUpdate();
+}
+// Controls the user has not touched follow the switch; edited ones keep the draft
+function portsSync() {
+    PT.rows.forEach(function(r, i) {
+        var p = S.ports[i],
+            cfg = portCfg(p),
+            cur = readCtl(r),
+            o = PT.orig[i];
+        r.p = p;
+        ["en", "name", "spd", "mtu", "fc", "eee"].forEach(function(k) {
+            if (cfg[k] == null || cur[k] !== o[k]) return;
+            setCtl(r, k, cfg[k]);
+            o[k] = readCtl(r)[k];
         });
     });
+    ptUpdate();
 }
 
 function portsStatus() {
     buildPorts();
     S.ports.forEach(function(p) {
-        var i = p.portNum - 1,
-            el = $("plink" + i);
-        var mc = $("pmac" + i);
-        if (mc) mc.textContent = parseInt(p.macs, 16) & 0x1fff;
-        if (el) el.innerHTML = linkBadge(p);
-        var sel = $("pspd" + i),
-            v = p.isSFP ? 0 : ADVSEL[parseInt(p.adv, 2)];
-        if (sel && v && document.activeElement !== sel) sel.value = v;
+        var r = PT.rows[p.portNum - 1];
+        if (!r) return;
+        var c = r.row.cells;
+        c[3].querySelector(".st").innerHTML = linkBadge(p);
+        c[6].querySelector(".st").innerHTML = fcState(p);
+        c[7].querySelector(".st").innerHTML = eeeState(p);
     });
+    portsSync();
+}
+// What Apply sends for one port: its whole state as shown, so the port ends up as displayed
+function portCmds(r, s, o) {
+    var p = r.p,
+        n = p.portNum,
+        c = [];
+    // Off goes first: a PHY that is off ignores the resets fc and eee would cause
+    if (!s.en) c.push("port " + n + " off");
+    if (s.name !== o.name) c.push("port " + n + " name" + (s.name ? " " + s.name : ""));
+    if (s.en) {
+        // Setting the speed restarts autonegotiation, so only when it changed or the port comes back on
+        if (!p.isSFP) {
+            if (s.spd === "custom") {
+                if (!p.enabled) c.push("port " + n + " on");
+            } else if (s.spd !== o.spd || !p.enabled) c.push("port " + n + " " + s.spd);
+        } else {
+            if (!p.enabled) c.push("port " + n + " on");
+            // The SFP rate cannot be read back, so it is only sent when it was changed
+            if (s.spd !== o.spd) c.push("sfp " + S.sfpSlot[n - 1] + " " + s.spd);
+        }
+    }
+    if (s.mtu) c.push("mtu " + n + " " + s.mtu);
+    if (!p.isSFP) {
+        c.push("port " + n + " fc " + (s.fc ? "on" : "off"));
+        c.push("eee " + (s.eee ? "on" : "off") + " " + n)
+    }
+    // PoE only when it changed: the controller restarts detection on the port
+    if (s.poe != null && s.poe !== o.poe) c.push("poe port " + n + " " + (s.poe ? "on" : "off"));
+    return c;
 }
 
-function applyPort(i) {
-    var p = S.ports[i],
+function ptChanged() {
+    var out = [];
+    PT.rows.forEach(function(r, i) {
+        var a = PT.orig[i],
+            b = readCtl(r),
+            ch = [];
+        ["en", "name", "spd", "mtu", "fc", "eee", "poe"].forEach(function(k) {
+            if (a[k] !== b[k]) ch.push(k)
+        });
+        if (ch.length) out.push({
+            r: r,
+            s: b,
+            o: a,
+            keys: ch
+        });
+    });
+    return out;
+}
+
+function ptUpdate() {
+    var ch = ptChanged(),
+        box = $("ppending");
+    PT.rows.forEach(function(r) {
+        r.row.classList.remove("chg");
+        ["en", "name", "spd", "mtu", "fc", "eee", "poe"].forEach(function(k) {
+            if (r[k])(r[k].type === "checkbox" ? r[k].nextSibling : r[k]).classList.remove("chg")
+        });
+    });
+    ch.forEach(function(x) {
+        x.r.row.classList.add("chg");
+        x.keys.forEach(function(k) {
+            var e = x.r[k];
+            if (e)(e.type === "checkbox" ? e.nextSibling : e).classList.add("chg")
+        });
+    });
+    PT.pending = ch.length;
+    // One line per changed port, the commands Apply will send
+    box.value = ch.map(function(x) {
+        return portCmds(x.r, x.s, x.o).join("; ")
+    }).join("\n");
+    box.rows = Math.min(Math.max(ch.length, 1), 6);
+    box.hidden = !ch.length;
+    $("pcount").textContent = t(ch.length ? "pt_pending" : "pt_nopending");
+    $("papply").disabled = !ch.length;
+}
+
+function applyPorts() {
+    var ch = ptChanged(),
         cmds = [];
-    var name = $("pname" + i).value.trim();
-    var en = $("pen" + i).checked;
-    var spd = $("pspd" + i).value;
-    var mtu = parseInt($("pmtu" + i).value, 10);
-    var oldName = p.name || "";
-    if (name !== oldName) {
-        if (name && !/^\S{1,15}$/.test(name)) {
+    for (var j = 0; j < ch.length; j++) {
+        var s = ch[j].s;
+        if (s.name && s.name !== ch[j].o.name && !/^\S{1,15}$/.test(s.name)) {
             toast(t("pt_name_err"), "err");
             return;
         }
-        cmds.push("port " + p.portNum + " name" + (name ? " " + name : ""));
-    }
-    if (!en) cmds.push("port " + p.portNum + " off");
-    else if (p.isSFP) {
-        if (!p.enabled) cmds.push("port " + p.portNum + " on");
-        cmds.push("sfp " + S.sfpSlot[i] + " " + spd);
-    } else cmds.push("port " + p.portNum + " " + spd);
-    if (mtu && mtu !== S.mtu[i]) {
-        if (mtu < 64 || mtu > 16383) {
+        if (s.mtu && !(/^\d+$/.test(s.mtu) && +s.mtu >= 64 && +s.mtu <= 16383)) {
             toast(t("pt_mtu_err"), "err");
             return;
         }
-        cmds.push("mtu " + p.portNum + " " + mtu);
+        // One POST per port: its commands run back to back instead of one HTTP round trip apart
+        var c = portCmds(ch[j].r, s, ch[j].o);
+        if (c.length) cmds.push(c.join("\n"));
     }
-    postCmds(cmds).then(loadMtu).catch(function() {});
+    $("papply").disabled = true;
+    // Rebuild from what the switch reports once the links have renegotiated
+    var reload = function() {
+        setTimeout(function() {
+            $("ptable").tBodies[0].innerHTML = "";
+            PT.rows = [];
+            pollStatus().then(function() {
+                buildPorts()
+            }).catch(function() {});
+        }, 1000);
+    };
+    postCmds(cmds).then(reload, function(e) {
+        toast(e.message, "err");
+        reload()
+    });
 }
+$("papply").addEventListener("click", applyPorts);
+// Leaving with unapplied changes asks first: the browser's own prompt for reload or close
+window.addEventListener("beforeunload", function(e) {
+    if (PT.pending) {
+        e.preventDefault();
+        e.returnValue = ""
+    }
+});
 tabHooks.ports = {
     enter: function() {
-        needPorts(buildPorts)
+        needPorts(function() {
+            buildPorts();
+            loadMtu();
+        })
     },
-    status: portsStatus,
+    // The MTU is not in /status.json: re-read it every 4th poll, so changes made elsewhere show
+    status: function() {
+        portsStatus();
+        if (++PT.polls % 4 === 0) loadMtu();
+    },
+    // and confirmModal when switching to another page
+    canLeave: function(go) {
+        if (!PT.pending) return true;
+        confirmModal(t("pt_leave_q"), t("pt_leave_d", {
+            n: PT.pending
+        }), function() {
+            $("ptable").tBodies[0].innerHTML = "";
+            PT.rows = [];
+            PT.pending = 0;
+            go();
+        });
+        return false;
+    },
 };
 
 var STP_PF = {
@@ -3408,7 +3984,9 @@ $("stpcntd").addEventListener("toggle", function() {
 var stpPoller = new Poller(stpLoad, 3000);
 tabHooks.stp = {
     enter: function() {
-        stpPoller.start()
+        needPorts(function() {
+            stpPoller.start()
+        })
     },
     leave: function() {
         stpPoller.stop()
@@ -3461,8 +4039,46 @@ var MIB = [
     "TX Good Counter PHY", 8, "", 0, "RX Good Counter PHY", 8, "", 0,
     "RX Error Counter PHY", 4, "TX Error Counter PHY", 4,
 ];
+/* Native per-port SRAM order, one counter per JSON entry (width in bytes). */
+var MIB836X = [
+    "Interface in Octets", 8, "802.3 FCS errors", 4,
+    "802.3 Symbol errors", 4, "802.3 In Pause frames", 4,
+    "802.3 Control in unknown opcodes", 4, "Ether fragments", 4,
+    "Ether jabbers", 4, "Interface in Unicast Pkts", 4,
+    "Ether drop events", 4, "Interface in Multicast Pkts", 4,
+    "Interface in Broadcast Pkts", 4, "In MLD checksum errors", 4,
+    "In IGMP checksum errors", 4, "In MLD specific query", 4,
+    "In MLD general query", 4, "In IGMP specific query", 4,
+    "In IGMP general query", 4, "In MLD leaves", 4, "In IGMP leaves", 4,
+    "Ether RX/TX Octets", 8, "Ether RX/TX undersize Pkts", 4,
+    "Ether RX/TX oversize Pkts", 4, "Ether RX/TX Pkts 64 Octets", 4,
+    "Ether RX/TX Pkts 65-127 Octets", 4, "Ether RX/TX Pkts 128-255 Octets", 4,
+    "Ether RX/TX Pkts 256-511 Octets", 4, "Ether RX/TX Pkts 512-1023 Octets", 4,
+    "Ether RX/TX Pkts 1024-1518 Octets", 4, "Interface out Octets", 8,
+    "802.3 Single collision frames", 4, "802.3 Multi collision frames", 4,
+    "802.3 Deferred transmissions", 4, "802.3 Late collisions", 4,
+    "Ether collisions", 4, "802.3 Excessive collisions", 4,
+    "802.3 Out Pause frames", 4, "Interface out discards", 4,
+    "802.1d Tp Port in discards", 4, "Interface out Unicast Pkts", 4,
+    "Interface out Multicast Pkts", 4, "Interface out Broadcast Pkts", 4,
+    "Out OAMPDU Pkts", 4, "In OAMPDU Pkts", 4,
+    "In IGMP joins success", 4, "In IGMP joins fail", 4,
+    "In MLD joins success", 4, "In MLD joins fail", 4,
+    "In report suppression drops", 4, "In leave suppression drops", 4,
+    "Out IGMP reports", 4, "Out IGMP leaves", 4,
+    "Out IGMP general query", 4, "Out IGMP specific query", 4,
+    "Out MLD reports", 4, "Out MLD leaves", 4,
+    "Out MLD general query", 4, "Out MLD specific query", 4,
+    "In known multicast Pkts", 4
+];
 /* counters.json returns 64-bit hex words; two 32-bit counters share one word */
 function decodeCounters(s) {
+    if (S.info.mib_family === "rtl836x") {
+        if (s.length !== MIB836X.length / 2) throw new Error("Invalid native MIB array");
+        return s.map(function(v, i) {
+            return [MIB836X[2 * i], v == null ? null : BigInt(v)];
+        });
+    }
     var out = [];
     for (var i = 0; i < MIB.length; i += 4) {
         if (MIB[i] === "" && MIB[i + 1] === 8) continue;
@@ -3498,7 +4114,9 @@ function showCounters(i) {
     body.appendChild(wrap);
 
     function load() {
-        return getJSON("/counters.json?port=" + (i + 1)).then(function(s) {
+        return (S.info.hw_ver ? Promise.resolve() : pollInfo()).then(function() {
+            return getJSON("/counters.json?port=" + (i + 1));
+        }).then(function(s) {
             var rows = decodeCounters(s);
             var tb = h("table", {
                 class: "t"
@@ -3515,11 +4133,13 @@ function showCounters(i) {
                     text: r[0]
                 }), h("td", {
                     class: "num mono",
-                    text: r[1].toString()
+                    text: r[1] == null ? "-" : r[1].toString()
                 })]));
             });
             wrap.innerHTML = "";
             wrap.appendChild(tb);
+        }).catch(function() {
+            wrap.textContent = t("st_fail");
         });
     }
     nz.addEventListener("change", load);
@@ -3528,9 +4148,7 @@ function showCounters(i) {
         return auto.checked ? load() : Promise.resolve()
     }, 2500);
     ctrPoll.start();
-    load().catch(function() {
-        wrap.textContent = t("st_fail")
-    });
+    load();
     modal(t("c_port") + " " + (i + 1) + ": " + t("st_counters"), body,
         [h("button", {
                 class: "ctl",
@@ -3556,7 +4174,7 @@ function statsStatus() {
         tb.innerHTML = "";
         for (var i = 0; i < S.n; i++)(function(i) {
             var tr = tb.insertRow();
-            for (var c = 0; c < 7; c++) tr.insertCell().className = c >= 3 ? "num" : "";
+            for (var c = 0; c < 8; c++) tr.insertCell().className = c >= 3 ? "num" : "";
             tr.insertCell().appendChild(h("button", {
                 class: "ctl",
                 text: t("st_details"),
@@ -3572,10 +4190,11 @@ function statsStatus() {
         r.cells[0].textContent = p.portNum;
         r.cells[1].textContent = p.name || "";
         r.cells[2].innerHTML = linkBadge(p);
-        r.cells[3].textContent = BigInt(p.txG).toString();
-        r.cells[4].textContent = BigInt(p.txB).toString();
-        r.cells[5].textContent = BigInt(p.rxG).toString();
-        r.cells[6].textContent = BigInt(p.rxB).toString();
+        r.cells[3].textContent = counterText(p.txG);
+        r.cells[4].textContent = counterText(p.txB);
+        r.cells[5].textContent = counterText(p.rxG);
+        r.cells[6].textContent = counterText(p.rxB);
+        r.cells[7].textContent = p.macs == null ? "-" : parseInt(p.macs, 16) & 0x1fff;
     });
 }
 tabHooks.stats = {
@@ -3692,14 +4311,7 @@ function vlanRefresh() {
                         })]);
                     },
                 }));
-                if (v.id == $("vmgmtcur").dataset.id) {
-                    act.appendChild(h("span", {
-                        class: "ctl",
-                        title: t("v_mgmt_tt"),
-                        class: "hint",
-                        style: "color: var(--fg2); font-size: 150%; padding-left: 10px;"
-                    }, [document.createTextNode("\u{1F6C8}")]));
-                } else {
+                if (v.id != $("vmgmtcur").dataset.id) {
                     act.appendChild(h("button", {
                         class: "ctl",
                         text: "\u2715",
@@ -3973,39 +4585,33 @@ function VlanInit() {
 var l2Rows = [],
     l2SortCol = "pport",
     l2SortDir = 1,
-    l2Gen = 0;
+    l2Gen = 0,
+    l2Walk = null;
 
 function l2Load() {
-    var seen = {},
-        all = [],
-        idx = 0,
-        guard = 0,
-        gen = ++l2Gen;
-
-    function step() {
-        return getJSON("/l2.json?idx=" + idx).then(function(s) {
-            if (gen !== l2Gen) throw new Error("stale");
-            if (!s.length) return all;
-            var wrapped = false;
-            s.forEach(function(e) {
-                e.idx = parseInt(e.idx, 16);
-                if (seen[e.idx]) {
-                    wrapped = true;
-                    return;
-                }
-                seen[e.idx] = 1;
-                e.vlan = parseInt(e.vlan, 16);
-                e.stat = e.type === "s";
-                e.pport = e.port === 9 ? "CPU" : S.logToPhys[e.port];
-                e.where = e.lag ? "LAG" + e.lag : String(e.pport);
-                all.push(e);
-            });
-            if (wrapped || ++guard > 140) return all;
-            idx = s[s.length - 1].idx + 1;
-            return step();
+    var walk = l2Walk;
+    if (!walk || walk.loading || walk.done) return Promise.resolve();
+    walk.loading = true;
+    return getJSON("/l2.json?idx=" + walk.idx).then(function(s) {
+        if (walk.gen !== l2Gen) throw new Error("stale");
+        if (!s.length) walk.done = true;
+        s.forEach(function(e) {
+            e.idx = parseInt(e.idx, 16);
+            if (walk.seen[e.idx]) {
+                walk.done = true;
+                return;
+            }
+            walk.seen[e.idx] = 1;
+            e.vlan = parseInt(e.vlan, 16);
+            e.stat = e.type === "s";
+            e.pport = e.port === 9 ? "CPU" : S.logToPhys[e.port];
+            e.where = e.lag ? "LAG" + e.lag : String(e.pport);
+            l2Rows.push(e);
         });
-    }
-    return step();
+        if (s.length) walk.idx = s[s.length - 1].idx + 1;
+    }).finally(function() {
+        walk.loading = false;
+    });
 }
 
 function l2Key(e) {
@@ -4019,13 +4625,27 @@ function l2Key(e) {
 }
 
 function l2Fetch() {
+    l2Rows = [];
+    l2Walk = { seen: {}, idx: 0, gen: ++l2Gen, loading: false, done: false };
+    l2Render();
+    return l2More();
+}
+
+function l2More() {
+    if (!l2Walk || l2Walk.loading || l2Walk.done) return Promise.resolve();
+    var gen = l2Gen;
+    $("l2more").disabled = true;
     $("l2count").textContent = t("l2_loading");
-    return l2Load().then(function(all) {
-        l2Rows = all;
-        l2Render();
-    }).catch(function(e) {
-        if (e.message !== "stale") $("l2count").textContent = t("l2_failed")
+    return l2Load().then(l2Render).catch(function(e) {
+        if (gen !== l2Gen) return;
+        $("l2more").disabled = false;
+        $("l2count").textContent = t("l2_failed");
     });
+}
+
+function l2Scroll() {
+    if (curTab === "l2" && $("l2more").getBoundingClientRect().top <=
+            document.querySelector("main").getBoundingClientRect().bottom + 100) l2More();
 }
 
 function l2Render() {
@@ -4058,7 +4678,8 @@ function l2Render() {
             text: "\u2715",
             title: t("l2_del_t"),
             onclick: function() {
-                getJSON("/l2_del.json?idx=" + e.idx).then(function() {
+                getJSON("/l2_del.json?idx=" + e.idx).then(function(r) {
+                    if (r.result !== 1) return;
                     l2Rows = l2Rows.filter(function(x) {
                         return x !== e
                     });
@@ -4067,7 +4688,14 @@ function l2Render() {
             }
         }));
     });
-    $("l2count").textContent = shown + " / " + l2Rows.length + " " + t("l2_entries");
+    var partial = l2Walk && !l2Walk.done;
+    $("l2count").textContent = (shown === l2Rows.length ? shown : shown + " / " + l2Rows.length) +
+        " " + t(partial ? "l2_loaded" : "l2_entries") +
+        (partial ? " \u00b7 " + t("l2_scroll_more") : "");
+    $("l2more").hidden = !l2Walk || l2Walk.done;
+    $("l2more").disabled = !!l2Walk && l2Walk.loading;
+    $("l2partial").hidden = !l2Walk || l2Walk.done;
+    requestAnimationFrame(l2Scroll);
 }
 $("l2table").querySelectorAll("th[data-sort]").forEach(function(th) {
     th.addEventListener("click", function() {
@@ -4081,6 +4709,9 @@ $("l2filter").addEventListener("input", l2Render);
 $("l2refresh").addEventListener("click", function() {
     l2Fetch()
 });
+$("l2more").addEventListener("click", l2More);
+document.querySelector("main").addEventListener("scroll", l2Scroll, { passive: true });
+window.addEventListener("resize", l2Scroll);
 $("l2flush").addEventListener("click", function() {
     confirmModal(t("l2_flush_q"), "", function() {
         postCmd("l2 forget").then(function() {
@@ -4091,11 +4722,12 @@ $("l2flush").addEventListener("click", function() {
 tabHooks.l2 = {
     enter: function() {
         needPorts(function() {
-            l2Fetch()
+            if (curTab === "l2") l2Fetch()
         })
     },
     leave: function() {
-        l2Gen++
+        l2Gen++;
+        l2Walk = null;
     }
 };
 
@@ -4326,9 +4958,46 @@ tabHooks.isolate = {
 var HASHF = ["spa", "smac", "dmac", "sip", "dip", "sport", "dport"];
 
 function buildLag() {
-    var w = $("lagwrap");
+    var w = $("lagwrap"),
+        fixed = S.info.mib_family === "rtl836x";
     if (w.children.length) return;
-    for (var g = 1; g <= 4; g++)(function(g) {
+    if (fixed) {
+        var hc = h("div", {
+            class: "card",
+            style: "grid-column:1/-1",
+            id: "lghcard"
+        });
+        hc.appendChild(h("p", {
+            class: "small mut",
+            style: "margin-bottom:10px",
+            text: t("lag_fixed836")
+        }));
+        var hrow = h("div", {
+            style: "display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px",
+            class: "small"
+        });
+        hrow.appendChild(h("span", {
+            class: "mut",
+            text: t("lag_hash836")
+        }));
+        HASHF.forEach(function(f) {
+            hrow.appendChild(h("label", null, [h("input", {
+                type: "checkbox",
+                id: "lgh" + f
+            }), document.createTextNode(" " + f + " ")]));
+        });
+        hc.appendChild(hrow);
+        hc.appendChild(h("button", {
+            class: "ctl pri",
+            text: t("c_apply"),
+            onclick: lagHashApply
+        }));
+        hc.addEventListener("change", function() {
+            hc.dataset.dirty = "1"
+        });
+        w.appendChild(hc);
+    }
+    for (var g = 1; g <= (fixed ? 2 : 4); g++)(function(g) {
         var card = h("div", {
             class: "card"
         });
@@ -4368,28 +5037,45 @@ function buildLag() {
         var pr = h("div", {
             style: "display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px"
         });
-        for (var p = 1; p <= S.n; p++) pr.appendChild(h("label", null, [
-            h("input", {
-                type: "checkbox",
-                id: "lg" + g + "p" + p
-            }), document.createTextNode(" " + p + " "),
-        ]));
+        var lo = 0,
+            hi = 0;
+        for (var p = 1; p <= S.n; p++) {
+            if (fixed && (S.physToLog[p - 1] >> 2) !== g - 1) continue;
+            lo = lo || p;
+            hi = p;
+            pr.appendChild(h("label", null, [
+                h("input", {
+                    type: "checkbox",
+                    id: "lg" + g + "p" + p
+                }), document.createTextNode(" " + p + " "),
+            ]));
+        }
+        if (fixed) card.insertBefore(h("p", {
+            class: "small mut",
+            style: "margin-bottom:10px",
+            text: t("lag_range836", {
+                a: lo,
+                b: hi
+            })
+        }), mr);
         card.appendChild(pr);
-        var hr = h("div", {
-            style: "display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px",
-            class: "small"
-        });
-        hr.appendChild(h("span", {
-            class: "mut",
-            text: t("lag_hash")
-        }));
-        HASHF.forEach(function(f) {
-            hr.appendChild(h("label", null, [h("input", {
-                type: "checkbox",
-                id: "lg" + g + "h" + f
-            }), document.createTextNode(" " + f + " ")]));
-        });
-        card.appendChild(hr);
+        if (!fixed) {
+            var hr = h("div", {
+                style: "display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px",
+                class: "small"
+            });
+            hr.appendChild(h("span", {
+                class: "mut",
+                text: t("lag_hash")
+            }));
+            HASHF.forEach(function(f) {
+                hr.appendChild(h("label", null, [h("input", {
+                    type: "checkbox",
+                    id: "lg" + g + "h" + f
+                }), document.createTextNode(" " + f + " ")]));
+            });
+            card.appendChild(hr);
+        }
         card.appendChild(h("button", {
             class: "ctl pri",
             text: t("c_apply"),
@@ -4419,7 +5105,7 @@ function lagLoad() {
         c.lags.forEach(function(lg, i) {
             var g = i + 1;
             lacpCfg[g] = parseInt(lg.cfg, 16);
-            if ($("lgm" + g).closest(".card").dataset.dirty) return;
+            if (!$("lgm" + g) || $("lgm" + g).closest(".card").dataset.dirty) return;
             $("lgm" + g).value = lacpCfg[g] ? "lacp" : "static";
             $("lgs" + g).textContent = lacpCfg[g] ? "LACP: " + t("lacp_agg") + " " + (lg.aggValid ? lg.agg : "(" + t("lacp_neg") + ")") + ", " + t("lacp_members") + " " + maskPorts(parseInt(lg.members, 16)) : "";
         });
@@ -4434,13 +5120,18 @@ function lagLoad() {
     }).then(function(s) {
         s.forEach(function(l) {
             var g = l.lagNum + 1;
-            if ($("lgm" + g).closest(".card").dataset.dirty) return;
+            if (!$("lgm" + g) || $("lgm" + g).closest(".card").dataset.dirty) return;
             var members = lacpCfg[g] || parseInt(l.members, 2);
-            for (var p = 1; p <= S.n; p++)
-                $("lg" + g + "p" + p).checked = !!((members >> S.physToLog[p - 1]) & 1);
-            var hash = parseInt(l.hash, 16);
+            for (var p = 1; p <= S.n; p++) {
+                var cb = $("lg" + g + "p" + p);
+                if (cb) cb.checked = !!((members >> S.physToLog[p - 1]) & 1);
+            }
+            var hash = parseInt(l.hash, 16),
+                fixed = !!$("lghcard"),
+                hp = fixed ? "lgh" : "lg" + g + "h";
+            if (fixed && $("lghcard").dataset.dirty) return;
             HASHF.forEach(function(f, i) {
-                $("lg" + g + "h" + f).checked = !!((hash >> i) & 1)
+                $(hp + f).checked = !!((hash >> i) & 1)
             });
         });
     });
@@ -4452,11 +5143,13 @@ function lagApply(g) {
         n = 0,
         pre = [];
     delete $("lgm" + g).closest(".card").dataset.dirty;
-    for (var p = 1; p <= S.n; p++)
-        if ($("lg" + g + "p" + p).checked) {
+    for (var p = 1; p <= S.n; p++) {
+        var cb = $("lg" + g + "p" + p); /* a fixed-group chip has only its own range */
+        if (cb && cb.checked) {
             cmd += " " + p;
             n++;
         }
+    }
     if (!lacp && lacpCfg[g]) pre.push("lag " + g + " lacp off");
     if (lacp && !n) cmd = "lag " + g + " lacp off";
     if (!n && !lacp) {
@@ -4467,17 +5160,29 @@ function lagApply(g) {
         });
         return;
     }
-    var hcmd = "laghash " + g,
-        nh = 0;
-    HASHF.forEach(function(f) {
-        if ($("lg" + g + "h" + f).checked) {
-            hcmd += " " + f;
-            nh++;
-        }
-    });
+    if (!$("lghcard")) {
+        var hcmd = "laghash " + g,
+            nh = 0;
+        HASHF.forEach(function(f) {
+            if ($("lg" + g + "h" + f).checked) {
+                hcmd += " " + f;
+                nh++;
+            }
+        });
+    }
     var cmds = pre.concat([cmd]);
     if (nh) cmds.push(hcmd);
     postCmds(cmds).then(lagLoad).catch(function() {});
+}
+
+/* The RTL836x hash is one for both groups: laghash takes any group number */
+function lagHashApply() {
+    var cmd = "laghash 1";
+    delete $("lghcard").dataset.dirty;
+    HASHF.forEach(function(f) {
+        if ($("lgh" + f).checked) cmd += " " + f;
+    });
+    (cmd === "laghash 1" ? lagLoad() : postCmds([cmd]).then(lagLoad)).catch(function() {});
 }
 var lagPoller = new Poller(function() {
     return lagLoad().catch(function() {})
@@ -4494,9 +5199,181 @@ tabHooks.lag = {
     }
 };
 
+
+var LLDP_TLVS = ["portdesc", "syscap", "mgmt", "pvid", "macphy", "lag", "mfs"];
+
+var LLDP_CAPS = [
+    [1, "Other"],
+    [2, "Repeater"],
+    [4, "Bridge"],
+    [8, "WLAN AP"],
+    [16, "Router"],
+    [32, "Telephone"],
+    [64, "DOCSIS"],
+    [128, "Station"]
+];
+
+function lldpCaps(c) {
+    return LLDP_CAPS.filter(function(x) {
+        return c & x[0]
+    }).map(function(x) {
+        return x[1]
+    }).join(", ")
+}
+
+/* IANA dot3MauType values a switch port is likely to report */
+var LLDP_MAU = {
+    10: "10BASE-T HD",
+    11: "10BASE-T FD",
+    15: "100BASE-TX HD",
+    16: "100BASE-TX FD",
+    17: "100BASE-FX HD",
+    18: "100BASE-FX FD",
+    21: "1000BASE-X HD",
+    22: "1000BASE-X FD",
+    24: "1000BASE-LX FD",
+    26: "1000BASE-SX FD",
+    29: "1000BASE-T HD",
+    30: "1000BASE-T FD",
+    31: "10GBASE-X",
+    33: "10GBASE-R",
+    34: "10GBASE-ER",
+    35: "10GBASE-LR",
+    36: "10GBASE-SR",
+    41: "10GBASE-CX4",
+    54: "10GBASE-T",
+    55: "10GBASE-LRM",
+    57: "10GBASE-KX4",
+    58: "10GBASE-KR",
+    103: "2.5GBASE-T",
+    104: "5GBASE-T",
+    110: "2.5GBASE-X",
+    112: "5GBASE-R"
+};
+
+function lldpLink(n) {
+    if (!n.aneg) return "-";
+    var s = n.mau ? LLDP_MAU[n.mau] || "MAU " + n.mau : "-";
+    return n.aneg === 2 ? s + ", " + t("c_auto") : s;
+}
+
+function lldpWarning(cell, n, bit, key, s) {
+    if (!(n.warn & bit)) return;
+    var label = t(key) + " (" + t("c_port") + " " + n.port + ")";
+    cell.appendChild(document.createTextNode(" "));
+    cell.appendChild(h("button", {
+        type: "button",
+        id: "lldp-warning-" + n.port + "-" + encodeURIComponent(n.chassis) + "-" + bit,
+        class: "ctl",
+        text: "⚠",
+        title: label,
+        "aria-label": label,
+        onclick: function() {
+            var body = h("div"),
+                unavailable = t("lldp_w_unavailable");
+            body.appendChild(h("p", {
+                text: t("lldp_w_local", {
+                    name: S.info.hostname || unavailable,
+                    port: n.port
+                })
+            }));
+            body.appendChild(h("p", {
+                text: t(bit === 1 ? "lldp_w_size" : bit === 2 ? "lldp_w_aggregation" : "lldp_w_duplicate")
+            }));
+            if (bit === 4) {
+                var ports = (s.neighbors || []).filter(function(p) {
+                    return p.chassis === n.chassis
+                }).map(function(p) {
+                    return p.port
+                });
+                body.appendChild(h("p", {
+                    text: t("lldp_w_ports", {
+                        ports: ports.join(", ")
+                    })
+                }));
+            } else {
+                var local = h("p", {
+                    text: t(bit === 1 ? "lldp_w_local_size" : "lldp_w_local_agg", {
+                        value: unavailable
+                    })
+                });
+                body.appendChild(local);
+                body.appendChild(h("p", {
+                    text: t(bit === 1 ? "lldp_w_remote_size" : "lldp_w_remote_agg", {
+                        value: bit === 1 ? t("lldp_w_bytes", {
+                            value: n.mtu
+                        }) : t(n.agg === 2 ? "c_yes" : "c_no")
+                    })
+                }));
+                getJSON(bit === 1 ? "/mtu.json" : "/lag.json").then(function(data) {
+                    var value = unavailable;
+                    if (bit === 1) {
+                        var port = data.filter(function(p) {
+                            return p.portNum === n.port
+                        })[0];
+                        if (port && /^0x[0-9a-f]+$/i.test(port.mtu)) value = t("lldp_w_bytes", {
+                            value: parseInt(port.mtu, 16)
+                        });
+                    } else {
+                        var port = s.portStatus.filter(function(p) {
+                            return p.portNum === n.port
+                        })[0];
+                        if (port && data.length === (S.info.mib_family === "rtl836x" ? 2 : 4) && data.every(function(g) {
+                                return /^[01]{16}$/.test(g.members)
+                            })) {
+                            var group = data.filter(function(g) {
+                                return (parseInt(g.members, 2) >> port.logPort) & 1
+                            })[0];
+                            value = group ? t("lldp_w_group", {
+                                group: group.lagNum + 1
+                            }) : t("c_no");
+                        }
+                    }
+                    local.textContent = t(bit === 1 ? "lldp_w_local_size" : "lldp_w_local_agg", {
+                        value: value
+                    });
+                }).catch(function() {});
+            }
+            modal(t(key), body);
+        }
+    }));
+}
+
+function lldpPoe(n) {
+    if (!n.poe) return "";
+    var parts = ["802.3" + n.poe];
+    if (n.poeClass != null) parts.push("class " + n.poeClass);
+    if (n.poeReq != null) parts.push((n.poeReq / 10).toFixed(1) + " W");
+    return parts.join(", ");
+}
+
 function lldpLoad() {
     return getJSON("/lldp.json").then(function(s) {
         $("lldp_en").checked = s.on;
+        var box = $("lldp_tlvs");
+        box.innerHTML = "";
+        LLDP_TLVS.forEach(function(k, i) {
+            var sw = h("span", {
+                class: "switch"
+            }, [
+                h("input", {
+                    type: "checkbox",
+                    onchange: function() {
+                        var el = this;
+                        postCmd("lldp tlv " + k + " " + (el.checked ? "on" : "off")).catch(function() {
+                            el.checked = !el.checked
+                        });
+                    }
+                }), h("i")
+            ]);
+            sw.firstChild.checked = s.tlv >> i & 1;
+            box.appendChild(h("label", {
+                class: "row"
+            }, [h("span", {
+                class: "lb",
+                text: t("lldp_t_" + k)
+            }), sw]));
+        });
         var tb = $("lldp_table").tBodies[0];
         tb.innerHTML = "";
         byPort(s.portStatus).forEach(function(p) {
@@ -4519,6 +5396,40 @@ function lldpLoad() {
             sw.firstChild.checked = p.permitted;
             tr.insertCell().appendChild(sw);
         });
+        S.lldpNb = s.neighbors || [];
+        var nb = $("lldp_nb_table").tBodies[0];
+        nb.innerHTML = "";
+        (s.neighbors || []).sort(function(a, b) {
+            return a.port - b.port
+        }).forEach(function(n) {
+            var tr = nb.insertRow();
+            tr.insertCell().textContent = n.port;
+            var chassis = tr.insertCell();
+            chassis.textContent = n.chassis;
+            lldpWarning(chassis, n, 4, "lldp_w_dup", s);
+            tr.insertCell().textContent = n.portId;
+            tr.insertCell().textContent = n.sysName;
+            tr.insertCell().textContent = n.sysDesc || "";
+            tr.insertCell().textContent = n.portDesc || "";
+            var ac = tr.insertCell();
+            if (n.mgmtAddr) ac.appendChild(h("a", {
+                href: "http://" + n.mgmtAddr,
+                target: "_blank",
+                rel: "noopener",
+                text: n.mgmtAddr
+            }));
+            tr.insertCell().textContent = lldpCaps(n.caps);
+            tr.insertCell().textContent = n.pvid || "-";
+            var mtu = tr.insertCell();
+            mtu.textContent = n.mtu || "-";
+            lldpWarning(mtu, n, 1, "lldp_w_mtu", s);
+            var lag = tr.insertCell();
+            lag.textContent = n.agg ? (n.agg === 2 ? t("c_yes") : t("c_no")) : "-";
+            lldpWarning(lag, n, 2, "lldp_w_lag", s);
+            tr.insertCell().textContent = lldpLink(n);
+            tr.insertCell().textContent = lldpPoe(n);
+            tr.insertCell().textContent = n.ttl;
+        });
     });
 }
 
@@ -4528,73 +5439,29 @@ $("lldp_en").addEventListener("change", function() {
         el.checked = !el.checked
     });
 });
+var lldpPoller = new Poller(lldpLoad, 5000);
 tabHooks.lldp = {
-    enter: lldpLoad
-};
-
-function eeeFlags(bits) {
-    var b = parseInt(bits, 2);
-    return ["100M", "1G", "2.5G"].map(function(s, i) {
-        return (b & (4 >> i)) ? s : null;
-    }).filter(Boolean).join(", ") || "-";
-}
-
-function eeeLoad() {
-    return getJSON("/eee.json").then(function(s) {
-        var tb = $("etable").tBodies[0];
-        tb.innerHTML = "";
-        byPort(s).forEach(function(p) {
-            var tr = tb.insertRow();
-            tr.insertCell().textContent = p.portNum + (p.isSFP ? " (SFP)" : "");
-            if (p.isSFP) {
-                for (var c = 0; c < 3; c++) tr.insertCell().textContent = "-";
-                tr.insertCell().textContent = t("e_na");
-                return;
-            }
-            tr.insertCell().textContent = eeeFlags(p.eee);
-            tr.insertCell().textContent = eeeFlags(p.eee_lp);
-            tr.insertCell().innerHTML = p.active ? badge(t("e_active"), "ok") : badge(t("e_idle"));
-            var on = parseInt(p.eee, 2) !== 0;
-            var sw = h("label", {
-                class: "switch"
-            }, [
-                h("input", {
-                    type: "checkbox",
-                    onchange: function() {
-                        postCmd("eee " + (this.checked ? "on" : "off") + " " + p.portNum)
-                            .then(function() {
-                                setTimeout(eeeLoad, 300)
-                            }).catch(function() {});
-                    }
-                }), h("i")
-            ]);
-            sw.firstChild.checked = on;
-            tr.insertCell().appendChild(sw);
-        });
-    });
-}
-var eeePoller = new Poller(function() {
-    return eeeLoad()
-}, 4000);
-tabHooks.eee = {
     enter: function() {
-        eeePoller.start()
+        lldpPoller.start()
     },
     leave: function() {
-        eeePoller.stop()
+        lldpPoller.stop()
     }
 };
 
+
 function bwLoad() {
     return getJSON("/bandwidth.json").then(function(s) {
+        var rtl836x = S.info.mib_family === "rtl836x",
+            step = rtl836x ? 8 : 16;
         var tb = $("btable").tBodies[0];
         tb.innerHTML = "";
         byPort(s).forEach(function(p) {
             var n = p.portNum;
             var iOn = !!Number(p.iLimited),
                 eOn = !!Number(p.eLimited);
-            var iM = (parseInt(p.iBW, 16) * 16 / 1000),
-                eM = (parseInt(p.eBW, 16) * 16 / 1000);
+            var iM = (parseInt(p.iBW, 16) * step / 1000),
+                eM = (parseInt(p.eBW, 16) * step / 1000);
             var tr = tb.insertRow();
             tr.insertCell().textContent = n;
             var icb = h("input", {
@@ -4607,9 +5474,9 @@ function bwLoad() {
                 class: "in sm",
                 id: "bwiv" + n,
                 type: "number",
-                min: "0.016",
-                max: "10000",
-                step: "any"
+                min: String(step / 1000),
+                max: rtl836x ? "1000" : "10000",
+                step: rtl836x ? "0.008" : "any"
             });
             if (iOn) iin.value = +iM.toFixed(3);
             tr.insertCell().appendChild(iin);
@@ -4638,9 +5505,9 @@ function bwLoad() {
                 class: "in sm",
                 id: "bwev" + n,
                 type: "number",
-                min: "0.016",
-                max: "10000",
-                step: "any"
+                min: String(step / 1000),
+                max: rtl836x ? "1000" : "10000",
+                step: rtl836x ? "0.008" : "any"
             });
             if (eOn) ein.value = +eM.toFixed(3);
             tr.insertCell().appendChild(ein);
@@ -4654,10 +5521,11 @@ function bwLoad() {
         });
     });
 }
-/* The bw command takes kbit/s and converts to 16-kbit register steps itself. */
+/* The command takes integer kbit/s; the native chip uses 8-kbit steps. */
 function bwHex(mbit) {
-    var kbit = Math.round(mbit * 1000);
-    if (kbit < 16 || kbit > 10000000) return null;
+    var kbit = Math.round(mbit * 1000),
+        rtl836x = S.info.mib_family === "rtl836x";
+    if (!(kbit >= (rtl836x ? 8 : 16) && kbit <= (rtl836x ? 1000000 : 10000000)) || (rtl836x && kbit % 8)) return null;
     var x = kbit.toString(16);
     return x.length % 2 ? "0" + x : x;
 }
@@ -4688,6 +5556,7 @@ var SC_TYPES = ["bcast", "mcast", "ucast", "umcast"],
 
 function scLoad() {
     return getJSON("/storm.json").then(function(s) {
+        var rtl836x = S.info.mib_family === "rtl836x";
         var tb = $("sctable").tBodies[0];
         byPort(s);
         var sig = s.map(function(p) {
@@ -4708,6 +5577,8 @@ function scLoad() {
                 });
                 tr.insertCell().textContent = n;
                 SC_TYPES.forEach(function(ty) {
+                    var units = [h("option", {value: "kbps", text: "kbit/s"})];
+                    if (!rtl836x) units.unshift(h("option", {value: "pps", text: "pps"}));
                     tr.insertCell().appendChild(h("span", {
                         style: "display:flex;gap:4px"
                     }, [
@@ -4715,22 +5586,14 @@ function scLoad() {
                             class: "in sm",
                             id: "scv" + ty + n,
                             type: "number",
-                            min: "1",
-                            step: "1"
+                            min: rtl836x ? "8" : "1",
+                            max: rtl836x ? "1000000" : "10000000",
+                            step: rtl836x ? "8" : "1"
                         }),
                         h("select", {
                             class: "in",
                             id: "scu" + ty + n
-                        }, [
-                            h("option", {
-                                value: "pps",
-                                text: "pps"
-                            }),
-                            h("option", {
-                                value: "kbps",
-                                text: "kbit/s"
-                            }),
-                        ]),
+                        }, units),
                     ]));
                 });
                 tr.insertCell().appendChild(h("button", {
@@ -4752,7 +5615,7 @@ function scLoad() {
                 var inp = $("scv" + ty + n),
                     sel = $("scu" + ty + n);
                 inp.value = on ? raw : "";
-                sel.value = on && !pps ? "kbps" : "pps";
+                sel.value = rtl836x || (on && !pps) ? "kbps" : "pps";
                 inp.dataset.cur = on ? inp.value + " " + sel.value : "off";
             });
         });
@@ -4769,7 +5632,8 @@ function scApply(n) {
             want = "off";
         if (v !== "" && v !== "0") {
             var x = Number(v);
-            if (!Number.isInteger(x) || x < 1 || (u === "pps" && x > 1048575) || (u === "kbps" && x > 10000000)) {
+            if (!Number.isInteger(x) || x < 1 || (u === "pps" && x > 1048575) || (u === "kbps" && x > 10000000) ||
+                (S.info.mib_family === "rtl836x" && (u !== "kbps" || x < 8 || x > 1000000 || x % 8))) {
                 toast(t("sc_err"), "err");
                 return;
             }
@@ -4790,6 +5654,132 @@ tabHooks.bw = {
 };
 
 var IPRE = /^(\d{1,3}\.){3}\d{1,3}$/;
+/* Compact non-secret information.json snapshot; absent when SNMP is not built. */
+var snmpPending = false,
+    snmpEdited = false;
+
+function snmpManagerCIDR(s) {
+    var prefix = 0;
+    s.slice(6, 10).forEach(function(n) {
+        while (n) {
+            prefix += n & 1;
+            n >>>= 1
+        }
+    });
+    return prefix ? s.slice(2, 6).join(".") + "/" + prefix : "";
+}
+
+function renderSnmp(s) {
+    var supported = Array.isArray(s) && s.length === 10;
+    $("sy-snmp").style.display = supported ? "" : "none";
+    if (!supported) return;
+    $("sy-snmp-enabled").textContent = s[0] ? "Enabled" : "Disabled";
+    $("sy-snmp-community").textContent = s[1] ? "Community configured. Blank keeps the current value." : "No community configured. Enter one to set up SNMP.";
+    if (!snmpEdited && !snmpPending) {
+        $("sy-snmp-toggle").checked = !!s[0];
+        $("sy-snmp-manager").value = snmpManagerCIDR(s);
+    }
+    ["toggle", "manager", "secret", "apply", "refresh"].forEach(function(id) {
+        $("sy-snmp-" + id).disabled = snmpPending
+    });
+    $("saveBtn").disabled = snmpPending;
+}
+
+function snmpManagerValue(value) {
+    var m = value.match(/^((?:\d{1,3}\.){3}\d{1,3})\/(\d{1,2})$/);
+    if (!m || !okIp(m[1]) || +m[2] < 1 || +m[2] > 32) return null;
+    var a = m[1].split(".").map(Number),
+        bits = +m[2];
+    if (!a[0] || a[0] === 127 || a[0] >= 224) return null;
+    a = a.map(function(n) {
+        var b = Math.min(bits, 8);
+        bits -= b;
+        return n & (b ? 256 - (1 << (8 - b)) : 0)
+    });
+    if (!a[0] || a[0] === 127 || a[0] >= 224) return null;
+    return a.join(".") + "/" + (+m[2]);
+}
+
+function snmpApply() {
+    if (snmpPending) return Promise.resolve();
+    var s = S.info.snmp;
+    if (!Array.isArray(s) || s.length !== 10) return Promise.resolve();
+    var community = $("sy-snmp-secret").value,
+        raw = $("sy-snmp-manager").value.trim(),
+        enabled = $("sy-snmp-toggle").checked;
+    if (!s[1] && !community && !raw && !enabled) return Promise.resolve();
+    if ((community && !/^[!-~]{1,32}$/.test(community)) || (!community && !s[1])) {
+        toast("Enter a community of 1–32 printable ASCII characters, without spaces.", "err");
+        return Promise.resolve();
+    }
+    var manager = snmpManagerValue(raw);
+    if (!manager) {
+        toast("Enter a valid allowed manager IP/CIDR, with a prefix from 1 to 32.", "err");
+        return Promise.resolve();
+    }
+    var cmds = [],
+        changed = community || manager !== snmpManagerCIDR(s);
+    if (changed) {
+        cmds.push("snmp off");
+        if (manager !== snmpManagerCIDR(s)) cmds.push("snmp manager " + manager);
+        if (community) cmds.push("snmp community " + community);
+    }
+    if (enabled && (changed || !s[0])) cmds.push("snmp on");
+    else if (!enabled && s[0] && !changed) cmds.push("snmp off");
+    if (!cmds.length) return Promise.resolve();
+    snmpPending = true;
+    snmpEdited = true;
+    renderSnmp(s);
+    return postCmds(cmds).then(function() {
+        snmpEdited = false;
+        $("sy-snmp-secret").value = "";
+    }).catch(function() {
+        snmpEdited = false;
+        toast("SNMP changes failed. Some settings may have changed; review the status before retrying.", "err");
+    }).then(pollInfo).catch(function() {
+        toast("Could not refresh SNMP status. Changes may already be applied.", "err");
+    }).then(function() {
+        snmpPending = false;
+        renderSnmp(S.info.snmp)
+    });
+}
+/* Prometheus exporter card; information.json has no "prometheus" when it is not built. */
+var promPending = false;
+
+function renderPrometheus(v) {
+    $("sy-prom").style.display = v === undefined ? "none" : "";
+    if (v === undefined) return;
+    if (!promPending) $("sy-prom-toggle").checked = !!v;
+    $("sy-prom-toggle").disabled = promPending;
+    $("sy-prom-url").textContent = v ? "http://" + location.host + "/metrics" : "";
+}
+$("sy-prom-toggle").addEventListener("change", function() {
+    promPending = true;
+    renderPrometheus(S.info.prometheus);
+    postCmds(["prometheus " + (this.checked ? "on" : "off")]).catch(function() {}).then(pollInfo).catch(function() {
+        toast("Could not refresh the Prometheus exporter status.", "err");
+    }).then(function() {
+        promPending = false;
+        renderPrometheus(S.info.prometheus)
+    });
+});
+["manager", "secret"].forEach(function(id) {
+    $("sy-snmp-" + id).addEventListener("input", function() {
+        snmpEdited = true
+    })
+});
+$("sy-snmp-toggle").addEventListener("change", function() {
+    snmpEdited = true
+});
+$("sy-snmp-apply").addEventListener("click", snmpApply);
+$("sy-snmp-refresh").addEventListener("click", function() {
+    if (snmpPending) return;
+    snmpEdited = false;
+    $("sy-snmp-secret").value = "";
+    return pollInfo().catch(function() {
+        toast("Could not refresh SNMP status.", "err")
+    });
+});
 
 function okIp(s) {
     if (!IPRE.test(s)) return false;
@@ -4968,16 +5958,17 @@ function sysConsole() {
         body: c
     }).then(function(r) {
         var body = r.body.replace(/\s+$/, "");
-        out.textContent += "> " + c + "\n";
-        if (body) out.textContent += body + "\n";
+        out.textContent += redactSnmp("> " + c) + "\n";
+        if (body) out.textContent += redactSnmp(body) + "\n";
         else out.textContent += (r.ok ? "OK" : "ERROR " + r.status) + "\n";
         if (out.textContent.length > 20000) out.textContent = out.textContent.slice(-16000);
         out.scrollTop = out.scrollHeight;
         if (r.ok && isConfCmd(c)) setDirty(true);
     }).catch(function(e) {
-        out.textContent += "> " + c + "\n" + e + "\n"
+        out.textContent += redactSnmp("> " + c + "\n" + e) + "\n"
     });
     $("sy-cmd").value = "";
+    $("sy-cmd").type = "text";
 }
 $("sy-reboot").addEventListener("click", function() {
     confirmModal(t("sy_reboot_q"), S.dirty ? t("sy_reboot_d") : "", function() {
@@ -4985,11 +5976,47 @@ $("sy-reboot").addEventListener("click", function() {
         toast(t("sy_rebooting"), "ok");
     });
 });
+/* Startup storage may contain plaintext communities, but never render them.
+ * Markers refer to private, in-memory originals and are resolved only for POST. */
+var cfgHidden = [];
+
+function maskConfig(txt) {
+    var hidden = [];
+    var text = txt.replace(/\r\n?/g, "\n").replace(/^[ \t]*snmp[ \t]+community[ \t]+[^\r\n]*$/gim, function(line) {
+        hidden.push(line);
+        return "snmp community [hidden:" + hidden.length + "]";
+    });
+    return {
+        text: text,
+        hidden: hidden
+    };
+}
+
+function unmaskConfig(txt, hidden) {
+    return txt.replace(/\r\n?/g, "\n").replace(/^[ \t]*snmp[ \t]+community(?:[ \t]+[^\r\n]*)?$/gim, function(line) {
+        var m = line.match(/^snmp community \[hidden:(\d+)\]$/);
+        if (!m || !hidden[+m[1] - 1]) throw new Error("Change the community in the SNMP settings, not the configuration editor.");
+        return hidden[+m[1] - 1];
+    });
+}
+
+function setConfigEditor(txt) {
+    var masked = maskConfig(txt);
+    cfgHidden = masked.hidden;
+    $("cfgedit").value = masked.text;
+}
+
+function redactSnmp(txt) {
+    return txt.replace(/\r\n?/g, "\n").replace(/(^|\n)([ \t]*(?:>[ \t]*)?snmp[ \t]+community)(?:[ \t]+[^\r\n]*)?/gi, "$1$2 [hidden]");
+}
+$("sy-cmd").addEventListener("input", function() {
+    this.type = /^[ \t]*snmp[ \t]+community(?:[ \t]|$)/i.test(this.value) ? "password" : "text";
+});
 
 function cfgReload() {
     return getText("/config").then(function(x) {
         x = x.replace(/\0[\s\S]*$/, "");
-        $("cfgedit").value = x;
+        setConfigEditor(x);
         cfgBytes();
         cfgParseKnown(x);
     }).catch(function() {});
@@ -5115,6 +6142,7 @@ tabHooks.system = {
 };
 
 var CONF_OVERWRITE = [
+    /^snmp\s+community\b/, /^snmp\s+manager\b/, /^snmp\s+changed\b/,
     /^ip\b/, /^gw\b/, /^netmask\b/, /^hostname\b/,
     /^syslog\s+ip\b/, /^syslog\s+port\b/, /^dns\s+server\b/, /^passwd\b/, /^session\b/,
     /^ntp\s+server\b/, /^ntp\s+interval\b/, /^ntp\s+timezone\b/, /^ntp\s+dst\b/,
@@ -5127,7 +6155,7 @@ var CONF_OVERWRITE = [
     /^stp\s+(port\s+\d{1,2}|lag\s+[1-4])\s+(edge|cost|prio|guard|filter|p2p)\b/,
     /^igmp\b/, /^mtu\s+\d{1,2}\b/, /^storm\s+\d{1,2}\s+(bcast|mcast|ucast|umcast)\b/,
 ];
-var CONF_TOGGLE = [/^(syslog)\s+(on|off)$/, /^(ntp)\s+(on|off)$/, /^(stp)\s+(on|off)$/, /^(lldp)\s+(on|off)$/, /^(stp\s+(port\s+\d{1,2}|lag\s+[1-4]))\s+(on|off)$/];
+var CONF_TOGGLE = [/^(snmp)\s+(on|off)$/, /^(prometheus)\s+(on|off)$/, /^(syslog)\s+(on|off)$/, /^(ntp)\s+(on|off)$/, /^(stp)\s+(on|off)$/, /^(lldp)\s+(on|off)$/, /^(lldp\s+tlv\s+\w+)\s+(on|off)$/, /^(stp\s+(port\s+\d{1,2}|lag\s+[1-4]))\s+(on|off)$/];
 
 function mergeConf(base, texts) {
     var conf = base.slice();
@@ -5146,13 +6174,21 @@ function mergeConf(base, texts) {
                 drop(new RegExp("^vlan " + m[1] + "( |$)"));
                 return;
             }
+            /* the RTL836x hash is one for both LAGs: deleting a LAG keeps it, and the last laghash line is all that counts */
+            var lagHashGlobal = typeof S !== "undefined" && S.info.mib_family === "rtl836x";
             if ((m = line.match(/^lag (\d) d$/))) {
-                drop(new RegExp("^lag(hash)? " + m[1] + "( |$)"));
+                drop(new RegExp("^lag" + (lagHashGlobal ? "" : "(hash)?") + " " + m[1] + "( |$)"));
                 return;
             }
+            if (lagHashGlobal && /^laghash \d\b/.test(line)) drop(/^laghash /);
             if ((m = line.match(/^eee (on|off)(?: (\d{1,2}))?(?: (?:100m|1g|2g5))?$/))) {
                 if (m[2]) drop(new RegExp("^eee (on|off) " + m[2] + "\\b"));
                 else drop(/^eee /);
+                conf.push(line);
+                return;
+            }
+            if ((m = line.match(/^port (\d{1,2}) fc (on|off)$/))) {
+                drop(new RegExp("^port " + m[1] + " fc (on|off)$"));
                 conf.push(line);
                 return;
             }
@@ -5173,6 +6209,16 @@ function mergeConf(base, texts) {
             if (!isConfCmd(line)) return;
             if ((m = line.match(/^port (\d{1,2}) name$/))) {
                 drop(new RegExp("^port " + m[1] + " name( |$)"));
+                return;
+            }
+            if ((m = line.match(/^(port \d{1,2}) duplex (half|full)$/))) {
+                drop(new RegExp("^" + m[1] + " duplex "));
+                conf.push(line);
+                return;
+            }
+            if ((m = line.match(/^(poe port \d{1,2}) (on|off)$/))) {
+                drop(new RegExp("^" + m[1] + " (on|off)$"));
+                conf.push(line);
                 return;
             }
             if ((m = line.match(/^ingress (.+)$/))) {
@@ -5233,7 +6279,7 @@ function mergeConf(base, texts) {
                     var key = line.match(rx)[0];
                     conf = conf.filter(function(item) {
                         return !(item === key || (item.indexOf(key + " ") === 0 &&
-                            !/\smgmt$/.test(item) && item.indexOf(key + " name ") !== 0 && item.indexOf(key + " lldp ") !== 0));
+                            !/\smgmt$/.test(item) && item.indexOf(key + " name ") !== 0 && item.indexOf(key + " lldp ") !== 0 && item.indexOf(key + " fc ") !== 0));
                     });
                     break;
                 }
@@ -5245,7 +6291,58 @@ function mergeConf(base, texts) {
     return conf;
 }
 
+// Leaves out every line of a setting whose last line sets what the board starts with (/defaults.json),
+// so the board default applies again. Defaults it does not report (SFP ports, flow control, MTU) and
+// lines that other lines depend on (qualified eee, speed and duplex) stay.
+function pruneDefaults(conf, d) {
+    if (!d) return conf;
+    // Noncanonical scalar commands may hide an earlier override; preserve the whole script.
+    if (conf.some(function(l) {
+        return /^(port \S+ (on|off|lldp)\b|lldp (on|off)\b)/.test(l) &&
+            !/^(port [1-9]\d? (on|off|lldp (permit|block))|lldp (on|off))$/.test(l)
+    })) return conf;
+    var P = {},
+        isDefault = {};
+    d.ports.forEach(function(p) {
+        P[p.portNum] = p
+    });
+    var eeeQualified = conf.some(function(l) {
+        return /^eee /.test(l) && !/^eee (on|off) [1-9]\d?$/.test(l)
+    });
+
+    function setting(l) {
+        var m, p;
+        if ((m = l.match(/^lldp (on|off)$/))) return {id: "lldp", is: (m[1] === "on") === !!d.lldp};
+        if ((m = l.match(/^port (\d{1,2}) lldp (permit|block)$/)) && (p = P[m[1]]) && p.lldp != null)
+            return {id: "lldp " + m[1], is: (m[2] === "permit") === !!p.lldp};
+        if (!eeeQualified && (m = l.match(/^eee (on|off) (\d{1,2})$/)) && (p = P[m[2]]) && p.eee != null)
+            return {id: "eee " + m[2], is: (m[1] === "on") === !!p.eee};
+        if ((m = l.match(/^port (\d{1,2}) (on|off)$/)) && (p = P[m[1]]) && p.en != null && !conf.some(function(c) {
+                return c.indexOf("port " + m[1] + " ") === 0 && !/^port \d{1,2} (name|lldp|fc|on|off)( |$)/.test(c)
+            }))
+            return {id: "port " + m[1], is: (m[2] === "on") === !!p.en};
+        return null;
+    }
+    conf.forEach(function(l) {
+        var s = setting(l);
+        if (s) isDefault[s.id] = s.is;
+    });
+    return conf.filter(function(l) {
+        var s = setting(l);
+        return !s || !isDefault[s.id];
+    });
+}
+
 function writeConfig(txt, title, fromLog) {
+    if (!fromLog) {
+        try {
+            txt = unmaskConfig(txt, cfgHidden)
+        } catch (e) {
+            toast(e.message, "err");
+            return;
+        }
+    }
+    var masked = maskConfig(txt);
     var info = h("p", {
             class: "small mut"
         }),
@@ -5258,29 +6355,41 @@ function writeConfig(txt, title, fromLog) {
         placeholder: t("cw_empty"),
         style: "min-height:45vh"
     });
-    ed.value = txt.replace(/\r\n/g, "\n");
+    ed.value = masked.text.replace(/\r\n/g, "\n");
     var ok = h("button", {
         class: "ctl pri",
         text: t("sy_write"),
         onclick: function() {
-            closeModal();
-            doWriteConfig(cfgText(ed.value), fromLog)
+            try {
+                var raw = unmaskConfig(ed.value, masked.hidden);
+                closeModal();
+                doWriteConfig(cfgText(raw), fromLog)
+            } catch (e) {
+                toast(e.message, "err")
+            }
         }
     });
 
     function refresh() {
-        var v = cfgText(ed.value),
-            bytes = new Blob([v]).size,
+        var v;
+        try {
+            v = cfgText(unmaskConfig(ed.value, masked.hidden))
+        } catch (e) {
+            ok.disabled = true;
+            warn.textContent = e.message;
+            return;
+        }
+        var bytes = new Blob([v]).size,
             long = cfgLongLine(v);
         var unknown = v.split("\n").filter(function(l) {
             return l.trim() && !isConfCmd(l.trim().replace(/\s+/g, " "))
         });
         info.textContent = t("cw_info", {
-            n: bytes
+            n: new Blob([cfgText(ed.value)]).size
         });
         ok.disabled = bytes > 2048 || !!long;
         warn.style.color = ok.disabled ? "var(--bad)" : "var(--warn)";
-        warn.textContent = bytes > 2048 ? t("cw_toolarge") : long ? t("cw_longline", long) : (unknown.length ? t("cw_unknown") + unknown.join(" | ") : "");
+        warn.textContent = bytes > 2048 ? t("cw_toolarge") : long ? t("cw_longline", long) : (unknown.length ? t("cw_unknown") + redactSnmp(unknown.join("\n")).replace(/\n/g, " | ") : "");
     }
     ed.addEventListener("input", refresh);
     refresh();
@@ -5321,7 +6430,7 @@ function doWriteConfig(txt, fromLog) {
         });
     }).then(function(cleared) {
         if (cleared) setDirty(false);
-        $("cfgedit").value = txt;
+        setConfigEditor(txt);
         cfgBytes();
         cfgParseKnown(txt);
         toast(t("cw_saved"), "ok");
@@ -5338,12 +6447,21 @@ $("saveBtn").addEventListener("click", function() {
         getText("/cmd_log").catch(function() {
             return ""
         }),
+        Array.isArray(S.info.snmp) ? getText("/snmp_config") : Promise.resolve(null),
+        getJSON("/defaults.json").catch(function() {
+            return null
+        }),
     ]).then(function(r) {
         var cur = r[0].replace(/\0[\s\S]*$/, "").split(/\r?\n/).map(function(l) {
             return l.trim().replace(/\s+/g, " ")
         }).filter(Boolean);
         var merged = mergeConf(cur, [r[1].replace(/\0[\s\S]*$/, "")]);
-        writeConfig(merged.join("\n"), t("cw_save_title"), true);
+        if (r[2] !== null) merged = mergeConf(merged.filter(function(l) {
+            return !/^snmp\s+(community|manager|changed|on|off)(\s|$)/.test(l)
+        }), [r[2]]);
+        writeConfig(pruneDefaults(merged, r[3]).join("\n"), t("cw_save_title"), true);
+    }).catch(function(e) {
+        toast(e.message || String(e), "err")
     });
 });
 

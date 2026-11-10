@@ -10,6 +10,9 @@
 
 #include "../rtl837x_sfr.h"
 #include "../rtl837x_regs.h"
+#if SOC_FAMILY == RTL836X
+#include "../rtl836x_regs.h"
+#endif
 
 // See setup_serial_timer1() for valid baudrate settings!
 #define SERIAL_BAUD_RATE 57600
@@ -381,5 +384,10 @@ void installer(void)
 	}
 	print_string("Done.\n");
 	print_string("Reseting now\n");
+#if SOC_FAMILY == RTL836X
+	REG_SET(RTL836X_REG_CHIP_RESET, CHIP_RESET_CHIP_RST);
+	for (;;);	/* the write poll may return before the reset takes effect */
+#else
 	REG_SET(RTL837X_REG_RESET, 1);
+#endif
 }

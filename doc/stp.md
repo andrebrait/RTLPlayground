@@ -33,6 +33,10 @@ stp on
 
 ## Hardware background
 
+This section describes the RTL837x. The RTL836x (TL-SG108PE V5) differs in the
+port state and link registers and in the address flush, see
+[RTL836x](#rtl836x-tl-sg108pe-v5) below.
+
 BPDUs are addressed to `01:80:C2:00:00:00`, a reserved link-local group. The
 ASIC's Reserved-Multicast action for that address decides what happens to the
 frame.
@@ -66,11 +70,82 @@ LACPDUs, delivered by forward, stopped arriving on port 3, and BPDUs sent into
 the same port, delivered by trap, kept arriving. A port that admits tagged
 frames only therefore takes part in STP.
 
-Port states live in `RTL837X_MSTP_STATES (0x5310)`, two bits per port:
+On the RTL837x the port states live in `RTL837X_MSTP_STATES (0x5310)`,
+two bits per port:
 `00` disabled, `01` blocking, `10` learning, `11` forwarding. A port in
 blocking forwards nothing between ports, but it still sends what the CPU
 hands it and still passes a received BPDU up to the CPU, which is what lets
 loop detection go on working on a port it has already blocked.
+
+## RTL836x (TL-SG108PE V5)
+
+The RTL8370N runs the same engine as the RTL837x; only the register access
+differs. The register facts below are the RTL8367C's, taken from Realtek's SDK
+(`rtl8367c_setAsicSpanningTreeStatus`) and the other drivers for this chip
+family, not measured on this switch; read the hardware status at the end.
+
+* **Port states** are spanning tree instance 0: `VLAN_MSTI0_CTRL0` (0x0a00)
+  for chip ports 0-7 and `VLAN_MSTI0_CTRL1` (0x0a01) for chip ports 8-10, two
+  bits per port, coded as above (`00` disabled, `01` blocking, `10` learning,
+  `11` forwarding). The front ports 1-8 are chip ports 0-7; the NIC, the CPU port
+  of the firmware, is chip port 10 (bits 5:4 of CTRL1). The registers are read,
+  changed and written whole, so a state change touches only the bits of its own
+  ports, the other ports and the unused bits keep their value, and the members of
+  a LAG change in one write.
+* **The NIC never blocks.** `stp on` and `stp off` keep chip port 10 forwarding.
+  Management still needs a forwarding path through a front port.
+* **Per-port off is plain forwarding.** A port with `stp port <n> off` is
+  written *forwarding* by `stp on`, once and directly, and is never put through
+  blocking first; so is an admin edge port. Only the ports that take part in the
+  tree start in blocking. Link changes, topology changes and LAG membership
+  changes leave an off port alone.
+* **Link and speed** come from `PORTn_STATUS` (0x1352 + port): carrier in bit 4,
+  speed in bits 1:0 (10M, 100M, 1G) and full duplex in bit 2. They are read once a
+  second, together with the LAG membership, which is how a lost or restored
+  carrier reaches the state machine. The automatic path cost uses the 10M, 100M
+  and 1G entries.
+* **BPDU delivery** uses the reserved multicast action of `01:80:C2:00:00:00`
+  (`trap_rma_set()`, 0x0800): trap while STP runs, forward after `stp off`, or
+  drop with `stp bpdu filter`. The action is matched on the destination address,
+  so `stp off` needs none of the per-VLAN L2 multicast entries of the RTL837x. The
+  NIC driver puts the ingress chip port in the synthetic CPU tag and a VID 0 tag
+  behind it, which is what `stp_in()` and `TRAP_RX_BODY()` read.
+* **Address flush** depends on `port_l2_forget_port()`. A topology change, a port
+  that turns alternate or backup and a link that goes down flush the addresses
+  learned on the port with it. The RTL836x implementation flushes the dynamic
+  entries of that one port (the RTL8367C L2 flush control in port mode); static
+  entries, such as the switch's own management address, and the other ports are
+  untouched. Without it a topology change would leave stale entries pointing at a
+  blocked port.
+* **LAGs** are the two fixed groups, ports 1-4 and 5-8
+  ([link_aggregation.md](link_aggregation.md#rtl836x-rtl8370n)), so the group
+  numbers are 1 and 2 (`stp lag 3` is refused). A group is one entity of the tree
+  as on the RTL837x.
+
+**Validation.** On a TL-SG108PE V5, only port 3 participated in a live test.
+The excluded ports, including uplink 8, stayed forwarding. Port 3 progressed
+through blocking, learning and forwarding without manual recovery. For 512
+broadcast probes per phase, its egress counts were 525 before STP, 0 while
+blocking, 0 while learning and 525 after recovery. Port 2 remained a forwarding
+control. Global STP, per-port settings and the saved configuration were restored.
+The native host tests cover BPDU parsing and construction, root election, carrier
+changes, BPDU guard, both fixed LAGs and dynamic-only flushes.
+
+A warm reset from an unsaved blocking state restored global STP off and all front
+ports forwarding, with the saved configuration unchanged. Boot restores
+forwarding before replaying the saved settings.
+
+The timer migration was exercised on the same switch with build `16f2c128`.
+Port 3 alone participated in RSTP with automatic edge detection: it started
+blocking and reached edge forwarding after 3.5 seconds, while excluded uplink
+8 stayed forwarding. The metrics clock advanced 16 seconds with a stable boot
+time. All per-port settings and global STP off were restored; the saved
+configuration was byte-identical. This does not test rapid convergence with a
+second bridge.
+
+Root election between real bridges, loop prevention, blocked-port BPDU RX/TX
+exemptions and selective hardware FDB flushing remain untested. The register
+references establish field layouts, not those bypass properties.
 
 ## Timers
 
@@ -182,7 +257,8 @@ A port without a configured cost takes it from its link speed. The long
 method uses the 802.1D-2004 values (20000 for 1G, 2000 for 10G); the short
 one the 802.1D-1998 table for bridges that still use 16-bit costs (100 for
 10M, 19 for 100M, 4 for 1G, 2 for 10G, and 3 for 2.5G and 5G, which that
-table does not list). All bridges in a network should use the same method.
+table does not list). All bridges in a network should use the same method. The
+RTL836x ports reach 1G at most, so only the 10M, 100M and 1G costs apply there.
 
 `stp bpdu filter` keeps BPDUs from being passed between ports while STP is
 off, instead of the default flooding that lets a surrounding spanning tree
@@ -219,7 +295,7 @@ prevention cut the link) but you still want STP on the rest of the ports.
 ## Link aggregation
 
 A LAG (Link Aggregation Group) is one port of the tree, with its own roles,
-timers and states. The switch supports up to 4 LAGs; each one takes the place
+timers and states. The switch supports up to 4 LAGs (2 on the RTL836x); each one takes the place
 of its member ports in the STP status and gets its own row on the Spanning
 Tree page. A group carries its own path cost, priority, edge, guard and
 point-to-point settings, and takes the same commands as a port:
@@ -289,3 +365,5 @@ LLC header included.
 * A backup port, one that hears the BPDUs of another port of this switch,
   is blocked and reported as Backup, but keeps sending BPDUs: loop detection
   on that segment relies on them.
+* Native blocked-port BPDU delivery and multi-bridge interoperability remain
+  unverified; see [RTL836x](#rtl836x-tl-sg108pe-v5).

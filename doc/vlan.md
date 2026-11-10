@@ -99,3 +99,25 @@ ingress [p]<t|u|a>...
   `ingress 1t 2a` -> Set port 1 as tagged input only, set port 2 accepting any frames.
   `ingress a` -> Set all ports to accept both tagged and untagged frames (default behaviour).
 ```
+
+On the RTL836x (TP-Link TL-SG108PE V5), the same commands program the
+RTL8367C 4K VLAN table and the per-port member configurations that hold the
+PVID. VLAN 1 initially includes every front port and CPU port 10 untagged,
+with PVID 1. VLANs created or edited through `vlan` always include the CPU
+as a tagged member; front-port tagging still follows the requested membership.
+The NIC adapter preserves the received VLAN tag and maps untagged CPU traffic
+to VLAN 1. Front-port egress follows the VLAN's untagged mask, so an untagged
+access port does not need to receive tagged management frames.
+
+Management defaults to VLAN 1. `vlan <VLAN-ID> mgmt`, or the VLAN editor's
+Management VLAN checkbox, selects another VLAN. The switch tags its management
+traffic with that VID and accepts management IPv4 and ARP only from that VLAN.
+LLDP, STP, LACP and IGMP processing remain independent of this management filter.
+`vlan 0 mgmt` disables the receive restriction and sends management traffic
+untagged, which the CPU port's PVID classifies into VLAN 1.
+
+Create the VLAN and configure a reachable port's membership and PVID before
+selecting it for management. An unreachable management VLAN locks out the web
+UI; on a board without a usable serial console, recovery may require restoring
+the flash externally. This port has host regression coverage and firmware build
+checks; management VLAN operation has not yet been validated on the TP-Link hardware.

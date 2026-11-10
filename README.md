@@ -13,8 +13,8 @@ only the following features are provided:
   Speed settings and configuration of these settings on the local side
 - Per-port configuration of frame sizes (MTUs) for Jumbo-Frame support or limiting MTUs
   for particular devices
-- EEE (Energy Efficient Ethernet) can be configured per-port. Detailed information is
-  provided for support offered by the link partner and the EEE status of a port.
+- EEE (Energy Efficient Ethernet) and 802.3x flow control can be configured per-port on the
+  Ports page, which also shows what the link partner offers and whether each is in use.
 - VLAN configuration
 - SFP information is displayed on the inserted modules, the current sensor values such as
   temperatures, RX and TX power are displayed in the CLI and as mouse-over on the web
@@ -172,6 +172,16 @@ cd installer
 make 
 ```
 image location is stored in  `RTLPlayground/installer/output/rtlplayground_oem_upgrade.bin`
+
+For the TP-Link TL-SG108PE V5, build its firmware first and pass the machine:
+
+```
+cd installer
+make MACHINE=TPLINK_TL_SG108PE_V5
+```
+
+The build stops if `../output/rtlplayground.bin` is not a TL-SG108PE V5 image.
+This was tested on a unit running TP-Link firmware 1.0.1 Build 20260330.
 
 > [!CAUTION]
 > This image must ONLY be used for original OEM firmware web interface firmware upgrade.
@@ -414,4 +424,5 @@ The following documents give further documentation on specific features of the R
 - [LACP (802.3ad link aggregation)](doc/lacp.md)
 - [VLAN](doc/vlan.md)
 - [Storm control](doc/storm_control.md)
+- [Flow control (802.3x pause)](doc/flow_control.md)
 - [Modifications and Flash replacement](doc/mods.md)

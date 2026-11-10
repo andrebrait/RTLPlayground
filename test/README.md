@@ -15,6 +15,10 @@ make clean
 Exit status is non-zero if any check fails, a sanitizer trips, or the watchdog
 fires — so it drops straight into CI.
 
+The asset-packing regression test also needs Python 3, zlib development headers,
+and GNU argp (provided by glibc on Linux).
+It runs the real `fileadder` executable against mixed raw and compressed files.
+
 ## How it works
 - **`sdcc_shim.h`** (force-included) erases SDCC 8051 keywords (`__xdata`,
   `__code`, `__banked`, …) so firmware sources compile under host gcc. It changes
@@ -46,9 +50,23 @@ fires — so it drops straight into CI.
 |-------------|---------------|--------------------|
 | `test_cmd_editor` | `cmd_editor.c` | **C4** — full-line hang + `cmd_buffer` 1-byte overflow; basic entry & backspace regressions |
 | `test_port_tables` | `rtl837x_port.c` | VLAN entry layout and round trip, PVID register sharing, static multicast and management entries, per-port flush, trunk membership and hash seed |
-| `test_page_json` | `httpd/page_impl.c` + `rtl837x_port.c` | `/vlan.json`, `/vlanlist`, `/l2.json` (walk, wrap marker, paging inside `outbuf`), 64-bit counters in `/status.json` and `/counters.json` |
+| `test_page_json` | `httpd/page_impl.c` + `rtl837x_port.c` + `rtl837x_pause.c` | `/vlan.json`, `/vlanlist`, `/l2.json` (walk, wrap marker, paging inside `outbuf`), 64-bit counters, pause flags (`fc`) and EEE flags (`eee`) in `/status.json` (including 5G/10G abilities and logical port 8 activity in JSON and CLI), `/counters.json`, the port mapping in `/information.json`, what `port <n> fc on|off` writes (not how `rtl837x_phy.c` keeps it across speed and duplex changes) |
 | `test_httpd_tx` | `httpd/httpd.c` + `uip/uip.c` | a GET of a static file against a client that moves its receive window: ACK accounting, continuation chunks out of flash, retransmission |
 | `test_lacp` | `rtl837x_lacp.c` | state machines against a simulated 802.3ad partner: convergence, mis-cabling, expiry, re-election, two groups, delivery by trap |
+| `test_lacp_836x` | `rtl837x_lacp.c` + `rtl836x_port.c` + `rtl837x_trap.c`, RTL836x build | the same machines over the RTL8370N's two fixed groups and a register-file model: convergence into the `PORT_TRUNK_GROUP_MASK` nibbles, timeout, the RMA trap action, refused cross-bank/CPU/third-group candidates leaving every state and register alone |
+| `test_stp_836x` | `rtl837x_stp.c` + `rtl836x_port.c` + `rtl837x_trap.c`, RTL836x build | native state fields, CPU mapping, excluded-port forwarding, automatic recovery, BPDU construction/parsing, root path cost, carrier changes, guard and both fixed LAG entities |
+| `test_l2_flush_836x` | `rtl836x_port.c`, RTL836x build | a modelled flush engine removes only the selected port's dynamic entries; static and other-port entries survive, CPU mapping, invalid ports and bounded busy/completion waits |
+| `test_fileadder.py` | `tools/fileadder.c` | Mixed compressed/raw assets, empty files, equal-size compression, already-compressed files and the root alias |
+| `test_lldp_tx` | `rtl837x_lldp.c` | emitted Port ID subtype and physical mapping, TTL 120/0, selected-port/all-port shutdown, bridge capabilities, management IPv4 bytes and omission at 0.0.0.0, optional capabilities switch |
+
+The L2 frontend deletion regression runs separately with `make -C test l2-delete`.
+It requires Node.js, without additional packages, and checks rejected, successful
+and failed deletion requests against the production renderer.
+
+The MAC-table loader regression runs separately with `make -C test l2-load`.
+It requires Node.js without extra packages and checks incremental loading of
+4096/4160-entry tables, short pages, wrap and empty termination, overlapping
+requests, cancellation, retry and sparse indices.
 
 ## Adding a test for another module
 1. Write `test_<module>.c` with `main()` driving the module's entry points and

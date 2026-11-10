@@ -69,6 +69,12 @@ ifndef BUILDDIR
 	BUILDDIR = output/$(MACHINE)
 endif
 
+ifeq ($(SNMP),1)
+CC_FLAGS += -DSNMP
+endif
+ifeq ($(PROMETHEUS),1)
+CC_FLAGS += -DPROMETHEUS
+endif
 CONFIG_STAMP := $(BUILDDIR)/.config
 VERSION_HEADER := version.h
 
@@ -143,26 +149,52 @@ SRCS = \
 	syslog.c \
 	timer.c \
 	udp_apps.c \
+	vlan.c \
 	crypto/chacha20.c
 
-# RTL837x
+# The SoC family, from MACHINE_CHIPSET in the board header: each family has its
+# own register-level modules
+CHIPSET := $(shell sed -n 's/^.define[[:space:]]*MACHINE_CHIPSET[[:space:]]*\([A-Z0-9]*\).*/\1/p' machine/$(MACHINE).h 2>/dev/null)
+ifeq ($(CHIPSET),RTL8370)
+SRCS += \
+	rtl836x_regs.c \
+	rtl836x_mib.c \
+	rtl8370_init.c \
+	rtl836x_nic.c \
+	rtl836x_leds.c \
+	rtl836x_port.c \
+	rtl836x_phy.c \
+	rtl836x_rate.c \
+	rtl836x_igmp.c \
+	rtl836x_stubs.c
+# The GPHY patch is Realtek data: gen_phy.py extracts it from the board's own
+# flash dump at build time, RTL8370_DUMP=<2 MiB dump>
+CC_FLAGS += -I$(BUILDDIR)
+ifeq ($(RTL8370_DUMP),)
+$(warning RTL8370_DUMP is not set: the image runs the GPHYs without the PHY patch)
+endif
+else
 SRCS += \
 	rtl837x_bandwidth.c \
-	rtl837x_cabletest.c \
-	rtl837x_flash.c \
-	rtl837x_igmp.c \
 	rtl837x_init.c \
 	rtl837x_nic.c \
 	rtl837x_leds.c \
 	rtl837x_leds_dump.c \
 	rtl837x_phy.c \
-	rtl837x_pins.c\
+	rtl837x_pins.c \
 	rtl837x_port.c \
+	rtl837x_pause.c \
+	rtl837x_storm.c
+endif
+SRCS += \
+	rtl837x_igmp.c \
+	rtl837x_cabletest.c \
+	rtl837x_trap.c \
+	rtl837x_flash.c \
 	rtl837x_stp.c \
 	rtl837x_lldp.c \
-	rtl837x_storm.c \
+	rtl837x_lldp_tx_strings.c \
 	rtl837x_lacp.c \
-	rtl837x_trap.c \
 	rtl837x_stp_cli.c
 SRCS += \
 	httpd/httpd.c \
@@ -174,8 +206,18 @@ SRCS += \
 	uip/uiplib.c \
 	uip/uip_arp.c \
 	uip/uip-fw.c \
-	uip/uip-neighbor.c \
-	uip/uip-split.c
+	uip/uip-neighbor.c
+
+ifeq ($(SNMP),1)
+SRCS += snmp.c snmp_control.c
+endif
+ifeq ($(PROMETHEUS),1)
+SRCS += metrics.c metrics_cli.c
+endif
+# The bounded hardware readers serve both SNMP and the Prometheus exporter.
+ifneq ($(filter 1,$(SNMP) $(PROMETHEUS)),)
+SRCS += snmp_hw.c
+endif
 
 OBJS = ${SRCS:%.c=$(BUILDDIR)/%.rel}
 DEPS := ${SRCS:%.c=$(BUILDDIR)/%.d}
@@ -202,7 +244,7 @@ $(HTML_MIN_STAMP): $(HTML) html/app.js $(HTML_MIN_LIST) tools/minify.py tools/rj
 	python3 tools/rjsmin.py < html/app.js > $(HTML_MIN)/app.js || exit 1
 	@touch $@
 
-html_data.c html_data.h &: $(HTML_MIN_STAMP) | tools
+html_data.c html_data.h &: $(HTML_MIN_STAMP) tools/fileadder.c | tools
 	tools/$(BUILDDIR)/fileadder -a $(HTML_LOCATION) -s $(IMAGESIZE) -b BANK1 -z -d $(HTML_MIN) -p html_data
 
 $(VERSION_HEADER): FORCE
@@ -253,6 +295,17 @@ $(CCFLAGS_STAMP): FORCE | create_build_dir
 $(CONFIG_STAMP): FORCE | create_build_dir
 	@echo '$(CONFIG)' | cmp -s - $@ 2>/dev/null || echo '$(CONFIG)' > $@
 
+# The path is stamped like $(CONFIG), so switching dumps regenerates the header
+RTL8370_DUMP_STAMP := $(BUILDDIR)/.rtl8370_dump
+$(RTL8370_DUMP_STAMP): FORCE | create_build_dir
+	@echo '$(RTL8370_DUMP)' | cmp -s - $@ 2>/dev/null || echo '$(RTL8370_DUMP)' > $@
+
+$(BUILDDIR)/phy_patch.h: $(RTL8370_DUMP_STAMP) $(RTL8370_DUMP) rtl8370n/gen_phy.py
+	$(if $(RTL8370_DUMP),python3 rtl8370n/gen_phy.py "$(RTL8370_DUMP)",echo '#define PHY_PATCH_LEN 0') > $@.tmp
+	mv $@.tmp $@
+
+$(BUILDDIR)/rtl8370_init.rel: $(BUILDDIR)/phy_patch.h
+
 $(BUILDDIR)/%.rel: %.c $(CCFLAGS_STAMP) | create_build_dir html_data.h
 	$(CC) -MMD $(CC_FLAGS) -o $@ -c $<
 
@@ -273,7 +326,7 @@ $(BUILDDIR)/rtlplayground-$(FILENAME_EXTENSION).bin: $(BUILDDIR)/rtlplayground.i
 	tools/$(BUILDDIR)/fileadder -a $(CONFIG_LOCATION) -s $(IMAGESIZE) -d "$(CONFIG)" $@
 	tools/$(BUILDDIR)/fileadder -a $(HTML_LOCATION) -s $(IMAGESIZE) -z -d $(HTML_MIN) -b BANK1 $@
 	tools/$(BUILDDIR)/crc_calculator -u $@
-	ln -sf $(MACHINE)/rtlplayground-$(FILENAME_EXTENSION).bin $(BUILDDIR)/../rtlplayground.bin
+	ln -sf $(notdir $(abspath $(BUILDDIR)))/$(notdir $@) $(BUILDDIR)/../rtlplayground.bin
 
 .PHONY: clean distclean all $(SUBDIRS) $(SUBDIRSCLEAN) create_build_dir
 

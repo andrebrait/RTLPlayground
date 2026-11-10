@@ -15,6 +15,9 @@
 #include "rtl837x_regs.h"
 #include "rtl837x_igmp.h"
 #include "machine.h"
+#if SOC_FAMILY == RTL836X
+#include "rtl836x_igmp.h"
+#endif
 
 extern __code const struct machine machine;
 extern __xdata uint8_t igmpEnabled;
@@ -30,7 +33,9 @@ extern __xdata uint8_t sfr_data[4];
 extern __xdata struct machine_runtime machine_detected;
 extern __xdata uint8_t uip_buf[UIP_CONF_BUFFER_ALLOC_SIZE];
 
+#if SOC_FAMILY == RTL837X
 __xdata uint16_t idx;
+#endif
 #define IGMP_IP_HDR		offsetof(struct igmp_pkt, hlen)
 #define IGMP_IP_IHL		0x0f
 #define IGMP_GROUP_OFS		4
@@ -39,6 +44,7 @@ __xdata uint16_t idx;
 static __xdata uint8_t igmp_grp;
 static __xdata uint8_t igmp_join;
 
+#if SOC_FAMILY == RTL837X
 #ifdef IPMC_USES_L3MC
 struct ipmc_table_entry {
 	uint8_t sip[4];
@@ -59,11 +65,15 @@ struct l2mc_table_entry {
 };
 static __xdata struct l2mc_table_entry entry;
 #endif
+#endif
 
 struct igmp_pkt {
 	uint8_t ipv4mc_addr[6];
 	uint8_t src_addr[6];
 	struct rtl_tag rtl_tag;
+#if SOC_FAMILY == RTL836X
+	struct vlan_tag native_vlan;
+#endif
 	uint16_t ipv4_tag;
 	uint8_t hlen;
 	uint8_t dscp;
@@ -91,6 +101,7 @@ struct igmp_pkt {
 #define IGMP_I ((__xdata struct igmp_pkt *)&uip_buf[0])
 
 
+#if SOC_FAMILY == RTL837X
 void igmp_setup(void) __banked
 {
 	uint8_t i;
@@ -206,12 +217,55 @@ void entry_to_l2mc(void)
 	REG_WRITE(RTL837x_TBL_DATA_IN_C, 0x00, entry.igmp_asic & 1, entry.igmp_index, entry.pmask >> 2);
 }
 #endif
+#endif
 
+
+/* Validate the complete report before the first table operation. */
+static uint8_t igmp_report_valid(void)
+{
+	__xdata uint8_t hlen;
+	__xdata uint16_t left, pos, records, sources, size;
+
+	hlen = (IGMP_I->hlen & IGMP_IP_IHL) << 2;
+	left = NTOHS(IGMP_I->len);
+	if ((IGMP_I->hlen >> 4) != 4 || hlen < 20 ||
+	    left < hlen + 8 || left > uip_len - IGMP_IP_HDR ||
+	    (NTOHS(IGMP_I->flags) & 0x3fff))
+		return 0;
+	igmp_grp = IGMP_IP_HDR + hlen;
+	if (uip_buf[igmp_grp] != IGMP_V3_REPORT)
+		return 1;
+
+	pos = igmp_grp + IGMP_V3_RECORD_OFS;
+	left -= hlen + IGMP_V3_RECORD_OFS;
+	records = ((uint16_t)uip_buf[igmp_grp + 6] << 8) | uip_buf[igmp_grp + 7];
+	if (!records)
+		return 0;
+	do {
+		if (left < 8)
+			return 0;
+		sources = ((uint16_t)uip_buf[pos + 2] << 8) | uip_buf[pos + 3];
+		if (sources > ((left - 8) >> 2))
+			return 0;
+		size = 8 + (sources << 2);
+		if (uip_buf[pos + 1] > ((left - size) >> 2))
+			return 0;
+		size += (uint16_t)uip_buf[pos + 1] << 2;
+		pos += size;
+		left -= size;
+	} while (--records);
+	return 1;
+}
 
 uint8_t igmp_packet_handler(void) __banked
 {
-	if (IGMP_I->ipv4_tag != HTONS(UIP_ETHTYPE_IP) || IGMP_I->protocol != IGMP_PROTO)
+	if (uip_len < IGMP_IP_HDR + 20 || uip_len > sizeof uip_buf ||
+	    IGMP_I->ipv4_tag != HTONS(UIP_ETHTYPE_IP) || IGMP_I->protocol != IGMP_PROTO)
 		return 0;
+	if (!igmp_report_valid()) {
+		uip_len = 0;
+		return 1;
+	}
 	// By default we do not send anything out
 	uip_len = 0;
 
@@ -223,7 +277,6 @@ uint8_t igmp_packet_handler(void) __banked
 	}
 	write_char('\n');
 #endif
-	igmp_grp = IGMP_IP_HDR + ((IGMP_I->hlen & IGMP_IP_IHL) << 2);
 #ifdef DEBUG
 	print_string("Found IGMP, type: "); print_byte(uip_buf[igmp_grp]); write_char('\n');
 #endif
@@ -254,6 +307,11 @@ uint8_t igmp_packet_handler(void) __banked
 	if (uip_buf[igmp_grp] == IGMP_LOCAL_NET_0 && !uip_buf[igmp_grp + 1] && !uip_buf[igmp_grp + 2])
 		return 1;
 
+#if SOC_FAMILY == RTL836X
+	if (!rtl836x_igmp_update(&uip_buf[igmp_grp], (IGMP_I->rtl_tag.pmask >> 8) & 0x0f, igmp_join))
+		print_string("IGMP table update failed\n");
+	return 1;
+#else
 #ifdef IPMC_USES_L3MC
 	memset((__xdata uint8_t *)&entry, 0, sizeof(struct ipmc_table_entry));
 	// For IPv4 MC, the Source-IP is 0.0.0.0
@@ -401,4 +459,5 @@ uint8_t igmp_packet_handler(void) __banked
 	print_sfr_data();
 #endif
 	return 1;
+#endif
 }

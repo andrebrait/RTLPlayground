@@ -23,6 +23,34 @@ share of bandwidth to an attached device (e.g. to share an uplink), or simulate
 connections with low bandwidth and even bad connectivity with packet drops when
 ingress is not controlled by Flow Control but by simply dropping packets.
 
+## RTL836x (TL-SG108PE V5)
+
+The native backend uses the same commands and Bandwidth page on ports 1–8,
+with 8-kbit/s steps from 8 to 1000000 kbit/s (0.008–1000 Mbit/s in the UI).
+Ingress supports pause-on-exceed or drop; egress shapes transmission.
+`off` restores the ASIC's unlimited count. The CPU port is not rate limited.
+Preamble and IFG are excluded, and reserved control frames bypass ingress
+metering. Limiting a management path can still make the switch unreachable.
+
+`rtl836x_rate.c` uses the RTL8367C SDK register layout: ingress low/high words
+at `0x000f + 32 * port`, egress at `0x038c + 2 * port`, and three high rate
+bits in the following word. Counts are kbit/s divided by eight; `0x1ffff`
+means unlimited. Ingress exceed mode is bit 11 of `0x000e + 32 * port`.
+Initialization removes retained limits before applying the saved script.
+Host tests cover these fields and the shared JSON contract.
+
+On TL-SG108PE V5 build `f1fe7cf4`, port 3 accepted native limits and rejected
+misaligned or extra-argument requests without changing them. The browser applied
+and removed a 1000-Mbit/s egress limit. A finite 256-frame broadcast sample took
+0.57 s unrestricted, 2.83 s at 512 kbit/s and 1.43 s at 1024 kbit/s, including
+the status response: this demonstrates rate-dependent shaping/backpressure, not
+calibrated throughput. Egress shaping delays rather than necessarily drops these
+frames, so an initial packet-drop assertion was invalid. Every limit and the
+saved configuration were restored; AP port 4 and uplink 8 were not configured.
+Ingress rate accuracy needs a controlled traffic source on the test port.
+
+The register and measurement sections below describe the RTL837x backend.
+
 ## Ingress/Egress control
 The relevant registers for controlling Ingress and Egress at a port are:
 ```

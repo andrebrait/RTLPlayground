@@ -9,7 +9,7 @@ The switch runs LACP in software on the 8051. LACP frames belong to the Slow
 Protocols, with destination `01:80:C2:00:00:02` and ethertype `0x8809`; the
 subtype of LACP frames is 1. The implementation has the Receive, Selection and
 Mux machines of 802.3ad clause 43 and does not aggregate links whose partners
-differ. Up to `LACP_NUM_LAGS` (4) groups can run LACP; the others stay static.
+differ. Up to `PORT_LAG_COUNT` groups can run LACP (4 on the RTL837x, 2 on the RTL836x); the others stay static.
 
 ## Getting the frames to the CPU
 
@@ -144,6 +144,30 @@ Further checks:
 
 When one slave goes down, the group narrows to the remaining member, and the
 slave rejoins after it comes back.
+
+## RTL836x (RTL8370N)
+
+The same state machines run over the two fixed groups of the chip, see
+[link_aggregation.md](link_aggregation.md). What the hardware sets as limits:
+
+* Candidates must lie in the group's own range: LAG 1 takes ports 1-4 and LAG 2
+  takes ports 5-8, and the CPU port is never a member. `lag <n> lacp <port>...`
+  with any other port, or for a group the chip does not have, is refused before
+  the LACP state, the static trunk or any register changes (`port_lag_members_valid()`).
+* A group has no trunk members in the chip until its ports have negotiated: the
+  machines write the members' mask to the group's nibble of `PORT_TRUNK_GROUP_MASK`
+  only for ports whose actor and partner both are in sync. `/lag.json` reads that
+  register, so it lists negotiated members, `/lacp.json` the candidates.
+* The reserved multicast action of `01:80:C2:00:00:02` is set with `trap_rma_set()`,
+  as on the RTL837x. The native NIC inserts the ingress port in the synthetic RTL
+  tag and a VID 0 VLAN tag for the shared receive parser. LACPDUs go out with the
+  CPU TX tag and the logical port (also the chip port) in its port mask.
+* The hash is the chip's one for both groups, and the 16-entry bucket table keeps its reset value.
+
+Hardware checks cover candidates without a partner, fixed-bank rejection, static
+mode transitions and trap actions. The host register model covers convergence,
+expiry and TX layout; on-wire interoperability with a Linux 802.3ad bond remains
+untested and needs two spare ports on a second host.
 
 ## Known limits
 

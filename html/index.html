@@ -95,14 +95,16 @@ table.t tr:last-child td{border-bottom:0}
 table.t tr:hover td{background:var(--sel)}
 table.t tr.sel{background:var(--panel2); font-weight: bold;}
 .num{font-variant-numeric:tabular-nums;text-align:right}
+#lldp_table th:nth-child(2),#lldp_table td:nth-child(2){width:100%;overflow-wrap:anywhere}
 .scrollx{overflow-x:auto}
 input.in,select.in,textarea.in{
   background:var(--bg);border:1px solid var(--bd);border-radius:7px;padding:5px 8px;outline:none;
 }
 input.in:focus,select.in:focus,textarea.in:focus{border-color:var(--ac)}
 input.in.sm{width:7em}
-label.row{display:flex;align-items:center;gap:10px;margin:8px 0}
-label.row span.lb{width:110px;flex:none;color:var(--fg2);font-size:13px}
+.row{display:flex;align-items:center;gap:10px;margin:8px 0}
+.row span.lb{width:110px;flex:none;color:var(--fg2);font-size:13px}
+#lldp_tlvs .row span.lb{width:170px}
 .switch{position:relative;display:inline-block;width:34px;height:19px;flex:none}
 .switch input{opacity:0;width:0;height:0}
 .switch i{
@@ -141,8 +143,25 @@ label.row span.lb{width:110px;flex:none;color:var(--fg2);font-size:13px}
 .port.up.sfp .jack:before{background-color:color-mix(in srgb,var(--pc) 10%,var(--panel2))}
 .port.up .ps{color:var(--pc);font-weight:600}
 .port.dis{opacity:.45;border-style:dashed}
+.port .poe:not([hidden]){display:block;font-size:8px;line-height:1.2;color:var(--fg2)}
 .badge{font-size:11px;font-weight:600;border-radius:10px;padding:1px 8px;background:var(--panel2);color:var(--fg2)}
 .badge.ok{color:var(--ok)}.badge.bad{color:var(--bad)}
+.badge.fit{display:inline-block;box-sizing:border-box;text-align:center}
+.badge.st-off{opacity:.45;outline:1px dashed var(--fg2);outline-offset:-1px}
+.badge.st-in{outline:1px solid var(--bd);outline-offset:-1px}
+.feat{display:inline-flex;gap:6px;align-items:center;white-space:nowrap}
+.feat .na{width:34px;flex:none}
+button.ib{background:none;border:0;padding:0 0 0 4px;cursor:pointer;color:var(--ac);font-size:15px;line-height:1}
+#ptable input.mtu{width:5.5em}
+#ptable tr.chg td{background:var(--sel)}
+#ptable .chg:not(tr){outline:2px solid var(--ac);outline-offset:2px}
+/* Card footer: spans the card padding so it stays framed while stuck to the bottom.
+ * bottom:-40px cancels main's bottom padding, which would leave rows visible under the bar. */
+#pbar{position:sticky;bottom:-40px;z-index:5;display:flex;gap:12px;align-items:flex-end;
+  background:var(--panel);border-top:1px solid var(--bd);border-radius:0 0 9px 9px;
+  box-shadow:0 -6px 8px -6px rgba(0,0,0,.18);padding:10px 18px 14px;margin:12px -18px -16px}
+#pbar>div{flex:1;min-width:0}
+#ppending{width:100%;box-sizing:border-box;resize:none;margin-top:4px;font-size:12px}
 .seg{display:inline-flex;border:1px solid var(--bd);border-radius:7px;overflow:hidden}
 .seg button{
   background:var(--panel);border:0;padding:3px 8px;cursor:pointer;font-size:12px;color:var(--fg2);
@@ -167,6 +186,7 @@ label.row span.lb{width:110px;flex:none;color:var(--fg2);font-size:13px}
   background:var(--panel);border:1px solid var(--bd);border-radius:12px;box-shadow:var(--shadow);
   width:min(760px,96vw);max-height:86vh;display:flex;flex-direction:column;
 }
+#modal.narrow{width:fit-content;min-width:260px}
 #mhead{display:flex;align-items:center;padding:13px 18px;border-bottom:1px solid var(--bd)}
 #mtitle{font-weight:650;font-size:15px;flex:1}
 #mx{background:none;border:0;font-size:19px;cursor:pointer;color:var(--fg2);padding:0 2px}
@@ -191,6 +211,7 @@ textarea.cfg{
 .small{font-size:12px}
 .dangerzone{border-color:color-mix(in srgb,var(--bad) 40%,var(--bd))}
 button.danger{background:var(--bad);color:#fff;border-color:transparent}
+.plb{display:none}
 @media (max-width:820px){
   #nav{position:fixed;left:-210px;transition:left .18s;z-index:30;box-shadow:var(--shadow)}
   #nav.open{left:0}
@@ -199,11 +220,29 @@ button.danger{background:var(--bad);color:#fff;border-color:transparent}
   #top{padding:8px 10px;gap:7px}
   #ttitle{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   #dirty{padding:2px 7px}
+  /* Ports table as one card per port, a label left of each setting */
+  #ptable thead{display:none}
+  #ptable,#ptable tbody{display:block}
+  #ptable tr{display:grid;grid-template-columns:7.5em 1fr;gap:6px 10px;align-items:center;
+    border:1px solid var(--bd);border-radius:8px;padding:10px 12px;margin-bottom:10px}
+  #ptable tr.chg{background:var(--sel)}
+  #ptable td,#ptable tr.chg td,#ptable tr:hover td{border:0;padding:0;background:none}
+  #ptable td::before{content:attr(data-l);color:var(--fg2);font-size:12px;margin-right:10px}
+  #ptable td{grid-column:1/-1;display:grid;grid-template-columns:7.5em 1fr;gap:10px;align-items:center}
+  #ptable td.pn,#ptable td.pn+td{grid-column:auto;display:block;font-weight:650}
+  #ptable td.pn+td::before{content:none}
+  #ptable td.pn::before{color:inherit;font-size:inherit;margin-right:4px}
+  #ptable td.ppoe::before{content:none}
+  #ptable td[hidden]{display:none}	/* the grid rule above would otherwise show MTU on chips without it */
+  #ptable .plb{display:inline;color:var(--fg2);font-size:12px}
+  #ptable select{width:100%!important}
 }
 @media (max-width:720px){
   #ttitle{flex:1}
   #strip{order:3;flex-basis:100%}
 }
+#sy-snmp .row>.lb{flex:0 0 132px;width:132px;min-width:0}#sy-snmp .row>span:not(.lb){min-width:0;overflow-wrap:anywhere}
+#sy-snmp .row>.in{flex:1;min-width:0;width:0}
 </style>
 <script>
 (function(){
@@ -256,9 +295,16 @@ button.danger{background:var(--bad);color:#fff;border-color:transparent}
     <section class="tab" id="tab-ports">
       <div class="card"><h2 data-i18n="pt_title">Port configuration</h2>
         <div class="scrollx"><table class="t" id="ptable">
-          <thead><tr><th data-i18n="c_port">Port</th><th data-i18n="c_name">Name</th><th data-i18n="c_link">Link</th><th data-i18n="pt_conn">Devices learned</th><th data-i18n="pt_speed">Speed</th><th data-i18n="c_enabled">Enabled</th><th data-i18n="pt_mtu">MTU</th><th></th></tr></thead>
+          <thead><tr><th data-i18n="c_port">Port</th><th data-i18n="c_enabled">Enabled</th><th data-i18n="c_name">Name</th><th data-i18n="c_link">Link</th><th data-i18n="pt_speed">Speed</th><th data-i18n="pt_mtu">MTU</th><th data-i18n="pt_fc">Flow control</th><th data-i18n="pt_eee">EEE</th><th id="ptpoe" hidden>PoE</th></tr></thead>
           <tbody></tbody></table></div>
         <p class="small mut" style="margin-top:8px" data-i18n="pt_sfp_note">SFP speed is set per slot and is not saved in the startup config.</p>
+        <div id="pbar">
+          <div>
+            <div class="small mut" id="pcount" data-i18n="pt_nopending">No pending changes</div>
+            <textarea class="in mono" id="ppending" readonly wrap="off" hidden></textarea>
+          </div>
+          <button class="ctl pri" id="papply" data-i18n="c_apply" disabled>Apply</button>
+        </div>
       </div>
     </section>
 
@@ -301,7 +347,7 @@ button.danger{background:var(--bad);color:#fff;border-color:transparent}
     <section class="tab" id="tab-stats">
       <div class="card"><h2><span data-i18n="st_title">Port statistics</span> <span class="hint" data-i18n="st_h">totals since boot</span></h2>
         <div class="scrollx"><table class="t" id="stable">
-          <thead><tr><th data-i18n="c_port">Port</th><th data-i18n="c_name">Name</th><th data-i18n="c_link">Link</th><th class="num" data-i18n="st_txg">TX good</th><th class="num" data-i18n="st_txb">TX bad</th><th class="num" data-i18n="st_rxg">RX good</th><th class="num" data-i18n="st_rxb">RX bad</th><th></th></tr></thead>
+          <thead><tr><th data-i18n="c_port">Port</th><th data-i18n="c_name">Name</th><th data-i18n="c_link">Link</th><th class="num" data-i18n="st_txg">TX good</th><th class="num" data-i18n="st_txb">TX bad</th><th class="num" data-i18n="st_rxg">RX good</th><th class="num" data-i18n="st_rxb">RX bad</th><th class="num" data-i18n="pt_conn">Devices learned</th><th></th></tr></thead>
           <tbody></tbody></table></div>
       </div>
     </section>
@@ -330,11 +376,13 @@ button.danger{background:var(--bad);color:#fff;border-color:transparent}
         <div style="display:flex;gap:10px;margin-bottom:10px">
           <button class="ctl" id="l2refresh" data-i18n="c_refresh">Refresh</button>
           <button class="ctl" id="l2flush" data-i18n="l2_flush">Flush learned entries</button>
-          <span class="small mut" id="l2count" style="align-self:center"></span>
+          <span class="small mut" id="l2count" role="status" style="align-self:center"></span>
         </div>
+        <p class="small mut" id="l2partial" data-i18n="l2_partial" hidden>Sorting and filtering apply to loaded entries only.</p>
         <div class="scrollx"><table class="t" id="l2table">
           <thead><tr><th data-sort="pport"><span data-i18n="c_port">Port</span><span class="arrow"></span></th><th data-sort="mac">MAC<span class="arrow"></span></th><th data-sort="vlan">VLAN<span class="arrow"></span></th><th data-sort="stat"><span data-i18n="c_type">Type</span><span class="arrow"></span></th><th></th></tr></thead>
           <tbody></tbody></table></div>
+        <button class="ctl" id="l2more" data-i18n="l2_more" hidden>Load more</button>
       </div>
     </section>
 
@@ -360,6 +408,14 @@ button.danger{background:var(--bad);color:#fff;border-color:transparent}
           <thead><tr><th data-i18n="c_port">Port Number</th><th data-i18n="lldp_portname">Name</th><th data-i18n="lldp_enable">Send Frames</th></tr></thead>
           <tbody></tbody></table></div>
       </div>
+      <div class="card"><h2 data-i18n="lldp_nb_title">Neighbours</h2>
+        <div class="scrollx"><table class="t" id="lldp_nb_table">
+          <thead><tr><th data-i18n="c_port">Port Number</th><th data-i18n="lldp_nb_chassis">Chassis ID</th><th data-i18n="lldp_nb_portid">Port ID</th><th data-i18n="lldp_nb_sysname">System Name</th><th data-i18n="lldp_nb_sysdesc">System Description</th><th data-i18n="lldp_nb_portdesc">Port Description</th><th data-i18n="lldp_nb_addr">Address</th><th data-i18n="lldp_nb_caps">Capabilities</th><th data-i18n="lldp_nb_pvid">PVID</th><th data-i18n="lldp_nb_mtu">MTU</th><th data-i18n="lldp_nb_lag">LAG</th><th data-i18n="lldp_nb_link">Link</th><th data-i18n="lldp_nb_poe">PoE</th><th data-i18n="lldp_nb_ttl">TTL</th></tr></thead>
+          <tbody></tbody></table></div>
+      </div>
+      <div class="card"><h2 data-i18n="lldp_tlvs">Optional TLVs</h2>
+        <div id="lldp_tlvs"></div>
+      </div>
     </section>
 
     <section class="tab" id="tab-isolate">
@@ -382,15 +438,6 @@ button.danger{background:var(--bad);color:#fff;border-color:transparent}
           <tbody></tbody></table></div>
       </div>
       <p class="small mut" style="margin-top:10px" data-i18n="lag_note">A LAG needs at least one member to be saved in the startup config; applying an empty group clears it.</p>
-    </section>
-
-    <section class="tab" id="tab-eee">
-      <div class="card"><h2 data-i18n="e_title">Energy Efficient Ethernet</h2>
-        <div class="scrollx"><table class="t" id="etable">
-          <thead><tr><th data-i18n="c_port">Port</th><th data-i18n="e_adv">Advertised</th><th data-i18n="e_lp">Link partner</th><th data-i18n="e_active">Active</th><th data-i18n="e_enable">Enable</th></tr></thead>
-          <tbody></tbody></table></div>
-        <p class="small mut" style="margin-top:8px" data-i18n="e_note">Advertised and link-partner flags per speed: 100M, 1G, 2.5G. SFP ports do not support EEE.</p>
-      </div>
     </section>
 
     <section class="tab" id="tab-bw">
@@ -474,7 +521,7 @@ button.danger{background:var(--bad);color:#fff;border-color:transparent}
               <option value="fr">Français</option>
               <option value="ja">日本語</option>
               <option value="zh">中文</option>
-              
+
             </select></label>
           <label class="row"><span class="lb" data-i18n="sy_theme">Theme</span>
             <select class="in" id="themeSel">
@@ -486,6 +533,28 @@ button.danger{background:var(--bad);color:#fff;border-color:transparent}
               <option value="sel-dark" data-i18n="th_sel_dark">Selenized Dark</option>
             </select></label>
           <p class="small mut" data-i18n="sy_display_note">Stored in this browser only.</p>
+        </div>
+        <div class="card" id="sy-snmp" style="display:none"><h2>SNMP</h2>
+          <div class="row"><span class="lb">SNMP agent</span><span id="sy-snmp-enabled"></span>
+            <label class="switch" style="margin-left:auto"><input type="checkbox" id="sy-snmp-toggle" aria-label="Enable SNMP agent"><i></i></label></div>
+          <label class="row"><span class="lb">Allowed manager</span><input class="in mono" id="sy-snmp-manager" maxlength="18" placeholder="192.0.2.250/32" aria-describedby="sy-snmp-manager-note"></label>
+          <p class="small mut" id="sy-snmp-manager-note">Manager IP or network in CIDR notation. Use /32 for one host.</p>
+          <label class="row"><span class="lb">Community</span><input class="in" id="sy-snmp-secret" type="password" maxlength="32" autocomplete="new-password" aria-describedby="sy-snmp-community"></label>
+          <p class="small mut" id="sy-snmp-community"></p>
+          <div style="display:flex;gap:10px;margin:12px 0">
+            <button class="ctl pri" id="sy-snmp-apply" data-i18n="c_apply">Apply</button>
+            <button class="ctl" id="sy-snmp-refresh" data-i18n="c_refresh">Refresh</button>
+          </div>
+          <div class="row"><span class="lb">Protocol</span><span>SNMPv2c</span></div>
+          <div class="row"><span class="lb">Access</span><span>Read-only</span></div>
+          <div class="row"><span class="lb">UDP port</span><span>161</span></div>
+          <p class="small mut">Apply updates the running settings. Use Save to flash to keep them after reboot.</p>
+          </div>
+        <div class="card" id="sy-prom" style="display:none"><h2>Metrics</h2>
+          <div class="row"><span class="lb">Prometheus exporter</span>
+            <label class="switch" style="margin-left:auto"><input type="checkbox" id="sy-prom-toggle" aria-label="Enable Prometheus exporter"><i></i></label></div>
+          <div class="row"><span class="lb">Scrape URL</span><span class="mono" id="sy-prom-url"></span></div>
+          <p class="small mut">Anyone who can reach the switch can read /metrics while the exporter is on. Use Save to flash to keep the setting after reboot.</p>
         </div>
       </div>
       <div class="card" style="margin-top:16px"><h2><span data-i18n="sy_startup">Startup configuration</span>
@@ -518,7 +587,7 @@ button.danger{background:var(--bad);color:#fff;border-color:transparent}
 </div>
 
 <div id="toasts"></div>
-<div id="mback"><div id="modal">
+<div id="mback"><div id="modal" role="dialog" aria-modal="true" aria-labelledby="mtitle">
   <div id="mhead"><span id="mtitle"></span><button id="mx">&#x2715;</button></div>
   <div id="mbody"></div><div id="mfoot"></div>
 </div></div>

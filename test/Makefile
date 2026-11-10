@@ -1,3 +1,4 @@
+.DEFAULT_GOAL := all
 # Host unit-test harness for RTLPlayground firmware logic.
 #
 # Compiles selected firmware translation units with host gcc + AddressSanitizer,
@@ -14,12 +15,20 @@ SRCROOT  = ..
 CFLAGS   = -std=gnu11 -g -O1 -Wall -Wextra -Werror -Wno-unused-parameter -Wno-unknown-pragmas \
            -Wno-pointer-sign \
            -DRTLP_HOST_TEST \
-           -fsanitize=address,undefined -fno-omit-frame-pointer \
-           -include sdcc_shim.h -Istub -I$(SRCROOT) -I$(SRCROOT)/httpd -I$(SRCROOT)/uip
+           -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer \
+           -include sdcc_shim.h -Istub -I$(SRCROOT) -I$(SRCROOT)/httpd -I$(SRCROOT)/uip -I$(SRCROOT)/machine
 ifeq ($(findstring clang,$(shell $(CC) --version 2>/dev/null)),)
 CFLAGS  += -Wno-builtin-declaration-mismatch
 endif
 LDFLAGS  = -fsanitize=address,undefined
+# Use the native linker's supported dead-code flag for mixed firmware benches.
+# Neither GNU --gc-sections nor -no-pie is forced on non-GNU linkers.
+GC_LDFLAGS := $(shell printf 'int main(void){return 0;}\n' | $(CC) -x c - -o /dev/null -Wl,--gc-sections >/dev/null 2>&1 && printf '%s' '-Wl,--gc-sections')
+ifeq ($(GC_LDFLAGS),)
+GC_LDFLAGS := $(shell printf 'int main(void){return 0;}\n' | $(CC) -x c - -o /dev/null -Wl,-dead_strip >/dev/null 2>&1 && printf '%s' '-Wl,-dead_strip')
+endif
+
+GC_CFLAGS := $(shell printf 'int main(void){return 0;}\n' | $(CC) -Werror -ffunction-sections -fdata-sections -x c - -c -o /dev/null >/dev/null 2>&1 && printf '%s' '-ffunction-sections -fdata-sections')
 
 BUILDDIR = build
 
@@ -34,15 +43,62 @@ TESTS = $(BUILDDIR)/test_cmd_editor \
         $(BUILDDIR)/test_cpu_vlan_restricted \
         $(BUILDDIR)/test_cpu_vlan_8372 \
         $(BUILDDIR)/test_nic_rx \
-        $(BUILDDIR)/test_lacp
+        $(BUILDDIR)/test_lacp \
+        $(BUILDDIR)/test_lldp \
+        $(BUILDDIR)/test_lldp_tx \
+        $(BUILDDIR)/test_rtl8370n_console \
+        $(BUILDDIR)/test_rtl836x_regs \
+        $(BUILDDIR)/test_rtl836x_nic \
+        $(BUILDDIR)/test_page_json_836x \
+        $(BUILDDIR)/test_rtl836x_phy
+
+TESTS += $(BUILDDIR)/test_trap_836x $(BUILDDIR)/test_trap_837x
+$(BUILDDIR)/test_trap_836x: CFLAGS += -DMACHINE_NAME=TPLINK_TL_SG108PE_V5
+$(BUILDDIR)/test_trap_836x $(BUILDDIR)/test_trap_837x: test_trap.c $(SRCROOT)/rtl837x_trap.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
 
 # The table tests link the register mock and one environment file; stub/
 # stands in for the two headers a firmware build generates.
 TABLE_ENV = support.c hw_mock.c env_tables.c $(SRCROOT)/cmd_editor.c \
-            $(SRCROOT)/rtl837x_port.c $(SRCROOT)/httpd/page_impl.c \
-            $(SRCROOT)/httpd/html_out.c
+            $(SRCROOT)/rtl837x_port.c $(SRCROOT)/rtl837x_pause.c $(SRCROOT)/httpd/page_impl.c \
+            $(SRCROOT)/httpd/html_out.c $(SRCROOT)/vlan.c
 
-all: run
+TESTS += $(BUILDDIR)/test_rx_bounds
+
+$(BUILDDIR)/test_rx_bounds: test_rx_bounds.c $(SRCROOT)/uip/uip_rx.h | $(BUILDDIR)
+	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS)
+
+# trap_init() with LLDP off and on by default
+TESTS += $(BUILDDIR)/test_trap_lldp0 $(BUILDDIR)/test_trap_lldp1
+$(BUILDDIR)/test_trap_lldp%: test_trap_defaults.c $(SRCROOT)/rtl837x_trap.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) -DMACHINE_DEFAULT_LLDP=$* $< -o $@ $(LDFLAGS)
+
+TESTS += $(BUILDDIR)/test_cable_836x
+$(BUILDDIR)/test_cable_836x: test_cable_836x.c $(SRCROOT)/rtl837x_cabletest.c $(SRCROOT)/timer.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) -DMACHINE_NAME=TPLINK_TL_SG108PE_V5 $< $(SRCROOT)/timer.c -o $@ $(LDFLAGS)
+
+# Prometheus exporter: metrics.c is included by the test, metrics_cli.c is linked.
+TESTS += $(BUILDDIR)/test_metrics
+$(BUILDDIR)/test_metrics: test_metrics.c $(SRCROOT)/metrics.c $(SRCROOT)/metrics_cli.c $(SRCROOT)/httpd/html_out.c $(SRCROOT)/metrics.h | $(BUILDDIR)
+	$(CC) $(CFLAGS) -DPROMETHEUS test_metrics.c $(SRCROOT)/metrics_cli.c $(SRCROOT)/httpd/html_out.c -o $@ $(LDFLAGS)
+TESTS += $(BUILDDIR)/test_metrics_http
+$(BUILDDIR)/test_metrics_http: test_metrics_http.c test_httpd_tx.c $(SRCROOT)/httpd/httpd.c $(SRCROOT)/httpd/html_out.c $(SRCROOT)/uip/uip.c $(SRCROOT)/sessions.c $(SRCROOT)/timer.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) -DPROMETHEUS test_metrics_http.c $(SRCROOT)/httpd/httpd.c $(SRCROOT)/httpd/html_out.c $(SRCROOT)/uip/uip.c $(SRCROOT)/sessions.c $(SRCROOT)/timer.c -o $@ $(LDFLAGS)
+TESTS += $(BUILDDIR)/test_prometheus_status_json
+$(BUILDDIR)/test_prometheus_status_json: test_prometheus_status_json.c test_page_json.c $(TABLE_ENV) hw_mock.h | $(BUILDDIR)
+	$(CC) $(CFLAGS) -DPROMETHEUS test_prometheus_status_json.c $(filter %.c,$(TABLE_ENV)) -o $@ $(LDFLAGS)
+
+all: run lldp-conf prometheus-gui prune-defaults
+
+# The RTL836x web pages; the test carries its own 16-bit register file.
+$(BUILDDIR)/test_page_json_836x: CFLAGS += -DMACHINE_NAME=TPLINK_TL_SG108PE_V5 -ffunction-sections -fdata-sections
+$(BUILDDIR)/test_page_json_836x: test_page_json_836x.c support.c env_tables.c $(SRCROOT)/cmd_editor.c \
+                                 $(SRCROOT)/httpd/page_impl.c $(SRCROOT)/httpd/page_stp.c $(SRCROOT)/httpd/html_out.c \
+                                 $(SRCROOT)/rtl836x_mib.c $(SRCROOT)/rtl836x_port.c $(SRCROOT)/vlan.c \
+                                 $(SRCROOT)/rtl836x_phy.c $(SRCROOT)/rtl836x_rate.c $(SRCROOT)/snmp_hw.c \
+                                 $(SRCROOT)/rtl836x_igmp.c $(SRCROOT)/rtl837x_igmp.c \
+                                 $(SRCROOT)/machine/TPLINK_TL_SG108PE_V5_init.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) -Wl,--gc-sections
 
 $(BUILDDIR):
 	mkdir -p $(BUILDDIR)
@@ -62,6 +118,29 @@ $(BUILDDIR)/test_tick_gate: test_tick_gate.c support.c $(SRCROOT)/cmd_editor.c $
 $(BUILDDIR)/test_timer: test_timer.c support.c $(SRCROOT)/cmd_editor.c $(SRCROOT)/timer.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
 
+# The experimental console uses the same SDCC shim and a simulated SFR edge.
+$(BUILDDIR)/test_rtl8370n_console: test_rtl8370n_console.c rtl8370n_hw.h $(SRCROOT)/rtl8370n/console.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) -Wno-pointer-to-int-cast -Wno-int-to-pointer-cast $< -o $@ $(LDFLAGS)
+
+# The RTL836x register primitives on a model of the RTL8370N register controller.
+$(BUILDDIR)/test_rtl836x_regs: CFLAGS += -DMACHINE_NAME=TPLINK_TL_SG108PE_V5
+$(BUILDDIR)/test_rtl836x_regs: test_rtl836x_regs.c $(SRCROOT)/rtl836x_regs.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS)
+
+# RTL836x NIC frame conversion; the register controller and the DMA engine are modelled.
+$(BUILDDIR)/test_rtl836x_nic: CFLAGS += -DMACHINE_NAME=TPLINK_TL_SG108PE_V5
+$(BUILDDIR)/test_rtl836x_nic: test_rtl836x_nic.c $(SRCROOT)/rtl836x_nic.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS)
+
+# Port commands and their native Clause 22 PHY implementation.
+$(BUILDDIR)/test_rtl836x_phy: CFLAGS += -DMACHINE_NAME=TPLINK_TL_SG108PE_V5 \
+    -Wno-parentheses -Wno-incompatible-pointer-types -Wno-int-to-pointer-cast -Wno-pointer-to-int-cast \
+    -ffunction-sections -fdata-sections
+$(BUILDDIR)/test_rtl836x_phy: test_rtl836x_phy.c $(SRCROOT)/cmd_parser.c $(SRCROOT)/rtl836x_phy.c \
+    $(SRCROOT)/rtl837x_cabletest.c $(SRCROOT)/timer.c \
+    $(SRCROOT)/machine/TPLINK_TL_SG108PE_V5_init.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) -Wl,--gc-sections
+
 # Exercise the production RX ring reader; only the hardware DMA edge is mocked.
 # Discard unused TX functions so this RX fixture needs no TX register mocks.
 $(BUILDDIR)/test_nic_rx: test_nic_rx.c $(SRCROOT)/rtl837x_nic.c $(SRCROOT)/rtl837x_nic.h | $(BUILDDIR)
@@ -70,13 +149,43 @@ $(BUILDDIR)/test_nic_rx: test_nic_rx.c $(SRCROOT)/rtl837x_nic.c $(SRCROOT)/rtl83
 $(BUILDDIR)/test_page_json: test_page_json.c $(TABLE_ENV) hw_mock.h | $(BUILDDIR)
 	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@ $(LDFLAGS)
 
+TESTS += $(BUILDDIR)/test_page_json_mixed
+$(BUILDDIR)/test_page_json_mixed: test_page_json.c $(TABLE_ENV) hw_mock.h | $(BUILDDIR)
+	$(CC) $(CFLAGS) -DRTLP_TEST_N10G=1 $(filter %.c,$^) -o $@ $(LDFLAGS)
+
 # rtl837x_lacp.c is compiled UNMODIFIED from the firmware tree.
 $(BUILDDIR)/test_lacp: test_lacp.c $(SRCROOT)/rtl837x_lacp.c $(SRCROOT)/timer.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
 
-# httpd/httpd.c and uip/uip.c are compiled UNMODIFIED from the firmware tree;
+# The same engine in its RTL836x build, over the real RTL836x port layer and the real RMA trap; only the
+# register controller (a register file), the NIC's TX edge and the console are modelled.
+TESTS += $(BUILDDIR)/test_lacp_836x
+$(BUILDDIR)/test_lacp_836x: CFLAGS += -DMACHINE_NAME=TPLINK_TL_SG108PE_V5
+$(BUILDDIR)/test_lacp_836x: test_lacp_836x.c $(SRCROOT)/rtl837x_lacp.c $(SRCROOT)/rtl836x_port.c $(SRCROOT)/rtl837x_trap.c $(SRCROOT)/timer.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) $(GC_CFLAGS) $^ -o $@ $(LDFLAGS) $(GC_LDFLAGS)
+
+TESTS += $(BUILDDIR)/test_stp_836x $(BUILDDIR)/test_l2_flush_836x
+$(BUILDDIR)/test_stp_836x $(BUILDDIR)/test_l2_flush_836x: CFLAGS += -DMACHINE_NAME=TPLINK_TL_SG108PE_V5
+$(BUILDDIR)/test_stp_836x: CFLAGS += -fpack-struct=1
+$(BUILDDIR)/test_stp_836x: test_stp_836x.c $(SRCROOT)/rtl837x_stp.c $(SRCROOT)/rtl836x_port.c $(SRCROOT)/rtl837x_trap.c $(SRCROOT)/timer.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) $(GC_CFLAGS) $^ -o $@ $(LDFLAGS) $(GC_LDFLAGS)
+$(BUILDDIR)/test_l2_flush_836x: test_l2_flush_836x.c $(SRCROOT)/rtl836x_port.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) $(GC_CFLAGS) $^ -o $@ $(LDFLAGS) $(GC_LDFLAGS)
+
+TESTS += $(BUILDDIR)/test_boot_defaults0 $(BUILDDIR)/test_boot_defaults1
+$(BUILDDIR)/test_boot_defaults%: test_boot_defaults.c $(SRCROOT)/rtl8370_init.c $(SRCROOT)/rtl836x_phy.c $(SRCROOT)/rtl836x_port.c stub/phy_patch.h | $(BUILDDIR)
+	$(CC) $(CFLAGS) $(GC_CFLAGS) -DMACHINE_NAME=TPLINK_TL_SG108PE_V5 -DMACHINE_DEFAULT_EEE=$* $(filter %.c,$^) -o $@ $(LDFLAGS) $(GC_LDFLAGS)
+
+$(BUILDDIR)/test_lldp: test_lldp.c $(SRCROOT)/rtl837x_lldp.c $(SRCROOT)/rtl837x_lldp_tx_strings.c $(SRCROOT)/httpd/html_out.c $(SRCROOT)/timer.c fw_memset.h | $(BUILDDIR)
+	$(CC) $(CFLAGS) -include fw_memset.h test_lldp.c $(SRCROOT)/rtl837x_lldp.c $(SRCROOT)/rtl837x_lldp_tx_strings.c $(SRCROOT)/httpd/html_out.c $(SRCROOT)/timer.c -o $@ $(LDFLAGS)
+
+TESTS += $(BUILDDIR)/test_igmp_rx
+$(BUILDDIR)/test_igmp_rx: test_igmp_rx.c hw_mock.c $(SRCROOT)/rtl837x_igmp.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) $(GC_CFLAGS) $^ -o $@ $(LDFLAGS) $(GC_LDFLAGS)
+
+# httpd/httpd.c, httpd/html_out.c and uip/uip.c are compiled UNMODIFIED from the firmware tree;
 # this test carries the environment below them itself.
-$(BUILDDIR)/test_httpd_tx: test_httpd_tx.c $(SRCROOT)/httpd/httpd.c $(SRCROOT)/uip/uip.c $(SRCROOT)/timer.c | $(BUILDDIR)
+$(BUILDDIR)/test_httpd_tx: test_httpd_tx.c $(SRCROOT)/httpd/httpd.c $(SRCROOT)/httpd/html_out.c $(SRCROOT)/uip/uip.c $(SRCROOT)/timer.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@ $(LDFLAGS)
 # the login sessions httpd.c calls into
 $(BUILDDIR)/test_httpd_tx: $(SRCROOT)/sessions.c
@@ -87,15 +196,170 @@ $(BUILDDIR)/test_cpu_vlan_8372: CFLAGS += -DMACHINE_MAX_PORT=7 -DMACHINE_MIN_POR
 $(BUILDDIR)/test_cpu_vlan_full $(BUILDDIR)/test_cpu_vlan_restricted $(BUILDDIR)/test_cpu_vlan_8372: test_cpu_vlan.c $(TABLE_ENV) | $(BUILDDIR)
 	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@ $(LDFLAGS)
 
-run: $(TESTS)
+$(BUILDDIR)/fileadder: $(SRCROOT)/tools/fileadder.c | $(BUILDDIR)
+	$(CC) -g -O1 -Wall -fsanitize=address,undefined -fno-omit-frame-pointer $< -o $@ -lz
+
+test_mirror:
+	CC="$(CC)" python3 test_mirror.py
+
+$(BUILDDIR)/test_lldp_tx: test_lldp_tx.c $(SRCROOT)/rtl837x_lldp.c $(SRCROOT)/rtl837x_lldp_tx_strings.c $(SRCROOT)/httpd/html_out.c $(SRCROOT)/timer.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) $(GC_CFLAGS) $^ -o $@ $(LDFLAGS) $(GC_LDFLAGS)
+
+run: $(TESTS) $(BUILDDIR)/fileadder snmp snmp-horaco-profile snmp-status snmp-cli snmp-replay config-replay prometheus-replay test_mirror
 	@fail=0; for t in $(TESTS); do \
 		echo "=== $$t ==="; \
 		$$t || fail=1; \
 		echo; \
 	done; \
-	if [ $$fail -ne 0 ]; then echo "TESTS FAILED"; exit 1; else echo "ALL TESTS PASSED"; fi
+	python3 test_fileadder.py $(BUILDDIR)/fileadder || fail=1; \
+	if [ $$fail -ne 0 ]; then echo "TESTS FAILED"; exit 1; fi
+	CC="$(CC)" python3 test_bringup_safety.py
+	CC="$(CC)" python3 test_lacp_cli.py
+	node test_mib.js
+	node test_ports.js
+	@echo "ALL TESTS PASSED"
+
+# Save to flash keeps one "lldp tlv" line per TLV (html/app.js mergeConf)
+NODE ?= node
+lldp-conf:
+	cd $(SRCROOT) && $(NODE) test/test_lldp_conf.cjs
+
+# Save to flash leaves out settings at their board default (html/app.js pruneDefaults)
+prune-defaults:
+	cd $(SRCROOT) && $(NODE) test/test_prune_defaults.cjs
+
+NODE ?= node
+# Prometheus card on the System page and its saved on/off command
+prometheus-gui:
+	cd $(SRCROOT) && $(NODE) test/test_prometheus_gui.cjs
+
+l2-delete:
+	node test_l2_delete.cjs
+
+l2-load:
+	node test_l2_load.cjs
 
 clean:
 	rm -rf $(BUILDDIR)
 
-.PHONY: all run clean
+.PHONY: all run lldp-conf prometheus-gui prune-defaults clean test_mirror l2-delete l2-load
+
+
+# SNMP host benches compile the same firmware sources; listener is opt-in here.
+SNMPFLAGS = $(CFLAGS) -DSNMP
+SNMPENV = $(SRCROOT)/snmp.c $(SRCROOT)/snmp_control.c $(SRCROOT)/uip/uip.c $(SRCROOT)/httpd/httpd.c $(SRCROOT)/httpd/html_out.c $(SRCROOT)/sessions.c $(SRCROOT)/timer.c
+# Eight-port mock (logical ports 0..7); the *_nine benches keep the default 0..8.
+$(BUILDDIR)/test_snmp $(BUILDDIR)/test_snmp_transport $(BUILDDIR)/test_snmp_cli: CFLAGS += -DMACHINE_MAX_PORT=7
+# Six user ports (logical 3..8), as on an RTL8372 board.
+$(BUILDDIR)/test_snmp_hw_six: CFLAGS += -DMACHINE_MIN_PORT=3
+$(BUILDDIR)/test_snmp: test_snmp.c test_httpd_tx.c $(SNMPENV) | $(BUILDDIR)
+	$(CC) $(SNMPFLAGS) test_snmp.c $(SNMPENV) -o $@ $(LDFLAGS)
+
+$(BUILDDIR)/test_snmp_hw: test_snmp_hw.c $(SRCROOT)/snmp_hw.c | $(BUILDDIR)
+	$(CC) $(SNMPFLAGS) test_snmp_hw.c -o $@ $(LDFLAGS)
+
+$(BUILDDIR)/test_snmp_nine: test_snmp.c test_httpd_tx.c $(SNMPENV) | $(BUILDDIR)
+	$(CC) $(SNMPFLAGS) -DSNMP_TEST_NINE test_snmp.c $(SNMPENV) -o $@ $(LDFLAGS)
+
+$(BUILDDIR)/test_snmp_hw_six: test_snmp_hw.c $(SRCROOT)/snmp_hw.c | $(BUILDDIR)
+	$(CC) $(SNMPFLAGS) test_snmp_hw.c -o $@ $(LDFLAGS)
+
+.PHONY: snmp snmp-unit
+snmp-unit: $(BUILDDIR)/test_snmp $(BUILDDIR)/test_snmp_nine $(BUILDDIR)/test_snmp_hw $(BUILDDIR)/test_snmp_hw_six
+	$(BUILDDIR)/test_snmp
+	$(BUILDDIR)/test_snmp_nine
+	$(BUILDDIR)/test_snmp_hw
+	$(BUILDDIR)/test_snmp_hw selector
+	$(BUILDDIR)/test_snmp_hw prebusy
+	$(BUILDDIR)/test_snmp_hw link
+	$(BUILDDIR)/test_snmp_hw speed
+	$(BUILDDIR)/test_snmp_hw admin
+	$(BUILDDIR)/test_snmp_hw_six
+
+
+# Exercise the actual dispatcher, ARP module and UDP service implementations.
+TRANSPORTDEPS = $(SRCROOT)/syslog.c $(SRCROOT)/dhcp.c $(SRCROOT)/uip/uip_arp.c $(SRCROOT)/snmp.h
+TRANSPORTENV = $(SNMPENV) $(SRCROOT)/udp_apps.c transport_arp.c \
+               transport_dhcp.c $(SRCROOT)/dns.c $(SRCROOT)/ntp.c transport_syslog.c
+$(BUILDDIR)/test_snmp_transport: test_snmp_transport.c test_snmp.c test_httpd_tx.c snmp_wire_fixtures.h $(TRANSPORTENV) $(TRANSPORTDEPS) | $(BUILDDIR)
+	$(CC) $(SNMPFLAGS) $(GC_CFLAGS) test_snmp_transport.c $(TRANSPORTENV) -o $@ $(LDFLAGS) $(GC_LDFLAGS)
+$(BUILDDIR)/test_snmp_transport_nine: test_snmp_transport.c test_snmp.c test_httpd_tx.c snmp_wire_fixtures.h $(TRANSPORTENV) $(TRANSPORTDEPS) | $(BUILDDIR)
+	$(CC) $(SNMPFLAGS) -DSNMP_TEST_NINE -ffunction-sections -fdata-sections test_snmp_transport.c $(TRANSPORTENV) -o $@ $(LDFLAGS) $(GC_LDFLAGS)
+snmp: snmp-unit $(BUILDDIR)/test_snmp_transport $(BUILDDIR)/test_snmp_transport_nine
+	$(BUILDDIR)/test_snmp_transport
+	$(BUILDDIR)/test_snmp_transport_nine
+
+# Real HORACO profile compatibility; all hardware access is mocked.
+$(BUILDDIR)/test_snmp_horaco_profile: test_snmp_horaco_profile.c test_snmp.c test_httpd_tx.c $(SNMPENV) $(SRCROOT)/machine/MOKERLINK_ZX_SWTGW218AS.c | $(BUILDDIR)
+	$(CC) $(SNMPFLAGS) -DMACHINE_MOKERLINK_ZX_SWTGW218AS -DMACHINE_NAME=MOKERLINK_ZX_SWTGW218AS test_snmp_horaco_profile.c $(SNMPENV) $(SRCROOT)/machine/MOKERLINK_ZX_SWTGW218AS.c -o $@ $(LDFLAGS)
+.PHONY: snmp-horaco-profile
+snmp-horaco-profile: $(BUILDDIR)/test_snmp_horaco_profile
+	$(BUILDDIR)/test_snmp_horaco_profile
+
+# Stage C: actual runtime snapshot and information.json serialization.
+$(BUILDDIR)/test_snmp_status_json: test_snmp_status_json.c test_page_json.c $(TABLE_ENV) $(SRCROOT)/snmp.c $(SRCROOT)/snmp_control.c | $(BUILDDIR)
+	$(CC) $(SNMPFLAGS) $(GC_CFLAGS) $(filter-out test_page_json.c,$(filter %.c,$^)) -o $@ $(LDFLAGS) $(GC_LDFLAGS)
+.PHONY: snmp-status
+snmp-status: $(BUILDDIR)/test_snmp_status_json
+	$(BUILDDIR)/test_snmp_status_json
+
+NODE ?= node
+.PHONY: snmp-status-gui
+snmp-status-gui:
+	cd $(SRCROOT) && $(NODE) test/test_snmp_status_gui.cjs
+
+# Live community/ACL and timestamp behavior with the real packet engine.
+$(BUILDDIR)/test_snmp_cli: test_snmp_cli.c test_snmp.c test_httpd_tx.c $(SNMPENV) | $(BUILDDIR)
+	$(CC) $(SNMPFLAGS) test_snmp_cli.c $(SNMPENV) -o $@ $(LDFLAGS)
+.PHONY: snmp-cli
+snmp-cli: $(BUILDDIR)/test_snmp_cli
+	$(BUILDDIR)/test_snmp_cli
+
+# Preserve the full SNMP suites as an explicit CI entry point.
+.PHONY: snmp-all snmp-replay snmp-gui
+snmp-all: snmp snmp-horaco-profile snmp-status snmp-cli snmp-replay snmp-gui
+snmp-replay:
+	cd $(SRCROOT) && REPLAY_CC="$(CC)" python3 test/test_snmp_control_replay.py
+snmp-gui:
+	cd $(SRCROOT) && $(NODE) test/test_snmp_status_gui.cjs
+	cd $(SRCROOT) && $(NODE) test/test_snmp_switch_gui.cjs
+	cd $(SRCROOT) && $(NODE) test/test_snmp_switch_save.cjs
+	cd $(SRCROOT) && $(NODE) test/test_snmp_privacy_gui.cjs
+
+$(addprefix $(BUILDDIR)/,test_snmp test_snmp_nine test_snmp_horaco_profile test_snmp_status_json test_snmp_cli test_snmp_transport test_snmp_transport_nine): snmp_setup.h $(SRCROOT)/snmp_internal.h $(SRCROOT)/snmp.h
+
+.PHONY: config-replay
+config-replay:
+	cd $(SRCROOT) && CC="$(CC)" python3 test/test_config_replay.py
+
+.PHONY: test_lag_tokens
+test_lag_tokens:
+	CC="$(CC)" python3 test_lag_tokens.py
+
+run: test_lag_tokens
+.PHONY: prometheus-replay
+prometheus-replay:
+	cd $(SRCROOT) && CC="$(CC)" python3 test/test_prometheus_replay.py
+.PHONY: l2-load
+
+.PHONY: test_bw_cli
+test_bw_cli:
+	CC="$(CC)" python3 test_bw_cli.py
+
+run: test_bw_cli
+.PHONY: test_igmp_cli
+test_igmp_cli:
+	CC="$(CC)" python3 test_igmp_cli.py
+
+run: test_igmp_cli
+.PHONY: test_cable_cli
+test_cable_cli:
+	CC="$(CC)" python3 test_cable_cli.py
+
+run: test_cable_cli
+
+.PHONY: test_management_vlan
+test_management_vlan:
+	CC="$(CC)" python3 test_management_vlan.py
+
+run: test_management_vlan

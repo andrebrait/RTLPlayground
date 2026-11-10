@@ -65,6 +65,8 @@
 #error "Unsupported MACHINE_CHIPSET is specified!"
 #endif
 
+#include "machine_defaults.h"
+
 #define LED_27 1
 // SYSTEM LED
 #define LED_28_SYS 2

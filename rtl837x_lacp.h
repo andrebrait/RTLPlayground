@@ -8,6 +8,7 @@
 
 #include <stdint.h>
 #include "rtl837x_common.h"
+#include "rtl837x_port.h"
 
 void lacp_init(void) __banked;
 void lacp_in(void) __banked;
@@ -16,7 +17,6 @@ void lacp_off(void) __banked;
 void lacp_show(void) __banked;
 void lacp_lag_set(uint8_t lag, __xdata uint16_t ports) __banked;
 
-#define LACP_NUM_LAGS		4
 #define LACP_LAG_NONE		0xff
 
 extern __xdata uint8_t  lacpEnabled;
@@ -26,10 +26,10 @@ extern __xdata uint8_t  lacp_rx_state[10];
 extern __xdata uint8_t  lacp_partner_sys[10][MAC_ADDR_LEN];
 extern __xdata uint16_t lacp_rx_count[10];
 extern __xdata uint8_t  lacp_port_lag[10];
-extern __xdata uint16_t lacp_lag_ports[LACP_NUM_LAGS];
-extern __xdata uint8_t  lacp_agg_sys[LACP_NUM_LAGS][MAC_ADDR_LEN];
-extern __xdata uint8_t  lacp_agg_valid[LACP_NUM_LAGS];
-extern __xdata uint16_t lacp_members_last[LACP_NUM_LAGS];
+extern __xdata uint16_t lacp_lag_ports[PORT_LAG_COUNT];
+extern __xdata uint8_t  lacp_agg_sys[PORT_LAG_COUNT][MAC_ADDR_LEN];
+extern __xdata uint8_t  lacp_agg_valid[PORT_LAG_COUNT];
+extern __xdata uint16_t lacp_members_last[PORT_LAG_COUNT];
 
 #define SLOW_PROTO_ETHERTYPE	0x8809
 #define SLOW_PROTO_SUBTYPE_LACP	0x01

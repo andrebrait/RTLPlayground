@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 #include "timer.h"
+#include "rtl837x_common.h"
+#include "rtl837x_port.h"
 void stp_in(void) __banked;
 void stp_setup(void) __banked;
 void stp_timers(void) __banked;
@@ -10,7 +12,7 @@ void stp_off(void) __banked;
 void stp_parse(void) __banked __reentrant;
 void stp_defaults(void) __banked;
 void stp_status(void) __banked;
-void stp_port_admin(uint8_t port, uint8_t on) __banked;
+void stp_port_admin(uint8_t port, __xdata uint8_t on) __banked;
 void stp_prio_apply(void) __banked;
 void stp_port_mcheck(uint8_t port) __banked;
 uint8_t stp_port_role(uint8_t port) __banked;
@@ -26,7 +28,7 @@ extern __xdata struct timer stp_step;
 
 #define STP_PORTS	(CPU_PORT + 1)
 #define STP_LAG_BASE	STP_PORTS
-#define STP_LAG_COUNT	4
+#define STP_LAG_COUNT	PORT_LAG_COUNT	/* 4 on the RTL837x, the 2 fixed groups of the RTL836x */
 #define STP_ENTITIES	(STP_LAG_BASE + STP_LAG_COUNT)
 
 /* Bridge identifier as carried in a BPDU (priority, extension, MAC). */

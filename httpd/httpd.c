@@ -9,6 +9,12 @@
 #include "timer.h"
 #include "sessions.h"
 #include "html_data.h"
+#ifdef SNMP
+#include "snmp.h"
+#endif
+#ifdef PROMETHEUS
+#include "metrics.h"
+#endif
 
 // #define DEBUG
 #include "debug.h"
@@ -116,7 +122,7 @@ uint8_t find_entry(__xdata uint8_t *e)
 {
 	uint8_t i, j;
 
-	for (i = 0; f_data[i].len; i++) {
+	for (i = 0; f_data[i].file; i++) {
 		j = 0;
 		while (f_data[i].file[j] && (f_data[i].file[j] == e[j])) {
 			j++;
@@ -485,10 +491,13 @@ uint8_t stream_upload(void)
 				}
 			}
 			// Make sure there is a 0 at the end of the uploaded data
-			flash_buf[0] = 0;
-			flash_region.addr = uptr;
-			flash_region.len = 1;
-			flash_write_bytes(flash_buf);
+			// (a full-size image ends at the end of the staged area: no room)
+			if (uptr < (uint32_t)FIRMWARE_UPLOAD_START * 2) {
+				flash_buf[0] = 0;
+				flash_region.addr = uptr;
+				flash_region.len = 1;
+				flash_write_bytes(flash_buf);
+			}
 			if (upload_settings.bptr >= upload_settings.plen)
 				return 0;
 			return 1;
@@ -624,13 +633,13 @@ static void run_cmd_body(__xdata uint8_t *body)
 	cmd_capture = 1;
 	execute_commands(body);
 	if (cmd_capture == 2)
-		slen += strtox(outbuf + slen, CMD_TRUNCATED);
+		string_to_html(CMD_TRUNCATED);
 	cmd_capture = 0;
 	/* Commands that configure something print nothing at all. Saying
 	 * so beats an empty body, which reads the same as "nothing ran".
 	 * Only on success: a silent failure must not answer with "OK". */
 	if (err_status == ERR_OK && slen == hdr_len)
-		slen += strtox(outbuf + slen, "OK\n");
+		string_to_html("OK\n");
 	/* On a parse error keep what the parser printed, because that text
 	 * is the explanation, and only restate the status. "400 NO" is as
 	 * long as "200 OK", so the header does not have to be rebuilt. */
@@ -652,7 +661,7 @@ static void run_login_body(__xdata uint8_t *body)
 		slen = strtox(outbuf, "HTTP/1.1 302 Found\r\nConnection: close\r\nLocation: index.html\r\n" \
 				      "Set-Cookie: session=");
 		session_new();
-		slen += strtox(outbuf + slen, "; SameSite=Strict\r\n\r\n");
+		string_to_html("; SameSite=Strict\r\n\r\n");
 	} else {
 		dbg_string("Password invalid!\n");
 		slen = strtox(outbuf, "HTTP/1.1 302 Found\r\nConnection: close\r\nLocation: login.html\r\n\r\n");
@@ -935,6 +944,16 @@ void httpd_appcall(void)
 			cont_len -= slen;
 			cont_addr += slen;
 			s->tstate = TSTATE_TX;
+#ifdef PROMETHEUS
+		} else if (metrics_more) {
+			slen = 0;
+			metrics_fill();
+			o_idx = 0;
+			if (slen) {
+				tx_send(slen > uip_mss() ? uip_mss() : slen);
+				s->tstate = TSTATE_TX;
+			}
+#endif
 		} else if (s->fw_reset_pending) {
 			// The upload verdict has been fully ACKed by the client;
 			// now it is safe to reset and apply the staged image
@@ -960,12 +979,15 @@ void httpd_appcall(void)
 		}
 	} else if (uip_newdata() && s->tstate != TSTATE_TX) {
 		cont_len = 0;
+#ifdef PROMETHEUS
+		metrics_more = false;	/* an unfinished scrape belongs to an earlier request */
+#endif
 		dbg_char('<'); dbg_short(uip_len); dbg_char('\n');
 		__xdata uint8_t *p = uip_appdata;
 		uint16_t body_off = 0;
 		// Mark end of request header with \0
 		p[uip_len] = 0;
-#ifdef DEBUG
+#if defined(DEBUG) && !defined(SNMP)
 		while (*p)
 			dbg_char(*p++);
 		dbg_char('\n');
@@ -1014,6 +1036,16 @@ void httpd_appcall(void)
 		entry = find_entry(q);
 		dbg_string("Entry is: "); dbg_byte(entry); dbg_char('\n');
 		if (entry == 0xff) {
+#ifdef PROMETHEUS
+			/* Scrapers carry no session; the on/off setting is the only gate. */
+			if (!strcmp(q, "/metrics")) {
+				if (prometheus_enabled)
+					metrics_start(is_word(q + 9, "mib=1"));
+				else
+					send_not_found();
+				goto do_send;
+			}
+#endif
 			if (!authenticated) {
 				dbg_string("Not authorized!\n");
 				send_unauthorized();
@@ -1031,8 +1063,6 @@ void httpd_appcall(void)
 				uint8_t cport = q[20] - '0';
 				if (send_counters(cport))
 					send_bad_request();
-			} else if (is_word(q, "/eee.json")) {
-				send_eee();
 			} else if (is_word(q, "/bandwidth.json")) {
 				send_bandwidth();
 			} else if (is_word(q, "/storm.json")) {
@@ -1049,6 +1079,8 @@ void httpd_appcall(void)
 				send_isolation();
 			} else if (is_word(q, "/mtu.json")) {
 				send_mtu();
+			} else if (is_word(q, "/defaults.json")) {
+				send_defaults();
 			} else if (is_word(q, "/lag.json")) {
 				send_lag();
 			} else if (is_word(q, "/stp.json")) {
@@ -1061,13 +1093,17 @@ void httpd_appcall(void)
 				send_stp_counters();
 			} else if (is_word(q, "/vlanlist")) {
 				send_vlanlist();
+#ifdef SNMP
+			} else if (is_word(q, "/snmp_config")) {
+				snmp_export_config();
+#endif
 			} else if (is_word(q, "/config")) {
 				send_config();
 			} else if (is_word(q, "/cmd_log")) {
 				send_cmd_log();
 			} else if (is_word(q, "/cmd_log_clear")) {
 				clear_command_history();
-				send_mtu(); // dummy response
+				send_ok();
 			} else if (is_word(q, "/reset")) {
 				slen = strtox(outbuf, "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
 				s->fw_reset_pending = 1;
@@ -1082,17 +1118,17 @@ void httpd_appcall(void)
 				goto do_send;
 			}
 			slen = strtox(outbuf, "HTTP/1.1 200 OK\r\nContent-Type: ");
-			slen += strtox(outbuf + slen, mime_strings[f_data[entry].mime]);
+			string_to_html(mime_strings[f_data[entry].mime]);
 			/* 'unsafe-inline' is needed for the inline onclick handlers
 			 * and the inline <script> on login.html. Connection: close is
 			 * required because this httpd closes the connection after every
 			 * response; without advertising it a browser reuses the socket
 			 * from its keep-alive pool and the next request hits the already
 			 * closed connection (a POST is then dropped without a retry). */
-			slen += strtox(outbuf + slen, "; charset=UTF-8\r\n");
+			string_to_html("; charset=UTF-8\r\n");
 			if (f_data[entry].gzip)
-				slen += strtox(outbuf + slen, "Content-Encoding: gzip\r\n");
-			slen += strtox(outbuf + slen, "Cache-Control: max-age=60, must-revalidate\r\nConnection: close\r\nAccess-Control-Allow-Origin: *\r\nContent-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; form-action 'self'\r\n\r\n");
+				string_to_html("Content-Encoding: gzip\r\n");
+			string_to_html("Cache-Control: max-age=60, must-revalidate\r\nConnection: close\r\nAccess-Control-Allow-Origin: *\r\nContent-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; form-action 'self'\r\n\r\n");
 
 			len_left = f_data[entry].len;
 			if (len_left > (TCP_OUTBUF_SIZE - slen)) {
