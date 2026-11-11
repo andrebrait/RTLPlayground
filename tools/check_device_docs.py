@@ -42,17 +42,17 @@ import re
 import sys
 
 ALLOWED_EXT_SUFFIXES = {'POE', 'VLANSW', 'UNMANAGED', '1S1C', '2C', '1C'}
-# MACHINE_CHIPSET is compared with the numeric RTL837x macros of machine.h, so
+# MACHINE_CHIPSET is compared with the numeric chipset macros of machine.h, so
 # the header takes the bare symbol.
-CHIPSETS = {'RTL8372', 'RTL8373'}
+CHIPSETS = {'RTL8370', 'RTL8372', 'RTL8373'}
 # Documentation may name the switch chipset with its N suffix. These are the only
 # switch SoCs the docs may mention (RTL8370 is the legacy 836x family chip).
-DOC_CHIPSETS = {'8370', '8372', '8373', '8372N', '8373N'}
+DOC_CHIPSETS = {'8370', '8370N', '8372', '8373', '8372N', '8373N'}
 # Anything else that looks like a member of the 837x family is a typo; the
 # companion parts (RTL8224, RTL8238, RTL8261, ...) do not match this.
 SWITCH_SOC_RE = re.compile(r'\b(?:RTL)?(8[0-9]7[0-9])(N?)\b')
 # The CPU variants the docs must record; the N suffix may be written or implied.
-DOC_CPU_RE = re.compile(r'837[23]')
+DOC_CPU_RE = re.compile(r'837[023]')
 MODEL_MAX_LEN = 29
 PHOTO_EXTENSIONS = {'.jpg', '.jpeg'}
 PHOTO_MAX_BYTES = 4 * 1024 * 1024
@@ -96,7 +96,7 @@ RULES = {
     'machine-header-model': (
         ERROR, 'machine/<MACHINE>.h defines MACHINE_MODEL'),
     'machine-header-chipset': (
-        ERROR, 'MACHINE_CHIPSET is RTL8372 or RTL8373'),
+        ERROR, 'MACHINE_CHIPSET is RTL8370, RTL8372 or RTL8373'),
     'machine-model-length': (
         WARNING, 'MACHINE_MODEL is at most 29 characters'),
     'machine-model-name': (
@@ -578,8 +578,8 @@ class Checker:
         if DOC_CPU_RE.search(text):
             return
         self.add('doc-cpu-missing',
-                 '%s: does not record the CPU variant (RTL8372, RTL8372N, '
-                 'RTL8373 or RTL8373N)' % rel, 'doc:' + doc)
+                 '%s: does not record the CPU variant (RTL8370N, RTL8372, '
+                 'RTL8372N, RTL8373 or RTL8373N)' % rel, 'doc:' + doc)
 
     def check_chip_names(self, rel, text, scope=GLOBAL):
         for line_no, line in enumerate(text.splitlines(), 1):
@@ -587,8 +587,8 @@ class Checker:
                 if match.group(1) + match.group(2) in DOC_CHIPSETS:
                     continue
                 self.add('doc-chip-typo',
-                         '%s:%d: %r is not a switch chipset (RTL8372, RTL8373 '
-                         'or one of their N variants)'
+                         '%s:%d: %r is not a switch chipset (RTL8370N, RTL8372, '
+                         'RTL8373 or one of their N variants)'
                          % (rel, line_no, match.group(0)), scope)
 
     # -- supported_devices.md ---------------------------------------------
