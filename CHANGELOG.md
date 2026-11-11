@@ -183,6 +183,11 @@
 
 ## Changed
 
+- Devices
+  - The TL-SG108PE V5 board definition is named after its PCB marking: `machine/pcb/2060500741.c`
+    and `2060500741_init.c`, which `MACHINE=TPLINK_TL_SG108PE_V5` links to, documented in
+    `doc/devices/2060500741.md`. The web UI and `/information.json` report the PCB as `2060500741`
+    instead of `unknown`. `tools/check_device_docs.py` accepts RTL8370 as `MACHINE_CHIPSET`.
 - Web UI
   - The web session expires after one hour without a request (was 200 seconds). The UI stops
     polling while its tab is hidden, so with 200 seconds switching tabs for a few minutes logged
@@ -346,6 +351,11 @@
   - RTL837x ports start with an RX maximum frame length of 1522 bytes, set before
     the saved configuration is replayed. Larger-frame setups that relied on the
     inherited startup limit must save explicit `mtu <port> <size>` commands.
+
+- Updates
+  - The MokerLink ZX-SWTGW218AS reports `MACHINE_MODEL` `MokerLink ZX-SWTGW218AS` instead of
+    `SWTGW218AS 8+1 Managed Switch`. `tools/fwupdate.py` refuses an image without the model
+    name the switch reports, so updating a switch that runs an older build needs `--force` once.
 
 - Config
   - VLAN don't accept port `u`-suffix anymore.
