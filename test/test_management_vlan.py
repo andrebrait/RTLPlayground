@@ -40,6 +40,16 @@ void uip_rx_ip_input(void) { ip_calls++; uip_len = 0; }
 void uip_arp_out(void) { assert(0); }
 void print_string(const char *s) { (void)s; }
 '''
+# handle_rx() once more as the RTL837x builds it: DHCP snooping and the ACL trap frames for other stations
+rtl837x = r'''
+#undef SOC_FAMILY
+#define SOC_FAMILY RTL837X
+static bool dhcp_snoop_on;
+static unsigned snoop_calls;
+void dhcp_snoop_in(void) { snoop_calls++; }
+struct uip_eth_addr uip_ethaddr = {{0x02, 0x11, 0x22, 0x33, 0x44, 0x55}};
+#define handle_rx handle_rx_837x
+'''
 checks = r'''
 static void receive(uint16_t management, uint16_t incoming, uint16_t type, bool allowed)
 {
@@ -56,6 +66,21 @@ static void receive(uint16_t management, uint16_t incoming, uint16_t type, bool 
     assert(arp_calls == (unsigned)(allowed && type == 0x0806 && !lldp_enabled));
     assert(ip_calls == (unsigned)(allowed && type == 0x0800 && !lldp_enabled));
     assert(lldp_calls == (unsigned)lldp_enabled);
+}
+static void receive_837x(uint16_t incoming, const uint8_t *dst, bool snoop, unsigned snoops, unsigned ips)
+{
+    uint8_t header[6] = {0x81, 0, incoming >> 8, incoming, 0x08, 0x00};
+    put_frame(0x100, 60, 0);
+    ring_put(0x108, dst, 6);
+    ring_put(0x108 + 12, header, 6);
+    registers[0x1a50] = 0x20;
+    registers[0x1a51] = 0;
+    management_vlan = 100;
+    dhcp_snoop_on = snoop;
+    pending = true;
+    ip_calls = snoop_calls = 0;
+    handle_rx_837x();
+    assert(snoop_calls == snoops && ip_calls == ips);
 }
 int main(void)
 {
@@ -98,7 +123,16 @@ int main(void)
     uip_buf[25] = 0x99;
     tcpip_output();
     assert(sent[20] == 0x88 && sent[21] == 0x99 && sent[7] == 60);
-    puts("PASS management VLAN: IPv4/ARP isolation, untagged VLAN 1, disabled filtering, LLDP bypass and native TX tags");
+    const uint8_t own[6] = {0x02, 0x11, 0x22, 0x33, 0x44, 0x55}, other[6] = {0x02, 0xaa, 0xbb, 0xcc, 0xdd, 0xee};
+    const uint8_t broadcast[6] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
+    receive_837x(200, broadcast, true, 1, 0);   /* another VLAN: snooped, kept out of the IP stack */
+    receive_837x(100, broadcast, true, 1, 1);   /* management VLAN: snooped once, then the IP stack */
+    receive_837x(100, own, true, 1, 1);
+    receive_837x(100, other, true, 1, 0);       /* trapped for another station */
+    receive_837x(100, other, false, 0, 0);
+    receive_837x(100, own, false, 0, 1);
+    receive_837x(200, own, false, 0, 0);
+    puts("PASS management VLAN: IPv4/ARP isolation, untagged VLAN 1, disabled filtering, LLDP bypass, native TX tags, RTL837x snooping and trap filter");
     return 0;
 }
 '''
@@ -106,7 +140,8 @@ with tempfile.TemporaryDirectory(prefix="rtl-management-vlan-") as temp:
     c = Path(temp) / "management_vlan.c"
     binary = Path(temp) / "management_vlan"
     c.write_text(harness + framing + function("void tcpip_output(void)") +
-                 function("void handle_rx(void)") + checks)
+                 function("void handle_rx(void)") + rtl837x + function("void handle_rx(void)") +
+                 "\n#undef handle_rx\n" + checks)
     subprocess.run(shlex.split(os.environ.get("CC", "gcc")) + [
         "-std=gnu11", "-g", "-O1", "-Wall", "-Wextra", "-Werror",
         "-Wno-unknown-pragmas", "-Wno-pointer-sign", "-fpack-struct=1",

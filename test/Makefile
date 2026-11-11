@@ -100,7 +100,7 @@ TESTS += $(BUILDDIR)/test_prometheus_status_json
 $(BUILDDIR)/test_prometheus_status_json: test_prometheus_status_json.c test_page_json.c $(TABLE_ENV) hw_mock.h | $(BUILDDIR)
 	$(CC) $(CFLAGS) -DPROMETHEUS test_prometheus_status_json.c $(filter %.c,$(TABLE_ENV)) -o $@ $(LDFLAGS)
 
-all: run lldp-conf prometheus-gui prune-defaults
+all: run lldp-conf prometheus-gui prune-defaults snmp-gui
 
 # The RTL836x web pages; the test carries its own 16-bit register file.
 $(BUILDDIR)/test_page_json_836x: CFLAGS += -DMACHINE_NAME=TPLINK_TL_SG108PE_V5 -ffunction-sections -fdata-sections
@@ -110,7 +110,7 @@ $(BUILDDIR)/test_page_json_836x: test_page_json_836x.c support.c env_tables.c $(
                                  $(SRCROOT)/rtl836x_phy.c $(SRCROOT)/rtl836x_rate.c $(SRCROOT)/snmp_hw.c \
                                  $(SRCROOT)/rtl836x_igmp.c $(SRCROOT)/rtl837x_igmp.c \
                                  $(SRCROOT)/machine/TPLINK_TL_SG108PE_V5_init.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) -Wl,--gc-sections
+	$(CC) $(CFLAGS) $(GC_CFLAGS) $^ -o $@ $(LDFLAGS) $(GC_LDFLAGS)
 
 $(BUILDDIR):
 	mkdir -p $(BUILDDIR)
@@ -151,12 +151,12 @@ $(BUILDDIR)/test_rtl836x_phy: CFLAGS += -DMACHINE_NAME=TPLINK_TL_SG108PE_V5 \
 $(BUILDDIR)/test_rtl836x_phy: test_rtl836x_phy.c $(SRCROOT)/cmd_parser.c $(SRCROOT)/rtl836x_phy.c \
     $(SRCROOT)/rtl837x_cabletest.c $(SRCROOT)/timer.c \
     $(SRCROOT)/machine/TPLINK_TL_SG108PE_V5_init.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) -Wl,--gc-sections
+	$(CC) $(CFLAGS) $(GC_CFLAGS) $^ -o $@ $(LDFLAGS) $(GC_LDFLAGS)
 
 # Exercise the production RX ring reader; only the hardware DMA edge is mocked.
 # Discard unused TX functions so this RX fixture needs no TX register mocks.
 $(BUILDDIR)/test_nic_rx: test_nic_rx.c $(SRCROOT)/rtl837x_nic.c $(SRCROOT)/rtl837x_nic.h | $(BUILDDIR)
-	$(CC) $(CFLAGS) -ffunction-sections -fdata-sections $(filter %.c,$^) -o $@ $(LDFLAGS) -Wl,--gc-sections
+	$(CC) $(CFLAGS) $(GC_CFLAGS) $(filter %.c,$^) -o $@ $(LDFLAGS) $(GC_LDFLAGS)
 
 $(BUILDDIR)/test_page_json: test_page_json.c $(TABLE_ENV) hw_mock.h | $(BUILDDIR)
 	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@ $(LDFLAGS)
@@ -240,7 +240,6 @@ lldp-conf:
 prune-defaults:
 	cd $(SRCROOT) && $(NODE) test/test_prune_defaults.cjs
 
-NODE ?= node
 # Prometheus card on the System page and its saved on/off command
 prometheus-gui:
 	cd $(SRCROOT) && $(NODE) test/test_prometheus_gui.cjs
@@ -315,7 +314,6 @@ $(BUILDDIR)/test_snmp_status_json: test_snmp_status_json.c test_page_json.c $(TA
 snmp-status: $(BUILDDIR)/test_snmp_status_json
 	$(BUILDDIR)/test_snmp_status_json
 
-NODE ?= node
 .PHONY: snmp-status-gui
 snmp-status-gui:
 	cd $(SRCROOT) && $(NODE) test/test_snmp_status_gui.cjs
@@ -352,7 +350,13 @@ run: test_lag_tokens
 .PHONY: prometheus-replay
 prometheus-replay:
 	cd $(SRCROOT) && CC="$(CC)" python3 test/test_prometheus_replay.py
-.PHONY: l2-load
+
+# The STP simulator has its own Makefile: 67 scenarios against rtl837x_stp.c and its CLI
+.PHONY: stp-sim
+stp-sim:
+	$(MAKE) -C stp CC="$(CC)"
+
+run: stp-sim
 
 .PHONY: test_bw_cli
 test_bw_cli:

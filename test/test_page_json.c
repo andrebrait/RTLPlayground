@@ -427,6 +427,36 @@ static void t_status_counters(void)
 	CHECK(balanced(), "valid JSON");
 }
 
+extern char port_names[9][PORT_NAME_SIZE];
+
+/* The replies made of lists and nested objects: each stays valid JSON inside the buffer */
+static void t_shapes(void)
+{
+	printf("[test] /lag.json, /mirror.json, /isolation.json, /storm.json, /bandwidth.json and /lldp.json\n");
+	hw_reset();
+	for (uint8_t p = 0; p < 9; p++)
+		memset(port_names[p], 'n', PORT_NAME_SIZE - 1);
+	out_reset(); send_lag();
+	CHECK(has("{\"lags\":[{\"lagNum\":0,\"type\":\"static\",\"members\":[],") && has("],\"ports\":[{\"p\":1,")
+	      && balanced() && slen <= TCP_OUTBUF_SIZE, "/lag.json: the groups, then one LACP row per port");
+	out_reset(); send_mirror();
+	CHECK(has("{\"enabled\":false,\"mirrorPort\":") && has(",\"mirror_rx\":[],\"mirror_tx\":[]}") && balanced(),
+	      "/mirror.json: off, with empty port lists");
+	out_reset(); send_isolation();
+	CHECK(has("[{\"port\":1,\"allow\":[") && count("\"allow\":[") == 9 && balanced() && slen <= TCP_OUTBUF_SIZE,
+	      "/isolation.json: one list per port");
+	out_reset(); send_storm();
+	CHECK(has("[{\"port\":1,\"bcast\":{\"enabled\":false,\"unit\":\"") && count("\"umcast\":{") == 9
+	      && balanced() && slen <= TCP_OUTBUF_SIZE, "/storm.json: four limits per port, the longest reply, fits the buffer");
+	out_reset(); send_bandwidth();
+	CHECK(has("[{\"port\":1,\"iLimited\":false,\"iBW\":\"0x") && has(",\"iAction\":\"drop\",\"eLimited\":false,\"eBW\":\"0x")
+	      && balanced() && slen <= TCP_OUTBUF_SIZE, "/bandwidth.json: limits as booleans, the action by name");
+	out_reset(); send_lldp();
+	CHECK(has("{\"on\":false,\"tlv\":") && has(",\"portStatus\":[{\"port\":1,\"name\":\"nnn") && has("\",\"permitted\":false}")
+	      && balanced() && slen <= TCP_OUTBUF_SIZE, "/lldp.json: switches as booleans, full-length port names");
+	memset(port_names, 0, sizeof port_names);
+}
+
 int main(void)
 {
 	printf("== httpd/page_impl.c JSON tests ==\n");
@@ -447,6 +477,7 @@ int main(void)
 	t_status_eee_multigig();
 	t_info_mapping();
 	t_pause_set();
+	t_shapes();
 	t_eee_set();
 	printf("\n%d checks, %d failed\n", tests_run, tests_failed);
 	return tests_failed ? 1 : 0;

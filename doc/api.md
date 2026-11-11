@@ -225,7 +225,12 @@ Array of ports
     ...
 ]
 ```
-List of MAC addresses 
+List of MAC addresses, at most 30 for each request: `/l2.json?idx=<N>` continues
+from table index N. An RTL836x switch replies `null` while its table is busy.
+
+`/l2_del.json?idx=<N>` deletes the entry at table index N and replies
+`{"result":1}`, or `{"result":0}` when that entry is gone, is not at that index
+any more or is the switch's own address.
 
 | Property | Description
 |----------|------------
@@ -240,8 +245,8 @@ List of MAC addresses
 ```json
 {
     "lags":[
-        {"lagNum":0,"type":"static","members":[],"hash":"3f"},
-        {"lagNum":1,"type":"lacp","members":[6,7],"active_members":[6],"valid":true,"aggregator":"ce11a001a010","hash":"7e"},
+        {"lagNum":0,"type":"static","members":[],"hash":"0000003f"},
+        {"lagNum":1,"type":"lacp","members":[6,7],"active_members":[6],"valid":true,"aggregator":"ce11a001a010","hash":"0000007e"},
         ...
     ],
     "ports":[
@@ -305,7 +310,7 @@ Object representing static and LACP lags
 | `on` | Global LLDP on/off, in off the switch will forward LLDPDU's (like a "dumb switch")
 | `tlv` | The optional TLVs the switch sends, one bit each in the order of `lldp tlv`: portdesc, syscap, mgmt, pvid, macphy, lag, mfs
 | `portStatus` | Array of LLDP Port Configurations
-| `neighbors` | Array of the neighbours the switch has heard, see [LLDP](lldp.md)
+| `neighbors` | Array of the neighbours the switch has heard
 
 ### LLDP Port Configurations
 
@@ -443,14 +448,14 @@ ingress rate limit does.
 | `on` | STP enabled
 | `hz` | STP timer frequency
 | `tc` | Number of topology changes
-| `port` | Array of STP port counters
+| `ports` | Array of STP port counters
 
 
 ### STP Port Counters
 | Property | Description
 |----------|------------
 | `p` | Physical port number
-| `counter` | Hex string of 4x32 bit counters (Number of BPDU RX, Number of BPDU RX, No of TC BPDU's received, No of TC BPDU's sent)
+| `c` | Hex string of 4x32 bit counters (Number of BPDU RX, Number of BPDU RX, No of TC BPDU's received, No of TC BPDU's sent), then 16 bits with the age of the last BPDU
 
 ## traffic
 ```json
@@ -463,7 +468,6 @@ ingress rate limit does.
 | Property | Description
 |----------|------------
 | `port` | Physical port number
-| `name` | User entered name
 | `link` | Current link mode
 | `txG` | Number of transmitted good frames
 | `txB` | Number of transmitted bad frames

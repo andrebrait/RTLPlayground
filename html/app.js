@@ -2362,7 +2362,7 @@ var LINKC = {
 };
 
 function linkUp(p) {
-    return p.link !== "DOWN"
+    return !!p.link && p.link !== "DOWN"
 }
 var $ = function(id) {
     return document.getElementById(id)
@@ -3542,23 +3542,6 @@ function portsSync() {
             o = PT.orig[i];
         r.p = p;
         ["en", "name", "spd", "mtu", "fc", "eee", "poe"].forEach(function(k) {
-            if (cfg[k] == null || cur[k] !== o[k]) return;
-            setCtl(r, k, cfg[k]);
-            o[k] = readCtl(r)[k];
-        });
-        portsSync();
-    });
-    ptUpdate();
-}
-// Controls the user has not touched follow the switch; edited ones keep the draft
-function portsSync() {
-    PT.rows.forEach(function(r, i) {
-        var p = S.ports[i],
-            cfg = portCfg(p),
-            cur = readCtl(r),
-            o = PT.orig[i];
-        r.p = p;
-        ["en", "name", "spd", "mtu", "fc", "eee"].forEach(function(k) {
             if (cfg[k] == null || cur[k] !== o[k]) return;
             setCtl(r, k, cfg[k]);
             o[k] = readCtl(r)[k];

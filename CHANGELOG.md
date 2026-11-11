@@ -313,11 +313,17 @@
   - An LLDPDU with a malformed Port ID (no identifier octets, a reserved subtype, a MAC address
     that is not six octets) or a truncated TLV is ignored instead of publishing a neighbour with
     an empty Port ID or the default TTL.
+  - Each port has its own transmit timer, as 802.1AB has it: a port that comes up, or
+    `lldp on`, sends one LLDPDU at once and then one per interval. The four fast LLDPDUs
+    go out only on a port that learned a new neighbour, not on every port.
+
+- Storm control
+  - A limit that gets no meter is an error now. It was reported as applied and saved.
+
+- ACL
   - Saving ACL changes preserves parent/`and` replay order, removes deleted
     chains, and retains field-selector disable commands.
   - Explicit ACL meter reservations replay before dynamic storm-control allocation.
-
-- ACL
   - Ports after interrupt, GPIO and S-VLAN actions remain ingress restrictions
     instead of becoming unintended redirects.
   - ACL meter configuration and policing use the shared meter allocator, refusing

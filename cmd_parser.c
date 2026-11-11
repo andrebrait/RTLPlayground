@@ -1851,7 +1851,7 @@ void parse_storm(void) __reentrant
 		goto err;
 	}
 	if (!storm_set(port, type, rate, d))
-		print_string("storm: no free meter\n");
+		cmd_error("storm: no free meter\n");
 	return;
 
 err:

@@ -466,8 +466,8 @@ void send_l2(uint16_t idx)
 		reg_read_m(RTL837x_L2_DATA_OUT_B);
 		__bit valid = (sfr_data[0] & 0x20) != 0;
 		if (valid) {
-			/* separator + 74-byte worst-case entry + closing "]" */
-			if (slen + 76 > TCP_OUTBUF_SIZE)
+			/* separator + 81-byte entry + closing "]" */
+			if (slen + 83 > TCP_OUTBUF_SIZE)
 				break;
 			if (!first)
 				char_to_html(',');

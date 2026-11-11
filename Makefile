@@ -338,7 +338,7 @@ $(BUILDDIR)/rtlplayground.ihx: $(OBJS) $(BUILDDIR)/crtbank.rel $(BUILDDIR)/crc16
 $(BUILDDIR)/rtlplayground.img: $(BUILDDIR)/rtlplayground.ihx
 	objcopy --input-target=ihex -O binary $< $@
 
-$(OUTPUT): $(BUILDDIR)/rtlplayground.img $(CONFIG) $(CONFIG_STAMP) | tools
+$(OUTPUT): $(BUILDDIR)/rtlplayground.img $(CONFIG) $(CONFIG_STAMP) test/check_banked_calls.py | tools
 	@mkdir -p "$(dir $@)"
 	if [ -e "$@" ]; then rm "$@"; fi
 	tools/$(BUILDDIR)/imagebuilder -i $(BUILDDIR)/rtlplayground.img "$@"
@@ -346,6 +346,7 @@ $(OUTPUT): $(BUILDDIR)/rtlplayground.img $(CONFIG) $(CONFIG_STAMP) | tools
 	tools/$(BUILDDIR)/fileadder -a $(CONFIG_LOCATION) -s $(IMAGESIZE) -d "$(CONFIG)" "$@"
 	tools/$(BUILDDIR)/fileadder -a $(HTML_LOCATION) -s $(IMAGESIZE) -z -d $(HTML_MIN) -b BANK1 "$@"
 	tools/$(BUILDDIR)/crc_calculator -u "$@"
+	python3 test/check_banked_calls.py $(BUILDDIR) --image "$@"
 	if [ "$(OUTPUT)" = "$(BUILDDIR)/rtlplayground-$(FILENAME_EXTENSION).bin" ]; then \
 		ln -sf $(notdir $(abspath $(BUILDDIR)))/rtlplayground-$(FILENAME_EXTENSION).bin "$(BUILDDIR)/../rtlplayground.bin"; \
 	fi

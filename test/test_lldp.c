@@ -26,7 +26,7 @@ uint8_t sfr_data[4];
 volatile uint16_t SFR_DATA_U16;
 
 static uint32_t links_sts;
-static int reg_reads, tx_frames;
+static int reg_reads, tx_frames, tx_port[16];
 
 static char console[512];
 static unsigned console_len;
@@ -38,7 +38,16 @@ void write_char(char c)
 	console[console_len] = 0;
 }
 void print_string(const char *s) { while (*s) write_char(*s++); }
-void tcpip_output(void) { tx_frames++; }
+void tcpip_output(void)
+{
+	uint16_t m = HTONS(((struct rtl_tag *)&uip_buf[RTL_FRAME_DESC_SIZE + 2 * MAC_ADDR_LEN])->pmask);
+	uint8_t i;
+
+	tx_frames++;
+	for (i = 0; i < 16; i++)
+		if ((m >> i) & 1)
+			tx_port[i]++;
+}
 uint8_t port_lag_of(uint8_t port) { (void)port; return PORT_LAG_NONE; }
 
 void reg_read_m(uint16_t reg_addr)
@@ -130,6 +139,7 @@ static void reset(bool enabled, uint16_t links)
 	lldp_enabled = enabled;
 	links_sts = links;
 	reg_reads = tx_frames = 0;
+	memset(tx_port, 0, sizeof(tx_port));
 }
 
 /* An LLDPDU in the receive buffer: start it, append TLVs, end it. */
@@ -361,21 +371,17 @@ int main(void)
 
 	lldp_enabled = true;
 	step(1);
-	CHECK(tx_frames == 9 && lldp_nb[0].ttl == 119,
-	      "L6 enabling LLDP sends immediately and still ages the neighbour");
-	step(3);
-	CHECK(tx_frames == 36 && lldp_nb[0].ttl == 116,
-	      "L7 four fast advertisements do not suspend receive-table ageing");
+	CHECK(tx_frames == 9 && tx_port[0] == 1 && tx_port[8] == 1 && lldp_nb[0].ttl == 119,
+	      "L6 after lldp on, one frame at once on every port with a link, and the table still ages");
 	step(LLDP_TX_INTERVAL_S - 1);
-	CHECK(tx_frames == 36, "L7b periodic transmission waits a full interval after fast start");
+	CHECK(tx_frames == 9, "L7 then nothing until the interval");
 	step(1);
-	CHECK(tx_frames == 45, "L7c periodic transmission resumes after fast start");
+	CHECK(tx_frames == 18, "L7b one frame per port after the interval");
 	links_sts &= ~1;
 	step(1);
-	CHECK(tx_frames == 45, "L7d link loss does not start a new advertisement burst");
 	links_sts |= 1;
 	step(1);
-	CHECK(tx_frames == 54, "L7e a new link restarts fast advertisements");
+	CHECK(tx_frames == 19 && tx_port[0] == 3, "L7c a port whose link comes back sends one frame at once, alone");
 
 	for (i = 0; i < LLDP_NB_MAX; i++)
 		put(i, 3, 120);
@@ -451,6 +457,42 @@ int main(void)
 	frame(2, LLDP_CHASSIS_ID_TLV_SUBTYPE, (const char *)ap_mac, MAC_ADDR_LEN, LLDP_PORT_ID_SUBTYPE_MAC, (const char *)ap_mac, MAC_ADDR_LEN);
 	add_tlv(short_tlv, sizeof(short_tlv));
 	CHECK(lldp_nb[0].mau == 0 && lldp_nb[0].aneg == 0, "L19 a MAC/PHY Status TLV of the wrong length is ignored");
+
+	int sent;
+	reset(true, 0x0108);
+	step(6);
+	memset(tx_port, 0, sizeof(tx_port));
+	frame(3, LLDP_CHASSIS_ID_TLV_SUBTYPE, (const char *)ap_mac, MAC_ADDR_LEN, LLDP_PORT_ID_TLV_SUBTYPE, "eth0", 4);
+	step(LLDP_FAST_TX_COUNT);
+	CHECK(tx_port[3] == LLDP_FAST_TX_COUNT && tx_port[8] == 0,
+	      "L20 a new neighbour gets the fast frames one second apart on its port alone");
+	step(LLDP_TX_INTERVAL_S - 1);
+	sent = tx_port[3];
+	step(1);
+	CHECK(sent == LLDP_FAST_TX_COUNT && tx_port[3] == sent + 1,
+	      "L20b after the fast frames the port is back to the interval");
+	frame(3, LLDP_CHASSIS_ID_TLV_SUBTYPE, (const char *)ap_mac, MAC_ADDR_LEN, LLDP_PORT_ID_TLV_SUBTYPE, "eth0", 4);
+	step(LLDP_FAST_TX_COUNT);
+	CHECK(tx_port[3] == sent + 1, "L21 a neighbour heard again is not new");
+
+	links_sts = 0x0128;
+	step(LLDP_FAST_TX_COUNT);
+	CHECK(tx_port[5] == 1, "L22 a port whose link comes up gets one frame at once, not the fast frames");
+
+	sent = tx_port[8];
+	lldp_logical_port_status = 0xfeff;
+	frame(8, LLDP_CHASSIS_ID_TLV_SUBTYPE, (const char *)ap_mac, MAC_ADDR_LEN, LLDP_PORT_ID_TLV_SUBTYPE, "eth1", 4);
+	step(LLDP_FAST_TX_COUNT);
+	CHECK(lldp_nb[1].port == 8 && tx_port[8] == sent, "L23 nothing is sent on a blocked port, a new neighbour there included");
+	lldp_logical_port_status = 0xffff;
+
+	reset(true, 0x0108);
+	for (i = 0; i < LLDP_NB_MAX; i++)
+		put(i, 8, 100);
+	frame(3, LLDP_CHASSIS_ID_TLV_SUBTYPE, (const char *)ap_mac, MAC_ADDR_LEN, LLDP_PORT_ID_TLV_SUBTYPE, "eth0", 4);
+	step(LLDP_FAST_TX_COUNT);
+	CHECK(lldp_nb[0].port == 3 && tx_port[3] == 1,
+	      "L24 a neighbour that pushes the oldest out of a full table gets no fast frames");
 
 	printf("\n%s (%d failure%s)\n", failures ? "SANDBOX: FAILURES" : "SANDBOX: ALL PASS",
 	       failures, failures == 1 ? "" : "s");
