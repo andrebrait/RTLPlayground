@@ -118,7 +118,7 @@ puts("startup replay, 1522-byte defaults, port bounds and saved MTU override pas
 }
 """
 (out/'startup_crlf.c').write_text(harness+body+tests)
-for board in ('MOKERLINK_ZX_SWTGW218AS','KEEPLINK_KP_9000_6XHML_X2'):
+for board in ('MOKERLINK_ZX_SWTGW218AS','KEEPLINK_KP_9000_6XHML_X2_2M_PCB43_V1_1'):
     binary=out/('test_startup_crlf_'+board)
     subprocess.run(['gcc','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-pointer-sign',
         '-g','-fsanitize=address,undefined','-fno-omit-frame-pointer','-no-pie',
