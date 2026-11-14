@@ -93,7 +93,7 @@ static int timer_expired(struct timer *t) { (void)t; return 0; }
 static void timer_reset(struct timer *t) { (void)t; }
 static uint8_t arp_age_secs, PCON;
 static uint32_t uptime_secs;
-static bool stp_enabled, lacpEnabled, evflags = true, tick_pending, link_irq;
+static bool stp_enabled, lacpEnabled, tick_pending, link_irq;
 static bool rx_irq, EX1, cmd_available;
 static unsigned rx_calls, acks;
 #define ERR_OK 0
