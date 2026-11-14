@@ -71,7 +71,9 @@ void early_boot_handle_button(void) __banked
 		return;
 
 	gpio_input_setup(machine.reset_pin);
+#if SOC_FAMILY == RTL837X
 	gpio_set_pull_mode(machine.reset_pin, GPIO_PULL_UP);
+#endif
 
 	// Debounce after init
 	delay(100);
