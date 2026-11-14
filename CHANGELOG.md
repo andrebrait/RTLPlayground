@@ -183,6 +183,8 @@
 
 ## Changed
 
+- Move Prometheus exporter settings into System → Services.
+
 - Devices
   - The TL-SG108PE V5 board definition is named after its PCB marking: `machine/pcb/2060500741.c`
     and `2060500741_init.c`, which `MACHINE=TPLINK_TL_SG108PE_V5` links to, documented in
