@@ -486,7 +486,7 @@ button.danger{background:var(--bad);color:#fff;border-color:transparent}
           <div id="sy-prom" style="display:none">
             <label class="row" style="justify-content:space-between"><span>Prometheus exporter</span>
               <span class="switch"><input type="checkbox" id="sy-prom-toggle" aria-label="Enable Prometheus exporter"><i></i></span></label>
-            <div class="row"><span class="lb">Scrape URL</span><span class="mono" id="sy-prom-url"></span></div>
+            <div class="row"><span class="lb">Scrape URL</span><span class="mono" id="sy-prom-url" style="min-width:0;overflow-wrap:anywhere"></span></div>
             <p class="small mut">Anyone who can reach the switch can read /metrics while the exporter is on. Use Save to flash to keep the setting after reboot.</p>
           </div>
         </div>
