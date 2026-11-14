@@ -819,8 +819,9 @@ void parse_isolate(void)
 
 	print_string("\nISOLATE ");
 
-	if (cmd_parse_port_separator(cmd_words_b[1]) == 0)
+	if (cmd_parse_port_separator(cmd_words_b[1]) == 0) {
 		goto err;
+	}
 	__xdata uint8_t port_configured = atoi_results_u8;
 
 	print_byte(port_configured); write_char('\n');
@@ -847,8 +848,9 @@ void parse_isolate(void)
 
 	__xdata uint8_t w = 2;
 	while (w < cmd_words_len) {
-		if (cmd_parse_port_cpu_separator(cmd_words_b[w++]) == 0)
+		if (cmd_parse_port_cpu_separator(cmd_words_b[w++]) == 0) {
 			goto err;
+		}
 		__xdata uint8_t port = atoi_results_u8;
 		members |= ((uint16_t)1) << port;
 	}
