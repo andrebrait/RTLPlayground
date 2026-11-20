@@ -307,10 +307,16 @@ amd989 `unifi_protocol.py:30-124`, unifi-stubd `docs/en/protocol-notes.md:74-90`
    second `USL8LP` reporting `ip` `0.0.0.0`, and a `U7PG2` access point. For
    each, the controller logged `discovered via L3 inform, skip SSH
    adoption`, sent `mgmt_cfg` and completed the adoption; the reported IP made
-   no difference. SSH adoption (`ubnt`/`ubnt`, `set-adopt`) is for devices
-   found by layer-2 discovery on UDP 10001, or that report an `sshd_port`
-   field, as the OpenWrt `unifi-agent` does while its SSH adoption is on. The
-   firmware sends neither, so it needs no SSH server.
+   no difference. A second run added an `sshd_port` field to a `U7PG2` and a
+   `USL8LP`, and gave another `U7PG2` the OpenWrt `unifi-agent`'s `fw_caps` 3
+   and version `6.8.2.15592`: all three were adopted the same way. What makes
+   a controller use SSH adoption (`ubnt`/`ubnt`, `set-adopt`) instead was not
+   reproduced. The OpenWrt agent's emulated AP was refused with `SSH adopt
+   failed` before it sent `sshd_port`, and a production 10.6 controller later
+   adopted its LG510S over SSH. Layer-2 discovery on UDP 10001 is the
+   documented path to SSH adoption, and the firmware sends none. Whether a
+   real controller adopts it by inform is **unverified** until it is tried
+   on hardware: an 8051 cannot offer SSH.
 7. Ways for the device to learn the inform URL: manual configuration (the
    web UI or CLI here), DHCP option 43 sub-option 1 carrying the IPv4 address
    (fxkr README), and the DNS name `unifi` (the default URL). Ubiquiti's help
@@ -1333,7 +1339,9 @@ Connected.
   **confirmed** (CBC and GCM). GCM from the first inform: **confirmed**.
 - Adoption reply in the request's mode: **confirmed**.
 - Inform adoption on the controller's own subnet, with the device's real IP:
-  **confirmed** (see [Adoption flow](#adoption-flow-layer-3-no-ssh), item 6).
+  **confirmed** in the lab, also with `sshd_port` reported. The trigger for
+  SSH adoption seen with the OpenWrt agent is **not reproduced** (see
+  [Adoption flow](#adoption-flow-layer-3-no-ssh), item 6).
 - `mgmt_cfg` contains `inform_url`: **refuted** for 10.6.109.
 - `setstate` for switch port config: **not seen**; port overrides arrive in
   `system_cfg`.
