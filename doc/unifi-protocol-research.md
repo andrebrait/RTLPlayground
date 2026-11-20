@@ -893,8 +893,8 @@ the main loop, at most 2 blocks (≈144 K cycles, 5–14 ms) per pass. LACP's
 timers run 50 times per second.
 
 **Measured on hardware** (`unifi selftest` in a `UNIFI=1` build, ZX-SWTGW218AS,
-5 ms tick): 64 AES blocks take 130 ms and 64 AES-GCM blocks 230 ms, so one
-16-byte GCM block costs about 3.6 ms, about 4.4 KB/s. The firmware's C
+5 ms tick, two builds): 64 AES blocks take 115–130 ms and 64 AES-GCM blocks
+210–230 ms, so one 16-byte GCM block costs about 3.3–3.6 ms, about 4.5 KB/s. The firmware's C
 differs from the simulator's (fewer internal-RAM locals), so these figures
 do not convert back to a clean cycle rate. Expected wall time at that speed:
 
