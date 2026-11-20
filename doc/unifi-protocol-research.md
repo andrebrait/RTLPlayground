@@ -1120,6 +1120,57 @@ Connected.
 - Configured-versus-reported speed mismatch: avoided by the API, which
   refuses speeds outside `speed_caps`.
 
+### Cross-check with the OpenWrt (LG510S-4T2XS) lab
+
+A parallel lab for an OpenWrt switch used the same controller image (10.6.109)
+and unifi-emu `a538889`, impersonating `US6XG150` and a `US8` that reports a
+4 + 2 layout (`andrebrait/lg510s-firmware-lab`, `docs/unifi-adoption.md`,
+commit `fffa926`, section "Lab validation"). Every overlapping result agrees
+with this lab. One apparent mismatch was resolved: `switch.port.N.poe` is only
+sent when the port reports `port_poe` and the other per-port PoE fields, not
+`poe_caps` alone. That lab also found the following, which this lab did not
+test:
+
+- **802.1X:** site `global_switch.dot1x_portctrl_enabled` and
+  `radiusprofile_id` give `switch.dot1x.status`, `switch.dot1x.dynvlan`,
+  `switch.dot1x.guest_vlan`, `switch.radius.{auth,acct}.N.{ip,port,secret}`
+  (the RADIUS secret in plain text) and `switch.port.N.dot1x.mode=force_authorized`
+  on every port. `dot1x_ctrl=mac_based` gives `dot1x.mode=mac_based` and
+  `dot1x.idle_timeout`.
+- **DHCP guard:** network `dhcpguard_enabled` with `dhcpd_ip_1/2` gives
+  `switch.dhcp_guard.N.{server,vlan,status}`.
+- **Voice VLAN:** `voice_networkconf_id` produces no key.
+- **Port profiles are flattened** into per-port keys. Editing a profile
+  re-sends them. The device never sees a profile.
+- **VLAN slots can renumber.** A VLAN that no port carries is dropped from
+  `switch.vlan.*`, and the remaining slots can change number. The parser must
+  key VLANs by `.id`, never by slot.
+- **A device PUT with `port_overrides` replaces the whole list.** Ports left
+  out return to defaults.
+- **Link debounce:** `feature_caps2` bit 1 with site
+  `global_switch.link_debounce` gives `switch.port.N.link_debounce=<ms>`.
+- **Field schemas:** `api/fields/*.json` in
+  `lib/internal/internal-dependencies.jar` (`Device.json` for
+  `port_overrides`, `PortConf.json`, `NetworkConf.json`, `Setting.json`) list
+  every override field with a validating regular expression. This is the
+  complete vocabulary the controller can send.
+- **Web UI (headless browser):** `poe_caps` 0 on every port hides the PoE Mode
+  column, legend and per-port selector, but the model name still reads "US XG
+  6 PoE". Reported 10/5/2.5/1G link speeds render correctly. The forced-speed
+  list shows exactly the speeds in `speed_caps`. The SFP tab shows
+  `sfp_vendor`, `sfp_part`, `sfp_serial`, `sfp_compliance`,
+  `sfp_temperature` and `sfp_txpower` (read as dBm). `sfp_rxfault=true`
+  raises a critical "Receive SFP Signal Loss" alert.
+- **Upgrade:** devices reporting 7.4.1 were marked upgradable. A manual
+  upgrade sends `{"_type":"upgrade","version","md5sum","url"}` with a Ubiquiti
+  firmware URL, and the site's `mgmt.auto_upgrade` is on by default (03:00).
+- **Commands:** locate arrives as `{"_type":"cmd","cmd":"set-locate"}`, and
+  restart as `{"_type":"reboot","reboot_type":"soft"}`.
+
+Neither lab ever saw a `switch.lag.N.lacp` key, or any other key that says
+whether a LAG runs LACP or is static. This lab claimed the `LACP` bit
+(`feature_caps` 1582078 includes 8192).
+
 ## Open questions and gaps
 
 1. *(Done for emulated `US6XG150`, `USWED36` and `USL8LP`, see
@@ -1150,7 +1201,7 @@ Connected.
    duplex and autoneg overrides, and the IGMP snooping keys. Still open: the
    keys for IGMP fast-leave and unknown-multicast flooding, and the 802.1X
    and voice-VLAN keys, which were not exercised.
-9. How the controller UI and auto-update behave when an `upgrade` is ignored.
+9. How the controller behaves when an `upgrade` is ignored, and whether reporting a version at or above the latest for the model stops the offers. The upgrade message itself and the nightly auto-upgrade default were captured by the OpenWrt lab.
 10. *(Settled for the API and `system_cfg`, see the lab.)* How the
     controller treats a device whose `port_table` has fewer ports than the
     model. Omitting port 10 on `USWED36` works; the device must still accept
