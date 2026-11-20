@@ -580,8 +580,8 @@ Suggested mapping for the layouts in `doc/supported_devices.md`:
 | 4 x 2.5G + 2 x 10G RJ45 (ZX310S-4T2XT) | `US6XG150` | Ports 5 and 6 are drawn as SFP+. |
 | 5 x 2.5G + 1 x SFP+ | no exact match | `US6XG150` (port 5 drawn as SFP+) or `USWED36` with ports 6–8 permanently down. |
 | 5 x 2.5G (no SFP) | `USWED35` | Exact, and the same switch silicon. |
-| 8 x 2.5G + 1 x SFP+ | `USWED36` (`USWED37` for PoE boards) | Near-exact: the combo slot 9/10 is the uplink. Report the SFP+ as 9 or 10 and the other as down. |
-| 8 x 1G (TL-SG108PE V5, RTL836x) | `US8` / `USC8P60` / `USL8LP` | Exact. |
+| 8 x 2.5G + 1 x SFP+ | `USWED36` (`USWED37` for PoE boards) | **Chosen.** Same physical layout as the RTLPlayground 2.5G switches (confirmed by the maintainer). The combo slot 9/10 is the uplink. Report the SFP+ as 9 or 10 and the other as down. |
+| 8 x 1G, 4 PoE+ (TP-Link TL-SG108PE, RTL836x) | `USL8LP` (USW-Lite-8-PoE) | **Chosen.** 8 GbE RJ45 ports, 4 of them 802.3at PoE+, 52 W budget, 30 W per port ([UI tech specs](https://techspecs.ui.com/unifi/switching/usw-lite-8-poe), [EU datasheet](https://intellcom.net/files/pdf/1655441745753/USW_Lite_8_POE_EU_Datasheet.pdf)). uidb has no per-port PoE map (`ports.standard: 8`, `features.poe: true`), so report `poe_caps` only on the PoE ports and `0` on the others. That the PoE ports are 1–4 on both devices is **unverified**. `US8` (PoE pass-through) and `USC8P60` (802.3af, not PoE+) fit less well. |
 
 Points that make `MCU_BASED` models (USWED35/36/37, USMINI) attractive, and
 some risks:
