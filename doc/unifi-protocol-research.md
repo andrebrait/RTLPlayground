@@ -799,6 +799,9 @@ Notes:
   UniFi client does not fit into the free fragments there, so it needs BANK5:
   add `-Wl-bBANK5=0x54000` to the link line. `imagebuilder` derives the bank
   count from the image size. Use the same layout on both builds.
+- Since this table was measured, BANK5 is linked and holds the SNTP client
+  (`ntp.c`, about 3.1 KB), moved there from BANK3 as the first hardware test
+  of the new bank. BANK3 gained that space, and BANK5 has about 45 KB left.
 
 ### TCP connections
 
