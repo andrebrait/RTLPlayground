@@ -895,7 +895,11 @@ void httpd_appcall(void)
 		dbg_string("Connected...\n");
 		s->tstate = TSTATE_NONE;
 		s->fw_reset_pending = 0; // explicitly initialize reused XDATA appstate
-	} else if (uip_closed()) {
+	}
+	// Not an else: when the client's ACK of the SYNACK is lost, the request
+	// itself completes the handshake, and uIP reports CONNECTED and NEWDATA
+	// in one call. The request then reaches the newdata branch below.
+	if (uip_closed()) {
 		dbg_string("Connection closed\n");
 		s->tstate = TSTATE_CLOSED;
 		if (s->fw_reset_pending && uip_acked())
