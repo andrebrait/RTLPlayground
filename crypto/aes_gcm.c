@@ -36,14 +36,11 @@ static __code const uint8_t shift_src[16] = {
 	0, 5, 10, 15, 4, 9, 14, 3, 8, 13, 2, 7, 12, 1, 6, 11
 };
 
-/* Reduction of the 4 bits shifted out of the GHASH accumulator. */
+/* Reduction of the 4 bits shifted out of the GHASH accumulator: the high
+ * byte of each entry; the low byte is (r << 5) & 0xff. */
 static __code const uint8_t last4_hi[16] = {
 	0x00, 0x1c, 0x38, 0x24, 0x70, 0x6c, 0x48, 0x54,
 	0xe1, 0xfd, 0xd9, 0xc5, 0x91, 0x8d, 0xa9, 0xb5
-};
-static __code const uint8_t last4_lo[16] = {
-	0x00, 0x20, 0x40, 0x60, 0x80, 0xa0, 0xc0, 0xe0,
-	0x00, 0x20, 0x40, 0x60, 0x80, 0xa0, 0xc0, 0xe0
 };
 
 #define XTIME(a) ((uint8_t)(((a) << 1) ^ (((a) & 0x80) ? 0x1b : 0)))
@@ -94,7 +91,7 @@ static void ghash_mult(void)
 		for (k = 15; k; k--)
 			gcm.z[k] = ((gcm.z[k] >> 4) | (gcm.z[k - 1] << 4)) ^ p[k];
 		gcm.z[0] = (gcm.z[0] >> 4) ^ p[0] ^ last4_hi[r];
-		gcm.z[1] ^= last4_lo[r];
+		gcm.z[1] ^= r << 5;
 	} while (i);
 	for (k = 0; k < 16; k++)
 		gcm.x[k] = gcm.z[k];
@@ -181,7 +178,6 @@ void gcm_start(__xdata const uint8_t * __xdata iv, __xdata uint8_t decrypt) __ba
 	}
 }
 
-
 /* The next counter block into gcm.blk; inc32 steps its last 4 bytes. */
 static void ctr_next(void)
 {
@@ -245,8 +241,7 @@ void gcm_finish(void) __banked
 {
 	uint8_t k;
 
-	/* [len(A)]_64 || [len(C)]_64 in bits; both fit in the low 3 bytes. */
-	gcm.x[5] ^= gcm.aad_len >> 13;
+	/* [len(A)]_64 || [len(C)]_64 in bits: A < 8 KB fits 2 bytes, C 3 bytes. */
 	gcm.x[6] ^= gcm.aad_len >> 5;
 	gcm.x[7] ^= gcm.aad_len << 3;
 	gcm.x[13] ^= gcm.len >> 13;

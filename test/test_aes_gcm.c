@@ -46,7 +46,7 @@ static int run(const uint8_t *key, const uint8_t *iv, const uint8_t *aad,
 int main(void)
 {
 	static const unsigned steps[] = { 16, 32, 0xffff };
-	static uint8_t buf[2048];
+	static uint8_t buf[10240];
 	unsigned s, i;
 
 	for (i = 0; i < sizeof(gcm_vecs) / sizeof(gcm_vecs[0]); i++) {
@@ -62,7 +62,7 @@ int main(void)
 			check(!memcmp(buf, t->pt, t->len), "plaintext", i, steps[s]);
 		}
 	}
-	printf("%s AES-128-GCM: %u Go vectors, 0 to 1500 bytes, 16-byte IV, 40-byte AAD\n",
+	printf("%s AES-128-GCM: %u Go vectors, 0 to 10240 bytes, 16-byte IV, 40-byte AAD\n",
 	       failures ? "FAIL" : "PASS", i);
 
 	for (s = 0; s < 3; s++) {

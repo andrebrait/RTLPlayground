@@ -48,6 +48,8 @@ jobs:
         run: cd branch && make clean && make CI=1 MACHINE="KEEPLINK_KP_9000_6XHML_X2_2M_PCB43_V1_1" HEALTH=1
       - name: Make project with the debug output
         run: cd branch && make clean && make CI=1 MACHINE="KEEPLINK_KP_9000_6XHML_X2_2M_PCB43_V1_1" DEBUG=1
+      - name: Make project with the UniFi work in progress (8x1/RTL8373)
+        run: cd branch && make clean && make CI=1 SNMP=1 UNIFI=1 MACHINE="KEEPLINK_KP_9000_9XHML_X_2M_PCB23_V3_1"
       - name: Make main
         run: |
           ln -s ../branch/toolchain main/toolchain

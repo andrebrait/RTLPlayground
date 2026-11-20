@@ -13,8 +13,6 @@
 
 #include "gcm_kat.h"
 
-#define BENCH_BLOCKS 64
-
 /* The first plaintext block of the KAT reply. */
 static __code const char kat_head[] = "{\"_type\":\"setpar";
 
@@ -80,11 +78,11 @@ void gcm_selftest(void) __banked
 			: "AES-128-GCM: controller reply FAILS\n");
 
 	st_t0 = st_ticks();
-	for (i = 0; i < BENCH_BLOCKS; i++)
+	for (i = 0; i < 64; i++)
 		aes_encrypt_blk();
 	st_ms("64 AES blocks: ");
 	st_t0 = st_ticks();
-	for (i = 0; i < BENCH_BLOCKS; i++)
+	for (i = 0; i < 64; i++)
 		gcm_crypt(st_buf, 16);
 	st_ms(", 64 GCM blocks: ");
 	write_char('\n');

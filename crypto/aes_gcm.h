@@ -10,11 +10,15 @@
  * One message at a time:
  *   gcm_setkey(key);              once per key
  *   gcm_start(iv, decrypt);
- *   gcm_aad(aad, len);            all of the AAD in one call, or none; the
- *                                 buffer is written back unchanged
+ *   gcm_aad(aad, len);            all of the AAD, under 8 KB, in one call,
+ *                                 or none; the buffer is written back unchanged
  *   gcm_crypt(p, len);            in place; every call but the last a
  *                                 multiple of 16 bytes, so it can be stepped
  *   gcm_finish();                 the tag is then in gcm.blk
+ *
+ * A message is at most 65535 bytes. Decryption writes plaintext into the
+ * buffer before the tag is known: use none of it until gcm_finish() and the
+ * tag compare pass. gcm_selftest() loads its own key and ends any message.
  */
 
 struct gcm_t {
