@@ -184,6 +184,9 @@
 ## Changed
 
 - Move Prometheus exporter settings into System → Services.
+- The Prometheus exporter serves `/metrics` on its own TCP port, 9100, next to
+  the web server on port 80, so a scrape and the web interface run at the
+  same time.
 
 - Devices
   - The TL-SG108PE V5 board definition is named after its PCB marking: `machine/pcb/2060500741.c`
@@ -343,11 +346,6 @@
     packaging firmware with the CI compiler.
 
 ## Breaking changes
-
-- Prometheus
-  - The exporter serves `/metrics` on its own TCP port, 9100, so a scrape no
-    longer waits for the web server's connection. Port 80 no longer serves
-    `/metrics`: scrape targets change from `<switch>:80` to `<switch>:9100`.
 
 - HTTP API
   - The JSON API is reshaped, see [doc/api.md](doc/api.md). `/status.json` is split into

@@ -513,7 +513,7 @@ static void scenario_httpd_request_on_handshake(void)
 	drain(MSS_FULL);
 	CHECK(body_offset() >= 0 && stream_len == body_offset() + FILE_LEN &&
 	      first_body_mismatch() == -1,
-	      "request_on_handshake: a request in the handshake's last segment is served");
+	      "httpd_request_on_handshake: a request in the handshake's last segment is served");
 }
 
 static void scenario_empty_asset(void)
