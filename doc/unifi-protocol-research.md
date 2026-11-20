@@ -547,6 +547,44 @@ Things not established:
   (`PROTOCOL-VALIDATION.md` lines 932–1006). For a USW this is
   **unverified**.
 
+### Reporting a port layout that differs from the model
+
+Two meanings of "override" appear in these projects. Keep them apart:
+
+- **UniFi port overrides** (`port_overrides`, the per-port settings an admin
+  sets in the controller) are controller-to-device *configuration*. They
+  arrive as `switch.port.N.*` keys in `system_cfg`. They do not change the
+  port layout.
+- **Emulator port-layout overrides** are device-side settings that change what
+  the device *reports* in `port_table`, while keeping a borrowed model code.
+  unifi-emu has a per-device `ports` count that "overrides the profile port
+  layout when > 0" (`device.go:63`, `resolvePorts` in `descriptor.go`, test
+  `TestBuildDescriptorPortOverride` builds a 3-port `USWED74`; revision
+  `a538889`). unifi-stubd profiles set "port count, names, roles, network
+  groups, media, and speed layout" per device, and say mixed-speed switches
+  should report the complete physical layout in `port_table`
+  (`docs/en/architecture.md:101`, `docs/en/protocol-notes.md:266`; revision
+  `c0f7203`).
+
+What the controller does with a reported layout that differs from the model:
+
+- openUF (on an AP, Network 10.6) found the Port Manager lists exactly the
+  ports in the reported `port_table` (two), not the model registry's five.
+  Per-port settings join on `port_table[].port_idx`. The `switch.port.N`
+  name/opmode entries in `system_cfg` still follow the registry count, but
+  are inventory only (`PROTOCOL-VALIDATION.md` lines 952–990, revision
+  `3da5719`).
+- Things that come from uidb, not from the device, presumably still follow
+  the model: the front-panel diagram, product image, port-category labels
+  (`standard`/`plus`/`sfp`) and the `switch.port.N` inventory.
+  **Unverified** for a USW.
+
+So a borrowed model code plus a port_table describing the real hardware is a
+workable route when no model matches exactly. The cost is a wrong front-panel
+picture. For the two chosen models (`USWED36`, `USL8LP`) the layouts already
+match, so this is only needed for the other RTLPlayground layouts (for
+example 5 x 2.5G + 1 x SFP+).
+
 ### Candidate models from uidb 10.6.109 (USW, up to 12 ports)
 
 | Model code | SKU / name | Ports (uidb) | Diagram | Max speed field | Notes |
@@ -581,7 +619,7 @@ Suggested mapping for the layouts in `doc/supported_devices.md`:
 | 5 x 2.5G + 1 x SFP+ | no exact match | `US6XG150` (port 5 drawn as SFP+) or `USWED36` with ports 6–8 permanently down. |
 | 5 x 2.5G (no SFP) | `USWED35` | Exact, and the same switch silicon. |
 | 8 x 2.5G + 1 x SFP+ | `USWED36` (`USWED37` for PoE boards) | **Chosen.** Same physical layout as the RTLPlayground 2.5G switches (confirmed by the maintainer). The combo slot 9/10 is the uplink. Report the SFP+ as 9 or 10 and the other as down. |
-| 8 x 1G, 4 PoE+ (TP-Link TL-SG108PE, RTL836x) | `USL8LP` (USW-Lite-8-PoE) | **Chosen.** 8 GbE RJ45 ports, 4 of them 802.3at PoE+, 52 W budget, 30 W per port ([UI tech specs](https://techspecs.ui.com/unifi/switching/usw-lite-8-poe), [EU datasheet](https://intellcom.net/files/pdf/1655441745753/USW_Lite_8_POE_EU_Datasheet.pdf)). uidb has no per-port PoE map (`ports.standard: 8`, `features.poe: true`), so report `poe_caps` only on the PoE ports and `0` on the others. That the PoE ports are 1–4 on both devices is **unverified**. `US8` (PoE pass-through) and `USC8P60` (802.3af, not PoE+) fit less well. |
+| 8 x 1G, 4 PoE+ (TP-Link TL-SG108PE, RTL836x) | `USL8LP` (USW-Lite-8-PoE) | **Chosen.** 8 GbE RJ45 ports, 4 of them 802.3at PoE+, 52 W budget, 30 W per port ([UI tech specs](https://techspecs.ui.com/unifi/switching/usw-lite-8-poe), [EU datasheet](https://intellcom.net/files/pdf/1655441745753/USW_Lite_8_POE_EU_Datasheet.pdf)). uidb has no per-port PoE map (`ports.standard: 8`, `features.poe: true`), so report `poe_caps` only on ports 1–4 and `0` on 5–8. On the TL-SG108PE V5, PoE is on ports 1–4 (`machine/TPLINK_TL_SG108PE_V5.h`: `MACHINE_POE_PORTS 4`; `doc/devices/2060500741.md`). That the USW-Lite-8-PoE also numbers its PoE ports 1–4 is **unverified**. `US8` (PoE pass-through) and `USC8P60` (802.3af, not PoE+) fit less well. |
 
 Points that make `MCU_BASED` models (USWED35/36/37, USMINI) attractive, and
 some risks:
