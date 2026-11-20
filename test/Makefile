@@ -97,6 +97,11 @@ $(BUILDDIR)/test_div_small: test_div_small.c $(SRCROOT)/div_small.c | $(BUILDDIR
 $(BUILDDIR)/test_ntp_time: test_ntp_time.c $(SRCROOT)/ntp.c $(SRCROOT)/div_small.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS)
 
+# aes_gcm.c is included by the test; regenerate the vectors with go run test/gen_gcm_vectors.go
+TESTS += $(BUILDDIR)/test_aes_gcm
+$(BUILDDIR)/test_aes_gcm: test_aes_gcm.c gcm_vectors.h $(SRCROOT)/crypto/aes_gcm.c $(SRCROOT)/crypto/aes_gcm.h $(SRCROOT)/crypto/gcm_kat.h | $(BUILDDIR)
+	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS)
+
 TESTS += $(BUILDDIR)/test_cable_836x
 $(BUILDDIR)/test_cable_836x: test_cable_836x.c $(SRCROOT)/rtl837x_cabletest.c $(SRCROOT)/timer.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) -DMACHINE_NAME=TPLINK_TL_SG108PE_V5 $< $(SRCROOT)/timer.c -o $@ $(LDFLAGS)
