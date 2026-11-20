@@ -354,7 +354,7 @@ void itoa_no_syslog(uint8_t v)
 
 /* Same as itoa(), one decade wider: enough for a port number. Kept separate
  * rather than widening itoa() itself, because every existing caller passes a
- * byte and would start paying for 16-bit divisions it does not need. */
+ * byte, and u16_to_dec() costs more than itoa()'s byte divisions. */
 void itoa_short(uint16_t v)
 {
 	uint8_t i = u16_to_dec(v);

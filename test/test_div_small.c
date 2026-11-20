@@ -38,9 +38,16 @@ int main(void)
 	puts("PASS u16_to_dec: every 16-bit value");
 
 	/* 64-bit values: powers of two, their neighbours and an LCG spread */
-	uint64_t x = 1, s = 12345;
+	uint64_t s = 12345;
 	for (int n = 0; n < 20000; n++) {
-		uint64_t val = n < 64 ? x << n : n < 128 ? (x << (n - 64)) - 1 : (s = s * 6364136223846793005ull + 1442695040888963407ull);
+		uint64_t val;
+
+		if (n < 64)
+			val = 1ull << n;
+		else if (n < 128)
+			val = (1ull << (n - 64)) - 1;
+		else
+			val = s = s * 6364136223846793005ull + 1442695040888963407ull;
 		for (d = 2; d <= 16; d++) {
 			uint8_t b[8];
 			uint64_t q = 0;

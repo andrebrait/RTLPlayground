@@ -63,22 +63,11 @@ static uint8_t ntp_divmod(uint8_t d) __reentrant
 }
 
 
-/* y % 100 and y % 400 without a 16-bit division: for y divisible by 4,
- * y % 100 is zero when (y / 4) % 25 is, and then y % 400 is zero when y % 16
- * is. */
+/* ntp_split() takes 32-bit Unix seconds, so y is 1970 to 2106. The only
+ * century years in that range are 2000, a leap year, and 2100, which is not. */
 static uint8_t ntp_leap(uint16_t y) __reentrant
 {
-	uint16_t q;
-
-	if (y & 3)
-		return 0;
-	q = div16_small(y >> 2, 5);
-	if (div_rem)
-		return 1;
-	div16_small(q, 5);
-	if (div_rem)
-		return 1;
-	return !(y & 15);
+	return !(y & 3) && y != 2100;
 }
 
 
@@ -147,9 +136,11 @@ static void ntp_print_offset(int16_t off) __reentrant
 	uint16_t a = off < 0 ? -off : off;
 
 	write_char(off < 0 ? '-' : '+');
-	/* a / 60 is (a / 4) / 15, and a % 60 is 4 * ((a / 4) % 15) + a % 4 */
+	/* a / 60 is (a / 4) / 15, and a % 60 is 4 * ((a / 4) % 15) + a % 4.
+	 * Divided twice so the remainder is read right after its division. */
 	ntp_print2(div16_small(a >> 2, 15));
 	write_char(':');
+	div16_small(a >> 2, 15);
 	ntp_print2((div_rem << 2) | (a & 3));
 }
 

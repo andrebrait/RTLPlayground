@@ -10,10 +10,8 @@ ifeq ($(findstring clang,$(shell $(CC) --version 2>/dev/null)),)
 CFLAGS  += -Wno-builtin-declaration-mismatch
 endif
 LDFLAGS  = -fsanitize=address,undefined
-# rtl837x_stp.c calls the HOME division helpers
-LDFLAGS += $(SRCROOT)/div_small.c
 
-SRCS = stp_sim.c $(SRCROOT)/rtl837x_stp.c $(SRCROOT)/rtl837x_stp_cli.c $(SRCROOT)/timer.c
+SRCS = stp_sim.c $(SRCROOT)/rtl837x_stp.c $(SRCROOT)/rtl837x_stp_cli.c $(SRCROOT)/timer.c $(SRCROOT)/div_small.c
 
 all: build/stp_sim
 	./build/stp_sim

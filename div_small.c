@@ -32,7 +32,7 @@ uint8_t div_small(__xdata uint8_t *n, uint8_t len, uint8_t d)
 	return cur;
 }
 
-uint16_t div16_small(uint16_t v, uint8_t d)
+uint16_t div16_small(uint16_t v, __xdata uint8_t d)
 {
 	__xdata uint8_t b[2];
 
