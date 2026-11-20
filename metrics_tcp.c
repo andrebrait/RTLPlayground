@@ -28,6 +28,9 @@ __xdata uint16_t metrics_len;
 
 /* Waiting for the request (0), or sending the response */
 static __xdata uint8_t m_sending;
+/* The connection that owns that state. Events from another one, such as a
+ * late RST for a connection in TIME_WAIT, leave it alone. */
+static __xdata struct uip_conn *__xdata m_conn;
 /* The request asked for the MIB families: m_request() sets it, so no
  * comparison has to be held across the call to metrics_start() */
 static __xdata bool m_mib;
@@ -82,6 +85,7 @@ static uint8_t m_request(void)
 void metrics_appcall(void) __banked
 {
 	if (uip_connected()) {
+		m_conn = uip_conn;
 		m_sending = 0;
 		if (!prometheus_enabled) {
 			uip_abort();
@@ -90,6 +94,8 @@ void metrics_appcall(void) __banked
 		/* No return: the segment that completes the handshake can carry
 		 * the request */
 	}
+	if (uip_conn != m_conn)
+		return;
 	if (uip_closed() || uip_aborted() || uip_timedout()) {
 		m_sending = 0;
 		return;

@@ -290,16 +290,19 @@ static void scenario_request_on_handshake(void)
 	      "metrics_request_on_handshake: a request in the handshake's last segment is served");
 }
 
-/* A peer MSS below the buffer: every buffer goes out in several segments */
-static void scenario_small_mss(void)
+/* Segments of 300 B, from the peer's MSS or from its window: every buffer goes
+ * out in several segments */
+static void scenario_small_segments(uint16_t mss, uint16_t window, const char *what)
 {
 	uint8_t original[300];
 	int original_len, same;
 
 	prometheus_enabled = 1;
-	scrape_start_window(300);
+	cli_mss = mss;
+	scrape_start_window(window);
+	cli_mss = MSS_FULL;
 	get("/metrics");
-	client_ack(300);
+	client_ack(window);
 	/* last_tx is the first buffer's second segment, at offset 300: lose it */
 	original_len = last_tx_len;
 	memcpy(original, last_tx, original_len);
@@ -309,11 +312,34 @@ static void scenario_small_mss(void)
 	run_periodic(UIP_RTO + 2);
 	same = original_len == 300 && last_tx_len == original_len &&
 	       !memcmp(last_tx, original, original_len);
+	printf("  (%s)\n", what);
 	CHECK(same, "metrics_rexmit_mid_buffer: a lost segment inside a buffer is resent unchanged");
 	for (int i = 0; i < 40 && !scrape_closed(); i++)
-		client_ack(300);
+		client_ack(window);
 	CHECK(body_ok(FILLS) && scrape_closed(),
-	      "metrics_small_mss: buffers larger than the MSS arrive whole, in order");
+	      "metrics_small_segments: buffers larger than a segment arrive whole, in order");
+}
+
+/* A late RST for the last scrape's connection, in TIME_WAIT, arrives while the
+ * next scrape has bytes in flight */
+static void scenario_stale_rst(void)
+{
+	prometheus_enabled = 1;
+	scrape_start();
+	get("/metrics");
+	drain(MSS_FULL);
+	cli_rcv_nxt++;			/* acknowledge the server's FIN */
+	client_send(TCP_ACK | TCP_FIN, NULL, 0);
+	client_swap(&saved);		/* keep the old connection's client */
+	starts = 0;
+	connect_more(40006, METRICS_PORT);
+	get("/metrics");		/* the first segment is in flight */
+	client_swap(&saved);
+	client_send(TCP_RST | TCP_ACK, NULL, 0);
+	client_swap(&saved);
+	drain(MSS_FULL);
+	CHECK(starts == 1 && body_ok(FILLS) && scrape_closed(),
+	      "metrics_stale_rst: a late RST for a connection in TIME_WAIT leaves the running scrape alone");
 }
 
 /* Turned off between the connection and the request */
@@ -364,7 +390,9 @@ int main(int argc, char **argv)
 	scenario_alongside_web();
 	scenario_one_scrape();
 	scenario_request_on_handshake();
-	scenario_small_mss();
+	scenario_small_segments(300, MSS_FULL, "peer MSS 300");
+	scenario_small_segments(MSS_FULL, 300, "window 300");
+	scenario_stale_rst();
 	scenario_disabled_before_request();
 	scenario_after_time_wait();
 	printf("\n%s (%d failure%s)\n", failures ? "BENCH: FAILURES" : "BENCH: ALL PASS",
