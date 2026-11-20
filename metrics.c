@@ -38,21 +38,27 @@ static void put_char(char c)
 }
 
 /* Decimal of an 8-byte big-endian counter divided by 10^decimals, by long
- * division of a copy. Byte-wise, so no 32-bit temporaries reach DATA. */
+ * division of a copy. Nibble-wise: each partial dividend is at most 159, so
+ * the 8-bit DIV AB does the work instead of the 16-bit library division. */
 static void put_dec(__xdata const struct snmp_counter *__xdata v, __xdata uint8_t decimals)
 {
 	__xdata uint8_t n[8], d[20];
-	__xdata uint8_t i, k = 0, nz;
-	__xdata uint16_t cur;
+	__xdata uint8_t i, k = 0, nz, cur, q, first = 0;
 
 	for (i = 0; i < 8; i++)
 		n[i] = v->bytes[i];
 	do {
 		cur = 0;
 		nz = 0;
-		for (i = 0; i < 8; i++) {
-			cur = (cur << 8) | n[i];
-			n[i] = cur / 10;
+		/* Leading zero bytes divide to zero: skip them */
+		while (first < 7 && !n[first])
+			first++;
+		for (i = first; i < 8; i++) {
+			cur = (cur << 4) | (n[i] >> 4);
+			q = cur / 10;
+			cur %= 10;
+			cur = (cur << 4) | (n[i] & 15);
+			n[i] = (q << 4) | (cur / 10);
 			cur %= 10;
 			nz |= n[i];
 		}
