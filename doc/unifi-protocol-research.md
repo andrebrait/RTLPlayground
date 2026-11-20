@@ -585,6 +585,31 @@ picture. For the two chosen models (`USWED36`, `USL8LP`) the layouts already
 match, so this is only needed for the other RTLPlayground layouts (for
 example 5 x 2.5G + 1 x SFP+).
 
+### Port index translation
+
+The controller keys every per-port setting on `port_table[].port_idx`, and
+`system_cfg` uses the same index in `switch.port.N.*` and
+`switch.vlan.K.port.N.mode`. Firmware ports already have two numberings:
+`struct machine` holds `log_to_phys_port[9]` and `phys_to_log_port[9]`
+(`machine.h`). UniFi needs a third, defined per machine together with the
+impersonated model:
+
+- `unifi_to_log_port[]`: UniFi `port_idx` (1-based) to RTLPlayground logical
+  port, with a sentinel for "no such port". A UniFi port without a mapping is
+  reported `enable=false, up=false` and its `system_cfg` keys are ignored.
+- The reverse lookup is a scan of that table, which is at most 10 entries.
+- Use it in both directions: when building `port_table` (logical to UniFi),
+  and when parsing `system_cfg` (UniFi to logical, then the existing
+  logical-to-physical map).
+
+Default is identity. Planned non-identity cases:
+
+| Machine | Model | Mapping |
+| --- | --- | --- |
+| 8 x 2.5G + 1 x SFP+ | `USWED36` | 1–8 identity; UniFi 9 = our SFP+ port; UniFi 10 unmapped (other half of the combo slot) |
+| TL-SG108PE V5 | `USL8LP` | Identity if the USL8LP PoE ports are 1–4. Otherwise map its PoE `port_idx` values to our ports 1–4 |
+| 5 x 2.5G + 1 x SFP+ | `US6XG150` | 1–5 identity; UniFi 6 = our SFP+ port. UniFi shows port 5 as SFP+ |
+
 ### Candidate models from uidb 10.6.109 (USW, up to 12 ports)
 
 | Model code | SKU / name | Ports (uidb) | Diagram | Max speed field | Notes |
