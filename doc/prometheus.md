@@ -27,8 +27,8 @@ The change applies immediately. **Save to flash** keeps it after a reboot.
 While the exporter is off, the switch resets connections to port 9100 once the
 handshake completes; a request that arrives after `prometheus off` on an open
 connection gets 404. The first TCP segment of the request must start with
-`GET /metrics` followed by a space or a query; anything else returns 404,
-including other methods such as `HEAD`. The MIB
+`GET /metrics` followed by a space, or by a query and then a space; anything
+else returns 404, including other methods such as `HEAD`. The MIB
 families are added when the query has a `mib=1` parameter; other query
 parameters are ignored.
 
