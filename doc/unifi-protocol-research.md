@@ -908,7 +908,14 @@ This design fits both switches:
    unifi-simulator was Connected with 6 fields per port. The target is about
    2.5 KB, against 5–6 KB for the full lab payload (**estimate**). This
    halves the recurring crypto cost.
-5. **Make nonces unique by construction.** The 16-byte IV is a 4-byte boot
+5. **Format decimals without division.** The inform needs decimal counters.
+   In the same simulator, a 4.6 KB `port_table` (9 ports × 30 fields) took
+   ≈8.8 M cycles with `v % 10` / `v / 10` on `uint32_t`, because each digit
+   calls SDCC's long-division routines. Subtracting powers of ten instead
+   took ≈0.97 M cycles (≈210 cycles per byte), against ≈4,500 cycles per
+   byte for AES-GCM. With that formatter, JSON generation costs about 5 % of
+   the crypto.
+6. **Make nonces unique by construction.** The 16-byte IV is a 4-byte boot
    counter kept in flash, a 4-byte message counter and 8 bytes from the
    hardware RNG (`get_random_32()`, the RLDP random register). The RNG's
    quality and its state after a reset are unknown. The `authkey` survives
