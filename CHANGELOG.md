@@ -288,6 +288,10 @@
 - Networking
   - Wildcard UDP listeners reply to the current sender without retaining its
     address or transmitting stale replies during periodic polls.
+  - The web server answers a request that arrives in the segment completing the
+    TCP handshake, as it does when the client's ACK of the SYNACK is lost. It
+    used to acknowledge the request and wait until the idle timeout reset the
+    connection.
 - SNMP
   - Valid requests exceeding the stored varbind limit return tooBig instead of timing out.
   - A transient hardware timeout no longer disables monitoring until reboot;
@@ -339,6 +343,11 @@
     packaging firmware with the CI compiler.
 
 ## Breaking changes
+
+- Prometheus
+  - The exporter serves `/metrics` on its own TCP port, 9100, so a scrape no
+    longer waits for the web server's connection. Port 80 no longer serves
+    `/metrics`: scrape targets change from `<switch>:80` to `<switch>:9100`.
 
 - HTTP API
   - The JSON API is reshaped, see [doc/api.md](doc/api.md). `/status.json` is split into

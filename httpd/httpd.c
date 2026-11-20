@@ -895,11 +895,11 @@ void httpd_appcall(void)
 		dbg_string("Connected...\n");
 		s->tstate = TSTATE_NONE;
 		s->fw_reset_pending = 0; // explicitly initialize reused XDATA appstate
-	}
-	// Not an else: when the client's ACK of the SYNACK is lost, the request
-	// itself completes the handshake, and uIP reports CONNECTED and NEWDATA
-	// in one call. The request then reaches the newdata branch below.
-	if (uip_closed()) {
+		// The segment that completes the handshake can carry the request. A
+		// goto, not a broken else chain: that costs internal RAM.
+		if (uip_newdata())
+			goto request;
+	} else if (uip_closed()) {
 		dbg_string("Connection closed\n");
 		s->tstate = TSTATE_CLOSED;
 		if (s->fw_reset_pending && uip_acked())
@@ -976,6 +976,7 @@ void httpd_appcall(void)
 			goto do_send;
 		}
 	} else if (uip_newdata() && s->tstate != TSTATE_TX) {
+request:
 		cont_len = 0;
 		dbg_char('<'); dbg_short(uip_len); dbg_char('\n');
 		__xdata uint8_t *p = uip_appdata;
