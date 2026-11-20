@@ -225,6 +225,8 @@
 - Time
   - The uptime in seconds (sessions, NTP, the reset button) is counted in XDATA instead of
     `RTL837X_REG_SEC_COUNTER`, so it no longer depends on SerDes 0 being on.
+  - The SNTP client moved from BANK3 to a fifth code bank, BANK5, which uses the
+    free flash at 0x34000-0x3FFFF below the web pages.
 
 - HTTP
   - `/cmd_log_clear` answers with an empty 200 instead of the MTU table.
