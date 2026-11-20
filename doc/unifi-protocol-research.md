@@ -301,7 +301,17 @@ amd989 `unifi_protocol.py:30-124`, unifi-stubd `docs/en/protocol-notes.md:74-90`
    key-delivery channels"). `mgmt_url` is the controller's web UI link, not an
    inform URL. Treating it as one loses the controller (openUF
    `PROTOCOL-VALIDATION.md` lines 600–604).
-6. Ways for the device to learn the inform URL: manual configuration (the
+6. **Adoption stays on inform on the controller's own subnet.** In the lab
+   (10.6.109), a fresh controller adopted four emulated devices whose informs
+   carried their real IP on the controller's subnet: `USWED36`, `USL8LP`, a
+   second `USL8LP` reporting `ip` `0.0.0.0`, and a `U7PG2` access point. For
+   each, the controller logged `discovered via L3 inform, skip SSH
+   adoption`, sent `mgmt_cfg` and completed the adoption; the reported IP made
+   no difference. SSH adoption (`ubnt`/`ubnt`, `set-adopt`) is for devices
+   found by layer-2 discovery on UDP 10001, or that report an `sshd_port`
+   field, as the OpenWrt `unifi-agent` does while its SSH adoption is on. The
+   firmware sends neither, so it needs no SSH server.
+7. Ways for the device to learn the inform URL: manual configuration (the
    web UI or CLI here), DHCP option 43 sub-option 1 carrying the IPv4 address
    (fxkr README), and the DNS name `unifi` (the default URL). Ubiquiti's help
    articles on adoption and ports
@@ -1322,6 +1332,8 @@ Connected.
 - Responses uncompressed: **confirmed**. Uncompressed informs accepted:
   **confirmed** (CBC and GCM). GCM from the first inform: **confirmed**.
 - Adoption reply in the request's mode: **confirmed**.
+- Inform adoption on the controller's own subnet, with the device's real IP:
+  **confirmed** (see [Adoption flow](#adoption-flow-layer-3-no-ssh), item 6).
 - `mgmt_cfg` contains `inform_url`: **refuted** for 10.6.109.
 - `setstate` for switch port config: **not seen**; port overrides arrive in
   `system_cfg`.
