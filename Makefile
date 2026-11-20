@@ -341,6 +341,10 @@ $(BUILDDIR)/rtlplayground.img: $(BUILDDIR)/rtlplayground.ihx
 
 $(OUTPUT): $(BUILDDIR)/rtlplayground.img $(CONFIG) $(CONFIG_STAMP) test/check_banked_calls.py | tools
 	@mkdir -p "$(dir $@)"
+	@# imagebuilder packs the last bank to end at 0x4000 + nbanks * 0xC000; the web pages follow.
+	@n=$$(( ($$(wc -c < $(BUILDDIR)/rtlplayground.img) - 0x4000) / 0x10000 )); \
+	if [ $$(( 0x4000 + n * 0xC000 )) -gt $(HTML_LOCATION) ]; then \
+		echo "Error: $$n code banks overlap the web pages at $(HTML_LOCATION)"; exit 1; fi
 	if [ -e "$@" ]; then rm "$@"; fi
 	tools/$(BUILDDIR)/imagebuilder -i $(BUILDDIR)/rtlplayground.img "$@"
 	tools/$(BUILDDIR)/fileadder -a $(DEFAULT_CONFIG_LOCATION) -s $(IMAGESIZE) -l $(CONFIG_LOCATION) -d "$(CONFIG)" "$@"

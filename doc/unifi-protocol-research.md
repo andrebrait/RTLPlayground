@@ -75,8 +75,8 @@ Scope and method:
    - TCP: a second uIP connection for inform and a third for metrics cost
      30 B each plus their buffers.
    - Code: the RTL8373 build has 17 KB of free code in fragments, so the
-     client needs a fifth code bank. The flash slot for it is empty on both
-     images.
+     client needs a fifth code bank. Its flash slot was empty on both
+     images; BANK5 is now linked and holds the SNTP client.
    - CPU: AES-128-GCM in C costs about 72,000 8051 cycles per 16 bytes
      (measured in a simulator), so the inform must be trimmed and the crypto
      run in small steps from the main loop. See
