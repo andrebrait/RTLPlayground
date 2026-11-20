@@ -25,7 +25,9 @@ prometheus off
 
 The change applies immediately. **Save to flash** keeps it after a reboot.
 While the exporter is off, the switch resets connections to port 9100 once the
-handshake completes. Any path other than `/metrics` returns 404. The MIB
+handshake completes; a request that arrives after `prometheus off` on an open
+connection gets 404. Anything other than a `GET /metrics` request line in one
+TCP segment returns 404, including other methods such as `HEAD`. The MIB
 families are added when the query has a `mib=1` parameter; other query
 parameters are ignored.
 
@@ -82,8 +84,8 @@ The error and drop mapping is the one the OpenWrt realtek DSA driver uses
 (`otto_stats_update_link()`). Unlike that driver, byte counters include the
 4-byte FCS and transmitted packets are not reduced by discards.
 
-With `?mib=1` the scrape also contains every named ASIC MIB counter as an
-`untyped` `node_ethtool_*` family, the counterpart of OpenWrt's ethtool
+With a `mib=1` query parameter the scrape also contains every named ASIC MIB
+counter as an `untyped` `node_ethtool_*` family, the counterpart of OpenWrt's ethtool
 collector. Counters that exist in the OpenWrt RTL930x driver keep its names,
 for example `node_ethtool_transmitted_crcalignerrors`; the others take their
 Web UI name, for example `node_ethtool_received_ether_crc_align_errors`.

@@ -3,9 +3,9 @@
  *
  * It runs next to the httpd, with its own connection slot. uip.c admits one
  * connection per listening port, so this file keeps a single connection's
- * state. The response is generated into metrics_buf one segment's worth at a
- * time; uIP keeps no copy of sent data, so a retransmission resends the
- * bytes still in the buffer.
+ * state. The response is generated into metrics_buf one buffer at a time and
+ * sent in segments of at most one MSS; uIP keeps no copy of sent data, so a
+ * retransmission resends the bytes still in the buffer.
  *
  * This code is in the Public Domain
  */
@@ -18,6 +18,10 @@
 #include "rtl837x_common.h"
 #include "uip.h"
 #include "metrics.h"
+
+/* metrics.c's string writer: not banked, so declared here and not in
+ * metrics.h, where files in other banks could call it */
+void metrics_put_str(__code const char *s);
 
 __xdata uint8_t metrics_buf[METRICS_BUF_SIZE];
 __xdata uint16_t metrics_len;

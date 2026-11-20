@@ -29,6 +29,9 @@ __xdata bool metrics_more;
  * node_network_info with a fully escaped 32-character port name) plus its
  * family's "# TYPE" line. */
 #define METRICS_ROW_MAX 400
+#if METRICS_BUF_SIZE < 2 * METRICS_ROW_MAX
+#error "METRICS_BUF_SIZE leaves room for too few rows per buffer"
+#endif
 
 static void put_char(char c)
 {

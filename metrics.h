@@ -23,8 +23,6 @@ void prometheus_command(void) __banked;
 void metrics_start(__xdata bool with_mib) __banked;
 /* Appends rows at metrics_len while they fit; clears metrics_more at the end. */
 void metrics_fill(void) __banked;
-/* Appends a string to metrics_buf. Not banked: BANK4 callers only. */
-void metrics_put_str(__code const char *s);
 /* The uIP application for connections to METRICS_PORT */
 void metrics_appcall(void) __banked;
 
