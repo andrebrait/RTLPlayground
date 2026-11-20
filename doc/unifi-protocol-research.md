@@ -75,8 +75,8 @@ Scope and method:
    - TCP: a second uIP connection for inform and a third for metrics cost
      30 B each plus their buffers.
    - Code: the RTL8373 build has 17 KB of free code in fragments, so the
-     client needs a fifth code bank. The flash slot for it is empty on both
-     images.
+     client needs a fifth code bank. Its flash slot was empty on both
+     images; BANK5 is now linked and holds the SNTP client.
    - CPU: AES-128-GCM in C costs about 72,000 8051 cycles per 16 bytes
      (measured in a simulator), so the inform must be trimmed and the crypto
      run in small steps from the main loop. See
@@ -799,6 +799,9 @@ Notes:
   UniFi client does not fit into the free fragments there, so it needs BANK5:
   add `-Wl-bBANK5=0x54000` to the link line. `imagebuilder` derives the bank
   count from the image size. Use the same layout on both builds.
+- Since this table was measured, BANK5 is linked and holds the SNTP client
+  (`ntp.c`, about 3.1 KB), moved there from BANK3 as the first hardware test
+  of the new bank. BANK3 gained that space, and BANK5 has about 45 KB left.
 
 ### TCP connections
 

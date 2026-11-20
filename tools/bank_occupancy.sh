@@ -33,7 +33,7 @@ echo "### $MACHINE"
 echo
 printf '| %-15s | %7s | %7s | %7s |\n' "segment" "main" "branch" "change"
 echo "| --------------- | ------: | ------: | ------: |"
-for s in HOME CSEG BANK1 BANK2 BANK3 BANK4 DSEG XSEG; do
+for s in HOME CSEG BANK1 BANK2 BANK3 BANK4 BANK5 DSEG XSEG; do
     print_line "$s" "$(seg "$s" "$MAIN")" "$(seg "$s" "$BRANCH")"
 done
 print_line "stack available" "$(stack "$MAIN")" "$(stack "$BRANCH")"

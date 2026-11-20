@@ -334,13 +334,17 @@ $(BUILDDIR)/%.rel: %.asm $(CCFLAGS_STAMP) | create_build_dir
 #	mv -f $(addprefix $(basename $^), .lst .rel .sym) .
 
 $(BUILDDIR)/rtlplayground.ihx: $(OBJS) $(BUILDDIR)/crtbank.rel $(BUILDDIR)/crc16.rel $(BUILDDIR)/crypto/chacha_8051.rel
-	$(CC) $(CC_FLAGS) --xram-size 49151 -Wl-bHOME=0x00000 -Wl-bBANK1=0x14000 -Wl-bBANK2=0x24000 -Wl-bBANK3=0x34000 -Wl-bBANK4=0x44000 -Wl-r -o $@ $^
+	$(CC) $(CC_FLAGS) --xram-size 49151 -Wl-bHOME=0x00000 -Wl-bBANK1=0x14000 -Wl-bBANK2=0x24000 -Wl-bBANK3=0x34000 -Wl-bBANK4=0x44000 -Wl-bBANK5=0x54000 -Wl-r -o $@ $^
 
 $(BUILDDIR)/rtlplayground.img: $(BUILDDIR)/rtlplayground.ihx
 	objcopy --input-target=ihex -O binary $< $@
 
 $(OUTPUT): $(BUILDDIR)/rtlplayground.img $(CONFIG) $(CONFIG_STAMP) test/check_banked_calls.py | tools
 	@mkdir -p "$(dir $@)"
+	@# imagebuilder packs the last bank to end at 0x4000 + nbanks * 0xC000; the web pages follow.
+	@n=$$(( ($$(wc -c < $(BUILDDIR)/rtlplayground.img) - 0x4000) / 0x10000 )); \
+	if [ $$(( 0x4000 + n * 0xC000 )) -gt $(HTML_LOCATION) ]; then \
+		echo "Error: $$n code banks overlap the web pages at $(HTML_LOCATION)"; exit 1; fi
 	if [ -e "$@" ]; then rm "$@"; fi
 	tools/$(BUILDDIR)/imagebuilder -i $(BUILDDIR)/rtlplayground.img "$@"
 	tools/$(BUILDDIR)/fileadder -a $(DEFAULT_CONFIG_LOCATION) -s $(IMAGESIZE) -l $(CONFIG_LOCATION) -d "$(CONFIG)" "$@"
