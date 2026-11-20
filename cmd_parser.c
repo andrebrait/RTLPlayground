@@ -2626,10 +2626,9 @@ static void ph_line(__code const char *name, __xdata uint8_t id)	/* id in xdata:
 }
 
 
-static __xdata struct uip_conn * __xdata health_conn;
-
 void health_show(void) __banked
 {
+	static __xdata struct uip_conn * __xdata health_conn;
 	__xdata uint8_t i;
 	__xdata uint32_t up;
 

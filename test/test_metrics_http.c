@@ -25,22 +25,42 @@ void metrics_fill(void)
 	metrics_more = ++fills < FILLS;
 }
 
+void metrics_put_str(const char *p)
+{
+	while (*p)
+		metrics_buf[metrics_len++] = *p++;
+}
+
 void metrics_start(bool with_mib)
 {
 	starts++;
 	start_mib = with_mib;
 	fills = 0;
-	memcpy(metrics_buf, "HTTP/1.1 200 OK\r\n\r\n", 19);
-	metrics_len = 19;
+	static const char ok[] = "HTTP/1.1 200 OK\r\n\r\n";
+	memcpy(metrics_buf, ok, sizeof(ok) - 1);
+	metrics_len = sizeof(ok) - 1;
 	metrics_more = true;
 	metrics_fill();
 }
 
 /* A connection to the exporter, after a fresh uip_init() and httpd_init() */
-static void scrape_start(void)
+static void scrape_start_window(uint16_t window)
 {
 	cli_sport = 40001;
 	cli_dport = METRICS_PORT;
+	session_start(window);
+}
+
+static void scrape_start(void)
+{
+	scrape_start_window(MSS_FULL);
+}
+
+/* The same, to the web server */
+static void web_start(void)
+{
+	cli_sport = 40000;
+	cli_dport = 80;
 	session_start(MSS_FULL);
 }
 
@@ -109,6 +129,16 @@ static void scenario_routes(void)
 	CHECK(!memcmp(stream, "HTTP/1.1 200", 12) && start_mib,
 	      "metrics_mib_query: ?mib=1 reaches the generator");
 	scrape_start();
+	get("/metrics?job=x&mib=1");
+	drain(MSS_FULL);
+	CHECK(!memcmp(stream, "HTTP/1.1 200", 12) && start_mib,
+	      "metrics_mib_param: mib=1 counts among other query parameters");
+	scrape_start();
+	get("/metrics?mib=10&x=mib=1");
+	drain(MSS_FULL);
+	CHECK(!memcmp(stream, "HTTP/1.1 200", 12) && !start_mib,
+	      "metrics_other_query: other parameters are served without the MIB families");
+	scrape_start();
 	get("/metrics");
 	drain(MSS_FULL);
 	CHECK(!start_mib, "metrics without a query leaves the MIB families out");
@@ -119,9 +149,7 @@ static void scenario_routes(void)
 	CHECK(!starts && !memcmp(stream, "HTTP/1.1 404", 12) && scrape_closed(),
 	      "metrics_other_path_404: the exporter's port answers anything else with 404");
 	starts = 0;
-	cli_sport = 40000;
-	cli_dport = 80;
-	session_start(MSS_FULL);
+	web_start();
 	get("/metrics");
 	drain(MSS_FULL);
 	CHECK(!starts && stream_len > 12 && memcmp(stream, "HTTP/1.1 200", 12),
@@ -238,6 +266,91 @@ static void scenario_one_scrape(void)
 	CHECK(starts == 1 && body_ok(FILLS) && scrape_closed(), "the first scrape is unaffected");
 }
 
+
+/* The client's pure ACK of the SYNACK is lost: the request completes the
+ * handshake, and uIP reports CONNECTED and NEWDATA in one call. */
+static void scenario_request_on_handshake(void)
+{
+	static const char req[] = "GET /metrics HTTP/1.1\r\nHost: sw\r\n\r\n";
+
+	prometheus_enabled = 1;
+	starts = 0;
+	uip_init();
+	httpd_init();
+	cli_sport = 40001;
+	cli_dport = METRICS_PORT;
+	cli_seq = 1000;
+	cli_rcv_nxt = 0;
+	cli_window = MSS_FULL;
+	stream_len = 0;
+	client_send(TCP_SYN, NULL, 0);
+	client_send(TCP_ACK | TCP_PSH, req, (int)strlen(req));
+	drain(MSS_FULL);
+	CHECK(starts == 1 && body_ok(FILLS) && scrape_closed(),
+	      "metrics_request_on_handshake: a request in the handshake's last segment is served");
+}
+
+/* A peer MSS below the buffer: every buffer goes out in several segments */
+static void scenario_small_mss(void)
+{
+	uint8_t original[300];
+	int original_len, same;
+
+	prometheus_enabled = 1;
+	scrape_start_window(300);
+	get("/metrics");
+	client_ack(300);
+	/* last_tx is the first buffer's second segment, at offset 300: lose it */
+	original_len = last_tx_len;
+	memcpy(original, last_tx, original_len);
+	stream_len -= original_len;
+	cli_rcv_nxt -= original_len;
+	last_tx_len = 0;
+	run_periodic(UIP_RTO + 2);
+	same = original_len == 300 && last_tx_len == original_len &&
+	       !memcmp(last_tx, original, original_len);
+	CHECK(same, "metrics_rexmit_mid_buffer: a lost segment inside a buffer is resent unchanged");
+	for (int i = 0; i < 40 && !scrape_closed(); i++)
+		client_ack(300);
+	CHECK(body_ok(FILLS) && scrape_closed(),
+	      "metrics_small_mss: buffers larger than the MSS arrive whole, in order");
+}
+
+/* Turned off between the connection and the request */
+static void scenario_disabled_before_request(void)
+{
+	prometheus_enabled = 1;
+	starts = 0;
+	scrape_start();
+	prometheus_enabled = 0;
+	get("/metrics");
+	drain(MSS_FULL);
+	CHECK(!starts && !memcmp(stream, "HTTP/1.1 404", 12),
+	      "metrics_disabled_before_request: a request after \"prometheus off\" gets 404");
+}
+
+/* TIME_WAIT does not hold the exporter's port */
+static void scenario_after_time_wait(void)
+{
+	struct uip_conn *c;
+
+	prometheus_enabled = 1;
+	scrape_start();
+	get("/metrics");
+	drain(MSS_FULL);
+	cli_rcv_nxt++;			/* acknowledge the server's FIN */
+	client_send(TCP_ACK | TCP_FIN, NULL, 0);
+	c = conn_on(METRICS_PORT);
+	CHECK(c && (c->tcpstateflags & UIP_TS_MASK) == UIP_TIME_WAIT,
+	      "the finished scrape's connection is in TIME_WAIT");
+	starts = 0;
+	connect_more(40004, METRICS_PORT);
+	get("/metrics");
+	drain(MSS_FULL);
+	CHECK(starts == 1 && body_ok(FILLS),
+	      "metrics_after_time_wait: a new scrape is admitted while the last one is in TIME_WAIT");
+}
+
 int main(int argc, char **argv)
 {
 	if (argc > 1 && !strcmp(argv[1], "-v"))
@@ -250,6 +363,10 @@ int main(int argc, char **argv)
 	scenario_empty_last_fill();
 	scenario_alongside_web();
 	scenario_one_scrape();
+	scenario_request_on_handshake();
+	scenario_small_mss();
+	scenario_disabled_before_request();
+	scenario_after_time_wait();
 	printf("\n%s (%d failure%s)\n", failures ? "BENCH: FAILURES" : "BENCH: ALL PASS",
 	       failures, failures == 1 ? "" : "s");
 	return failures ? 1 : 0;

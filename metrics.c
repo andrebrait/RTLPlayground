@@ -35,7 +35,7 @@ static void put_char(char c)
 	metrics_buf[metrics_len++] = c;
 }
 
-static void put_str(__code const char *s)
+void metrics_put_str(__code const char *s)
 {
 	while (*s)
 		put_char(*s++);
@@ -103,7 +103,7 @@ static void put_esc(__xdata const char *s, __xdata uint8_t max)
 		if (*s == '\\' || *s == '"')
 			put_char('\\');
 		if (*s == '\n') {
-			put_str("\\n");
+			metrics_put_str("\\n");
 			continue;
 		}
 		put_char(*s);
@@ -275,14 +275,14 @@ static __xdata uint8_t fam, row, typed, mib;
 static void begin_sample(void)
 {
 	if (!typed) {
-		put_str("# TYPE ");
-		put_str(families[fam].name);
+		metrics_put_str("# TYPE ");
+		metrics_put_str(families[fam].name);
 		put_char(' ');
-		put_str(type_names[families[fam].type]);
+		metrics_put_str(type_names[families[fam].type]);
 		put_char('\n');
 		typed = 1;
 	}
-	put_str(families[fam].name);
+	metrics_put_str(families[fam].name);
 }
 
 /* Logical port of this row; row 0 is the switch itself. */
@@ -290,7 +290,7 @@ static void begin_sample(void)
 
 static void put_device(void)
 {
-	put_str("device=\"lan");
+	metrics_put_str("device=\"lan");
 	put_fixed(machine.log_to_phys_port[PORT], 0);
 	put_char('"');
 }
@@ -396,12 +396,12 @@ static void emit_row(void)
 		if (row)
 			return;
 		begin_sample();
-		put_str("{sysname=\"RTLPlayground\",release=\"" VERSION_SW "\",version=\"" BUILD_DATE
+		metrics_put_str("{sysname=\"RTLPlayground\",release=\"" VERSION_SW "\",version=\"" BUILD_DATE
 			"\",machine=\"");
-		put_str(machine.machine_name);
-		put_str("\",nodename=\"");
+		metrics_put_str(machine.machine_name);
+		metrics_put_str("\",nodename=\"");
 		put_esc(hostname, sizeof(hostname));
-		put_str("\",domainname=\"(none)\"} 1\n");
+		metrics_put_str("\",domainname=\"(none)\"} 1\n");
 		return;
 	case K_BOOT:
 	case K_TIME:
@@ -428,25 +428,25 @@ static void emit_row(void)
 			if (s == 0xff || (f->kind == K_HWTEMP && !dom_word(s, 0, &w)))
 				return;
 			begin_sample();
-			put_str("{chip=\"sfp_lan");
+			metrics_put_str("{chip=\"sfp_lan");
 			put_fixed(machine.log_to_phys_port[PORT], 0);
 			if (f->kind == K_CHIP) {
-				put_str("\",chip_name=\"sfp_lan");
+				metrics_put_str("\",chip_name=\"sfp_lan");
 				put_fixed(machine.log_to_phys_port[PORT], 0);
-				put_str("\"} 1\n");
+				metrics_put_str("\"} 1\n");
 				return;
 			}
-			put_str("\",sensor=\"temp1\"}");
+			metrics_put_str("\",sensor=\"temp1\"}");
 			end_sample_q((int16_t)w, 8);
 			return;
 		}
 #if SOC_FAMILY == RTL837X
 		begin_sample();
 		if (f->kind == K_CHIP) {
-			put_str("{chip=\"thermal_thermal_zone0\",chip_name=\"cpu_thermal\"} 1\n");
+			metrics_put_str("{chip=\"thermal_thermal_zone0\",chip_name=\"cpu_thermal\"} 1\n");
 			return;
 		}
-		put_str("{chip=\"thermal_thermal_zone0\",sensor=\"temp1\"}");
+		metrics_put_str("{chip=\"thermal_thermal_zone0\",sensor=\"temp1\"}");
 		soc_temp();
 #endif
 		return;
@@ -455,7 +455,7 @@ static void emit_row(void)
 		if (row)
 			return;
 		begin_sample();
-		put_str("{zone=\"0\",type=\"cpu-thermal\",policy=\"step_wise\",mode=\"enabled\"}");
+		metrics_put_str("{zone=\"0\",type=\"cpu-thermal\",policy=\"step_wise\",mode=\"enabled\"}");
 		soc_temp();
 #endif
 		return;
@@ -482,17 +482,17 @@ static void emit_row(void)
 			begin_sample();
 			put_char('{');
 			put_device();
-			put_str(",address=\"");
+			metrics_put_str(",address=\"");
 			for (s = 0; s < 6; s++) {
 				if (s)
 					put_char(':');
 				put_hex(uip_ethaddr.addr[s]);
 			}
-			put_str("\",broadcast=\"ff:ff:ff:ff:ff:ff\",operstate=\"");
-			put_str(v ? "up" : k == 2 ? "down" : "lowerlayerdown");
-			put_str("\",ifalias=\"");
+			metrics_put_str("\",broadcast=\"ff:ff:ff:ff:ff:ff\",operstate=\"");
+			metrics_put_str(v ? "up" : k == 2 ? "down" : "lowerlayerdown");
+			metrics_put_str("\",ifalias=\"");
 			put_esc(port_names[PORT], PORT_NAME_SIZE);
-			put_str("\"} 1\n");
+			metrics_put_str("\"} 1\n");
 			return;
 		}
 		break;
@@ -508,7 +508,7 @@ static void emit_row(void)
 		begin_sample();
 		put_char('{');
 		put_device();
-		put_str("} ");
+		metrics_put_str("} ");
 		put_u64(&sum);
 		put_char('\n');
 		return;
@@ -519,13 +519,13 @@ static void emit_row(void)
 		begin_sample();
 		put_char('{');
 		put_device();
-		put_str(",vendor=\"");
+		metrics_put_str(",vendor=\"");
 		put_esc(sfp_module_vendor[s], 16);
-		put_str("\",model=\"");
+		metrics_put_str("\",model=\"");
 		put_esc(sfp_module_model[s], 16);
-		put_str("\",serial=\"");
+		metrics_put_str("\",serial=\"");
 		put_esc(sfp_module_serial[s], 16);
-		put_str("\"} 1\n");
+		metrics_put_str("\"} 1\n");
 		return;
 	case K_SFP_LOS:
 		s = sfp_slot();
@@ -577,7 +577,7 @@ void metrics_fill(void) __banked
 void metrics_start(__xdata bool with_mib) __banked
 {
 	metrics_len = 0;
-	put_str("HTTP/1.1 200 OK\r\nConnection: close\r\n"
+	metrics_put_str("HTTP/1.1 200 OK\r\nConnection: close\r\n"
 		"Content-Type: text/plain; version=0.0.4; charset=utf-8\r\n\r\n");
 	fam = row = typed = 0;
 	mib = with_mib;

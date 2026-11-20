@@ -1,8 +1,7 @@
 /*
  * The Prometheus exporter's own TCP connection on METRICS_PORT.
  *
- * A scrape no longer shares the httpd's connection slot and outbuf: the web
- * interface and a scrape can run at the same time. uip.c admits one
+ * It runs next to the httpd, with its own connection slot. uip.c admits one
  * connection per listening port, so this file keeps a single connection's
  * state. The response is generated into metrics_buf one segment's worth at a
  * time; uIP keeps no copy of sent data, so a retransmission resends the
@@ -23,20 +22,13 @@
 __xdata uint8_t metrics_buf[METRICS_BUF_SIZE];
 __xdata uint16_t metrics_len;
 
-/* Waiting for the request (0), or sending the response. Bytes, not bool:
- * a bool here costs a bit and a byte of the full internal RAM. */
+/* Waiting for the request (0), or sending the response */
 static __xdata uint8_t m_sending;
 /* The request asked for the MIB families: m_request() sets it, so no
  * comparison has to be held across the call to metrics_start() */
 static __xdata bool m_mib;
 /* Bytes of metrics_buf already acknowledged, and in flight */
 static __xdata uint16_t m_off, m_sent;
-
-static void m_put(__code const char *s)
-{
-	while (*s)
-		metrics_buf[metrics_len++] = *s++;
-}
 
 /* The next segment of metrics_buf, at most one MSS */
 static void m_send(void)
@@ -47,41 +39,52 @@ static void m_send(void)
 	uip_send(metrics_buf + m_off, m_sent);
 }
 
-/* Is the request "GET /metrics" or "GET /metrics?mib=1", followed by a space?
- * Sets m_mib for the second. */
-static bool m_request(__xdata const uint8_t *p, uint16_t len)
+/* Is the request "GET /metrics", with or without a query, followed by a space?
+ * Sets m_mib when the query has a "mib=1" parameter. Reads uip_appdata
+ * itself, keeps its counters in XDATA and returns a byte, not a bool built
+ * from && and ||: each of those costs internal RAM. */
+static __xdata uint16_t m_i, m_p;
+static __xdata uint8_t m_j;
+
+static uint8_t m_request(void)
 {
 	static __code const char get[] = "GET /metrics";
-	static __code const char mib[] = "?mib=1";
-	uint8_t i;
+	static __code const char mib[] = "mib=1";
+	__xdata const uint8_t *p = uip_appdata;
 
 	m_mib = false;
-	if (len < sizeof(get))
-		return 0;
-	for (i = 0; get[i]; i++)
-		if (p[i] != get[i])
+	for (m_i = 0; get[m_i]; m_i++) {
+		if (m_i >= uip_len)
 			return 0;
-	if (p[i] == ' ')
-		return 1;
-	if (len < sizeof(get) + sizeof(mib) - 1)
-		return 0;
-	p += i;
-	for (i = 0; mib[i]; i++)
-		if (p[i] != mib[i])
+		if (p[m_i] != get[m_i])
 			return 0;
-	if (p[i] != ' ')
+	}
+	if (m_i < uip_len && p[m_i] == '?') {
+		do {
+			m_p = ++m_i;	/* past '?' or '&' */
+			for (m_j = 0; mib[m_j] && m_i < uip_len && p[m_i] == mib[m_j]; m_j++)
+				m_i++;
+			while (m_i < uip_len && p[m_i] != '&' && p[m_i] != ' ')
+				m_i++;
+			if (!mib[m_j] && m_i - m_p == sizeof(mib) - 1)
+				m_mib = true;
+		} while (m_i < uip_len && p[m_i] == '&');
+	}
+	if (m_i >= uip_len)
 		return 0;
-	m_mib = true;
-	return 1;
+	return p[m_i] == ' ';
 }
 
 void metrics_appcall(void) __banked
 {
 	if (uip_connected()) {
-		if (!prometheus_enabled)
-			uip_abort();
 		m_sending = 0;
-		return;
+		if (!prometheus_enabled) {
+			uip_abort();
+			return;
+		}
+		/* No return: the segment that completes the handshake can carry
+		 * the request */
 	}
 	if (uip_closed() || uip_aborted() || uip_timedout()) {
 		m_sending = 0;
@@ -89,7 +92,6 @@ void metrics_appcall(void) __banked
 	}
 	if (m_sending && uip_acked()) {
 		m_off += m_sent;
-		m_sent = 0;
 		if (m_off == metrics_len) {
 			metrics_len = 0;
 			m_off = 0;
@@ -110,11 +112,11 @@ void metrics_appcall(void) __banked
 		return;
 	}
 	if (!m_sending && uip_newdata()) {
-		if (m_request((__xdata const uint8_t *)uip_appdata, uip_len) && prometheus_enabled) {
+		if (m_request() && prometheus_enabled) {
 			metrics_start(m_mib);
 		} else {
 			metrics_len = 0;
-			m_put("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
+			metrics_put_str("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
 			metrics_more = false;
 		}
 		m_sending = 1;

@@ -111,7 +111,7 @@ void httpd_init(void) __banked
 	// Start listening to port 80
 	uip_listen(HTONS(80));
 #ifdef PROMETHEUS
-	// The exporter refuses connections while it is off
+	// Always listened: metrics_appcall() resets connections while the exporter is off
 	uip_listen(HTONS(METRICS_PORT));
 #endif
 	// Not through uip_conn: it only points at a connection while uIP is

@@ -16,20 +16,8 @@
 #include "snmp_hw.h"
 #include "metrics.h"
 
-__xdata uint8_t outbuf[TCP_OUTBUF_SIZE];
-__xdata uint16_t slen;
 __xdata uint8_t metrics_buf[METRICS_BUF_SIZE];
 __xdata uint16_t metrics_len;
-
-/* copied verbatim from rtlplayground.c: html_out.c's str_code_to_html() calls it */
-uint16_t strtox(__xdata uint8_t *dst, __code const char *s)
-{
-	__xdata uint8_t *b = dst;
-	while (*s)
-		*dst++ = *s++;
-	*dst = 0;
-	return dst - b;
-}
 
 #include "../metrics.c"
 
@@ -104,13 +92,12 @@ static size_t scrape_len;
  * fills, between_fills() may change the switch. */
 static const char *render(bool mib, void (*between_fills)(void))
 {
-	size_t hdr;
+	static const char header[] = "HTTP/1.1 200 OK\r\nConnection: close\r\n"
+		"Content-Type: text/plain; version=0.0.4; charset=utf-8\r\n\r\n";
+	size_t hdr = sizeof(header) - 1;
 	metrics_start(mib);
-	assert(metrics_len <= METRICS_BUF_SIZE);
-	metrics_buf[metrics_len] = 0;	/* room: rows stop METRICS_ROW_MAX short */
-	hdr = strstr((char *)metrics_buf, "\r\n\r\n") + 4 - (char *)metrics_buf;
-	assert(!strncmp((char *)metrics_buf, "HTTP/1.1 200 OK\r\nConnection: close\r\n"
-		       "Content-Type: text/plain; version=0.0.4; charset=utf-8\r\n\r\n", hdr));
+	assert(metrics_len <= METRICS_BUF_SIZE && metrics_len >= hdr);
+	assert(!memcmp(metrics_buf, header, hdr));
 	scrape_len = 0;
 	memcpy(scrape, metrics_buf + hdr, metrics_len - hdr);
 	scrape_len = metrics_len - hdr;

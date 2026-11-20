@@ -24,8 +24,10 @@ prometheus off
 ```
 
 The change applies immediately. **Save to flash** keeps it after a reboot.
-While the exporter is off, the switch resets connections to port 9100. Any
-request other than `GET /metrics` or `GET /metrics?mib=1` returns 404.
+While the exporter is off, the switch resets connections to port 9100 once the
+handshake completes. Any path other than `/metrics` returns 404. The MIB
+families are added when the query has a `mib=1` parameter; other query
+parameters are ignored.
 
 `/metrics` needs no login: Prometheus cannot hold a web session. Anyone who
 can reach port 9100 can read the counters, port names, SFP
@@ -94,7 +96,7 @@ Web UI name, for example `node_ethtool_received_ether_crc_align_errors`.
   Externally calibrated modules report `rtlplayground_sfp_external_calibration 1`
   and no diagnostic values.
 - `node_network_info` has no `duplex` label.
-- The response is generated while it is sent, one TCP segment at a time, so a
-  scrape is not a single snapshot.
+- The response is generated while it is sent, one buffer (one MSS) at a time,
+  so a scrape is not a single snapshot.
 - One scrape runs at a time. A second connection's SYN is dropped until the
-  first scrape is done, and its client retries.
+  first connection is closed, and its client retries.

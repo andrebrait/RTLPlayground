@@ -5751,6 +5751,7 @@ function renderPrometheus(v) {
     if (v === undefined) return;
     if (!promPending) $("sy-prom-toggle").checked = !!v;
     $("sy-prom-toggle").disabled = promPending;
+    /* 9100 is METRICS_PORT in metrics.h */
     $("sy-prom-url").textContent = v ? "http://" + location.hostname + ":9100/metrics" : "";
 }
 $("sy-prom-toggle").addEventListener("change", function() {
