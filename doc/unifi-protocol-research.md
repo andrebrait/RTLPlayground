@@ -1048,8 +1048,11 @@ Notes on the API:
 - A port override with only `forward=disabled` was stored as
   `forward=all`, and a port profile with `forward=disabled` was stored the
   same way. The override was only kept as disabled when it also had
-  `native_networkconf_id=""` (and `setting_preference=manual`,
-  `tagged_vlan_mgmt=block_all`, which may not all be needed).
+  `native_networkconf_id=""` and `tagged_vlan_mgmt=block_all`. The OpenWrt
+  lab isolated this on a `US6XG150`: all three fields are required, and
+  `setting_preference` is not. Without `block_all` the port was stored as
+  `forward=customize` and tagged in every slot. Without the empty native
+  network no `status` line was sent.
 - IGMP fast-leave and flood-unknown lists (`fastleave_for_network_ids`,
   `flood_unknown_multicast_for_network_ids`) produced no change. Their keys
   are still unknown.
@@ -1169,7 +1172,19 @@ test:
 
 Neither lab ever saw a `switch.lag.N.lacp` key, or any other key that says
 whether a LAG runs LACP or is static. This lab claimed the `LACP` bit
-(`feature_caps` 1582078 includes 8192).
+(`feature_caps` 1582078 includes 8192). No `api/fields` schema has a LACP
+field. Per the OpenWrt lab, Ubiquiti's LAG FAQ
+(https://help.ui.com/hc/en-us/articles/360007279753, not fetched here) says
+UniFi switches support only LACP (802.3ad), with no static LAGs. So
+`opmode=aggregate` with `lag=N` means an LACP bond, and the switch should run
+LACP on those ports. `switch.lag.%d.lacp` in `ubntbox` is probably legacy or
+used by other models. The controller reads LACP status back from
+`port_table[].lacp_state`.
+
+Neither lab saw a `setstate` reply. The OpenWrt lab's 1,028 captured replies
+were 983 `noop`, 41 `setparam`, 1 `cmd`, 1 `reboot` and 1 `upgrade`. Neither
+lab found what sets `igmp_fastleave`: `fastleave_for_network_ids` left it at
+`false` in both.
 
 ## Open questions and gaps
 
