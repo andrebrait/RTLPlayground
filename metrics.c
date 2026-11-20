@@ -38,32 +38,22 @@ static void put_char(char c)
 }
 
 /* Decimal of an 8-byte big-endian counter divided by 10^decimals, by long
- * division of a copy. Nibble-wise: each partial dividend is at most 159, so
- * the 8-bit DIV AB does the work instead of the 16-bit library division. */
+ * division of a copy with div_small(). */
 static void put_dec(__xdata const struct snmp_counter *__xdata v, __xdata uint8_t decimals)
 {
 	__xdata uint8_t n[8], d[20];
-	__xdata uint8_t i, k = 0, nz, cur, q, first = 0;
+	__xdata uint8_t i, k = 0, first = 0;
 
 	for (i = 0; i < 8; i++)
 		n[i] = v->bytes[i];
-	do {
-		cur = 0;
-		nz = 0;
+	for (;;) {
 		/* Leading zero bytes divide to zero: skip them */
 		while (first < 7 && !n[first])
 			first++;
-		for (i = first; i < 8; i++) {
-			cur = (cur << 4) | (n[i] >> 4);
-			q = cur / 10;
-			cur %= 10;
-			cur = (cur << 4) | (n[i] & 15);
-			n[i] = (q << 4) | (cur / 10);
-			cur %= 10;
-			nz |= n[i];
-		}
-		d[k++] = '0' + cur;
-	} while (nz || k <= decimals);
+		if (!n[first] && k > decimals)
+			break;
+		d[k++] = '0' + div_small(n + first, 8 - first, 10);
+	}
 	while (k) {
 		put_char(d[--k]);
 		if (k && k == decimals)
@@ -308,6 +298,17 @@ static void end_sample_int(__xdata int32_t v, __xdata uint8_t decimals)
 	put_char('\n');
 }
 
+/* v / 2^shift with three decimals, 3 <= shift. The same value as
+ * v * 1000 / 2^shift in C, rounded toward zero, without the signed 32-bit
+ * library division: 1000 / 2^shift is 125 / 2^(shift - 3). */
+static void end_sample_q(__xdata int16_t v, __xdata uint8_t shift)
+{
+	__xdata uint32_t u = v < 0 ? 0 - (uint32_t)(int32_t)v : (uint32_t)v;
+
+	u = (u * 125) >> (shift - 3);
+	end_sample_int(v < 0 ? -(int32_t)u : (int32_t)u, 3);
+}
+
 /* Adds (or with sub, subtracts) the 32-bit value whose bytes are b[0..3],
  * least significant first, to the 8-byte big-endian acc. Byte-wise, because
  * SDCC spills 32-bit arithmetic on xdata operands to DATA. */
@@ -361,7 +362,7 @@ static bool dom_word(uint8_t slot, __xdata uint8_t offset, __xdata uint16_t *__x
 static void soc_temp(void)
 {
 	reg_read_m(RTL837X_TM_RESULT);
-	end_sample_int((int32_t)(int16_t)(((uint16_t)sfr_data[2] << 8) | sfr_data[3]) * 1000 / 128, 3);
+	end_sample_q((int16_t)(((uint16_t)sfr_data[2] << 8) | sfr_data[3]), 7);
 }
 #endif
 
@@ -432,7 +433,7 @@ static void emit_row(void)
 				return;
 			}
 			str_code_to_html("\",sensor=\"temp1\"}");
-			end_sample_int((int32_t)(int16_t)w * 1000 / 256, 3);
+			end_sample_q((int16_t)w, 8);
 			return;
 		}
 #if SOC_FAMILY == RTL837X

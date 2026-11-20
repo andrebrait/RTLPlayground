@@ -67,6 +67,7 @@ __xdata uint8_t ct_have = 0;
 __xdata uint8_t ct_pair;
 #if SOC_FAMILY == RTL836X
 __xdata uint16_t ct_ctrl;
+static __xdata uint8_t ct_rem;
 #else
 __xdata uint8_t ct_flags;
 __xdata uint16_t ct_bmcr;
@@ -87,6 +88,30 @@ void rtl_phy_cable_test_start(uint8_t port) __banked
 	phy_write(port, PHY_MMD31, RTCT_CTRL, RTCT_CTRL_START);
 #endif
 }
+
+#if SOC_FAMILY == RTL836X
+/* ct_len[ct_pair] from RTCT counts to 0.1 m, above the zero offset ct_ctrl.
+ * A function of its own, on globals only: calling div16_small() from the loop
+ * below pushed that function's port parameter into internal RAM, which some
+ * RTL836x builds have no byte left for. */
+static void ct_scale(void)
+{
+	if (ct_len[ct_pair] <= ct_ctrl) {
+		ct_len[ct_pair] = 0;
+		return;
+	}
+#if RTCT_LEN_PER_50CM != 36
+#error "the arithmetic below is for 36"
+#endif
+	/* (d * 5 + 18) / 36 in 16 bits: with d = 36a + c it is
+	 * 5a + (5c + 18) / 36, where 5c + 18 fits a byte. a is (d / 4) / 9 and
+	 * c is 4 * ((d / 4) % 9) + d % 4. */
+	ct_ctrl = ct_len[ct_pair] - ct_ctrl;
+	ct_len[ct_pair] = div16_small(ct_ctrl >> 2, 9);
+	ct_rem = (div_rem << 2) | (ct_ctrl & 3);
+	ct_len[ct_pair] = ct_len[ct_pair] * 5 + (uint8_t)(ct_rem * 5 + 18) / (uint8_t)36;
+}
+#endif
 
 bool rtl_phy_cable_test_get_status(uint8_t port) __banked
 {
@@ -134,11 +159,15 @@ bool rtl_phy_cable_test_get_status(uint8_t port) __banked
 		ct_len[ct_pair] = SFR_DATA_U16;
 #if SOC_FAMILY == RTL836X
 		ct_ctrl = ct_pair & 1 ? RTCT_LEN_ZERO_BD : RTCT_LEN_ZERO;
-		ct_len[ct_pair] = ct_len[ct_pair] > ct_ctrl ?
-			((uint32_t)(ct_len[ct_pair] - ct_ctrl) * 5 + RTCT_LEN_PER_50CM / 2) / RTCT_LEN_PER_50CM : 0;
+		ct_scale();
 #else
 		ct_len[ct_pair] = ct_len[ct_pair] > RTCT_LEN_ZERO ? ct_len[ct_pair] - RTCT_LEN_ZERO : 0;
-		ct_len[ct_pair] = ct_len[ct_pair] * 5 / RTCT_LEN_PER_50CM;
+#if RTCT_LEN_PER_50CM != 43
+#error "the multiplier below is for / 43"
+#endif
+		/* 43 is prime, so no nibble division: x / 43 is (x * 48771) >> 21
+		 * for every 16-bit x (43 * 48771 is 2^21 + 1), checked exhaustively */
+		ct_len[ct_pair] = ((uint32_t)(uint16_t)(ct_len[ct_pair] * 5) * 48771) >> 21;
 #endif
 	}
 	return true;
@@ -176,9 +205,10 @@ static void cabletest_print(void)
 			print_string(": unknown\n");
 			continue;
 		}
-		itoa_short(ct_len[ct_pair] / 10);
+		itoa_short(div16_small(ct_len[ct_pair], 10));
 		write_char('.');
-		write_char('0' + ct_len[ct_pair] % 10);
+		div16_small(ct_len[ct_pair], 10);
+		write_char('0' + div_rem);
 		print_string(" m\n");
 	}
 }

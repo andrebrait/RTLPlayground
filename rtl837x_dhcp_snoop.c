@@ -260,20 +260,17 @@ void dhcp_snoop_show(void) __banked
 			print_string(" s\n");
 		} else if (ds_lease < 0x40000) {
 			ds_lease >>= 2;
-			ds_i = ds_lease;
-			ds_i /= 15;
+			ds_i = div16_small(ds_lease, 15);
 			itoa_short(ds_i);
 			print_string(" min\n");
 		} else if (ds_lease < 0x100000) {
 			ds_lease >>= 4;
-			ds_i = ds_lease;
-			ds_i /= 225;
+			ds_i = div16_small(div16_small(ds_lease, 15), 15);
 			itoa_short(ds_i);
 			print_string(" h\n");
 		} else {
 			ds_lease >>= 7;
-			ds_i = ds_lease;
-			ds_i /= 675;
+			ds_i = div16_small(div16_small(div16_small(ds_lease, 15), 15), 3);
 			itoa_short(ds_i);
 			print_string(" d\n");
 		}

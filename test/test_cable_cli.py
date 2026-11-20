@@ -96,7 +96,7 @@ subprocess.run(shlex.split(os.environ.get('CC', 'gcc')) + [
     '-include', str(root / 'test/sdcc_shim.h'), '-I' + str(root / 'test/stub'),
     '-I' + str(root), '-I' + str(root / 'uip'), '-I' + str(root / 'httpd'),
     str(source), str(root / 'test/support.c'), str(root / 'test/hw_mock.c'),
-    str(root / 'rtl837x_cabletest.c'), str(root / 'timer.c'),
+    str(root / 'rtl837x_cabletest.c'), str(root / 'timer.c'), str(root / 'div_small.c'),
     '-Wl,-dead_strip' if sys.platform == 'darwin' else '-Wl,--gc-sections',
     '-o', str(binary)], check=True)
 subprocess.run([str(binary)], check=True)
