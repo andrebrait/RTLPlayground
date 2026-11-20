@@ -493,6 +493,19 @@ Mapping onto RTLPlayground:
 | Management VLAN, MTU, jumbo frames | `switch.managementvlan`, `switch.mtu`, `switch.jumboframes` | existing settings |
 | IGMP snooping, DHCP snooping/guard | `switch.dhcp_snoop.status`, `switch.dhcp_guard.*` (IGMP key not seen) | `rtl837x_igmp.c`, `rtl837x_dhcp_snoop.c` |
 
+Unsupported settings: the protocol has no per-setting rejection. The device
+acknowledges a whole `system_cfg` by echoing its `cfgversion`. Not echoing it
+makes the controller re-provision on every inform and leave the device in a
+provisioning loop (unifi-openwrt `docs/internals.md:73`; openUF
+`PROTOCOL-VALIDATION.md` lines 529–565). So the device should always echo the
+`cfgversion`, apply what it can, and clamp the rest. For example, a forced
+5G or 10G speed on a 2.5G copper port becomes the fastest supported setting.
+The device then reports what the hardware actually does: the real `speed` in
+`port_table`, `speed_caps` limited to real modes, and `poe_caps=0`. Skipped
+or clamped keys go to a local "unhandled" log, as unifi-openwrt does
+(`docs/internals.md:129-135`). Whether the controller flags a mismatch
+between a configured and a reported speed is **unverified**.
+
 Things not established:
 
 - A real `system_cfg` captured from a stock controller for one of the
