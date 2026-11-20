@@ -3,16 +3,27 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include "uip.h"
 
-/* Serves GET /metrics while non-zero. Set by "prometheus on|off". */
+/* The exporter's own TCP port, the usual one for a node exporter */
+#define METRICS_PORT 9100
+/* One segment's worth: the response goes out a buffer at a time */
+#define METRICS_BUF_SIZE UIP_TCP_MSS
+
+/* Serves GET /metrics on METRICS_PORT while non-zero. Set by "prometheus on|off". */
 extern __xdata uint8_t prometheus_enabled;
 /* True while a /metrics response still has rows to generate. */
 extern __xdata bool metrics_more;
+/* The response being sent, owned by metrics_tcp.c, filled by metrics.c */
+extern __xdata uint8_t metrics_buf[METRICS_BUF_SIZE];
+extern __xdata uint16_t metrics_len;
 
 void prometheus_command(void) __banked;
-/* Starts a response in outbuf: header, then rows while they fit. */
+/* Starts a response in metrics_buf: header, then rows while they fit. */
 void metrics_start(__xdata bool with_mib) __banked;
-/* Appends rows at slen while they fit in outbuf; clears metrics_more at the end. */
+/* Refills metrics_buf from the start with the rows that fit; clears metrics_more at the end. */
 void metrics_fill(void) __banked;
+/* The uIP application for connections to METRICS_PORT */
+void metrics_appcall(void) __banked;
 
 #endif

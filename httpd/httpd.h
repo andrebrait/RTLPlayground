@@ -18,7 +18,13 @@ typedef struct httpd_state {
 /* Finally we define the application function to be called by uIP. */
 void httpd_appcall(void);
 #ifndef UIP_APPCALL
+#ifdef PROMETHEUS
+/* Sends the exporter's port to metrics_appcall(), everything else to the httpd */
+void tcp_appcall(void);
+#define UIP_APPCALL tcp_appcall
+#else
 #define UIP_APPCALL httpd_appcall
+#endif
 #endif /* UIP_APPCALL */
 
 void httpd_init(void) __banked;

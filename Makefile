@@ -232,7 +232,7 @@ ifeq ($(SNMP),1)
 SRCS += snmp.c snmp_control.c
 endif
 ifeq ($(PROMETHEUS),1)
-SRCS += metrics.c metrics_cli.c
+SRCS += metrics.c metrics_cli.c metrics_tcp.c
 endif
 # The bounded hardware readers serve both SNMP and the Prometheus exporter.
 ifneq ($(filter 1,$(SNMP) $(PROMETHEUS)),)

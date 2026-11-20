@@ -90,11 +90,17 @@ typedef uint16_t u16_t;
 typedef unsigned short uip_stats_t;
 
 /**
- * Maximum number of TCP connections. TODO: Increase this, but also make the socket state/buffer per-connection.
+ * Maximum number of TCP connections: the httpd, and with PROMETHEUS the
+ * exporter's own port. uip.c admits one connection per listening port,
+ * because each application keeps a single connection's state.
  *
  * \hideinitializer
  */
+#ifdef PROMETHEUS
+#define UIP_CONF_MAX_CONNECTIONS 2
+#else
 #define UIP_CONF_MAX_CONNECTIONS 1
+#endif
 
 /**
  * This httpd closes after every response, so an ESTABLISHED connection
@@ -112,11 +118,16 @@ typedef unsigned short uip_stats_t;
 #define UIP_CONF_IDLE_TIMEOUT 30
 
 /**
- * Maximum number of listening TCP ports. TODO: increase this!
+ * Maximum number of listening TCP ports: 80, and METRICS_PORT with
+ * PROMETHEUS.
  *
  * \hideinitializer
  */
+#ifdef PROMETHEUS
+#define UIP_CONF_MAX_LISTENPORTS 2
+#else
 #define UIP_CONF_MAX_LISTENPORTS 1
+#endif
 
 /**
  * uIP buffer size.

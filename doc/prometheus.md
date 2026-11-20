@@ -5,8 +5,10 @@ firmware has no exporter code; the Web UI's Prometheus controls stay hidden. It
 can be combined with `SNMP=1`; both use the same bounded hardware readers in
 `snmp_hw.c`.
 
-The exporter serves `GET /metrics` on the web server's port 80, in the
-Prometheus text format (version 0.0.4). Metric names, types and labels follow
+The exporter serves `GET /metrics` on its own TCP port, 9100, in the
+Prometheus text format (version 0.0.4). It has its own connection, so a scrape
+and the web interface can run at the same time. The web server on port 80 does
+not serve `/metrics`. Metric names, types and labels follow
 `prometheus-node-exporter-lua` on OpenWrt `realtek` switches, so dashboards and
 alerting rules written for those switches also apply here.
 
@@ -22,10 +24,11 @@ prometheus off
 ```
 
 The change applies immediately. **Save to flash** keeps it after a reboot.
-While the exporter is off, `/metrics` returns 404.
+While the exporter is off, the switch resets connections to port 9100. Any
+request other than `GET /metrics` or `GET /metrics?mib=1` returns 404.
 
 `/metrics` needs no login: Prometheus cannot hold a web session. Anyone who
-can reach the switch's web server can read the counters, port names, SFP
+can reach port 9100 can read the counters, port names, SFP
 module details and hostname while the exporter is on. Restrict management
 access accordingly.
 
@@ -35,14 +38,14 @@ access accordingly.
 scrape_configs:
   - job_name: rtlplayground
     static_configs:
-      - targets: ["192.0.2.10:80"]
+      - targets: ["192.0.2.10:9100"]
   # Optional: the full ASIC MIB counter set, at a slower interval.
   - job_name: rtlplayground-mib
     scrape_interval: 5m
     params:
       mib: ["1"]
     static_configs:
-      - targets: ["192.0.2.10:80"]
+      - targets: ["192.0.2.10:9100"]
 ```
 
 ## Metrics
@@ -91,5 +94,7 @@ Web UI name, for example `node_ethtool_received_ether_crc_align_errors`.
   Externally calibrated modules report `rtlplayground_sfp_external_calibration 1`
   and no diagnostic values.
 - `node_network_info` has no `duplex` label.
-- The response is generated while it is sent, one buffer at a time, so a scrape
-  is not a single snapshot. A second request drops an unfinished scrape.
+- The response is generated while it is sent, one TCP segment at a time, so a
+  scrape is not a single snapshot.
+- One scrape runs at a time. A second connection's SYN is dropped until the
+  first scrape is done, and its client retries.
