@@ -65,16 +65,22 @@ Scope and method:
    *(string evidence)*. AES-GCM only needs the forward AES cipher plus GHASH. On
    the 8051 that is the cheaper choice compared with CBC, which needs both
    directions.
-5. **It looks feasible on the 8051, but the hard parts are TCP and memory, not
-   crypto.** The inform POST is several KB (4.7–6.2 KB of JSON for 6–10
-   ports in the lab). The controller accepts an encrypted inform with no
-   compression at all, so no zlib code is needed on the device. Controller
-   responses are encrypted but never compressed, so no inflate is needed
-   either (both **confirmed in the lab**). A provisioning response is
-   2.2–7.6 KB on the wire. The blockers are elsewhere. uIP is configured for one TCP connection, and the
-   httpd already uses it. uIP regenerates data on retransmit. The `system_cfg`
-   response must be decrypted, tag-checked and parsed as a stream, or spooled to
-   flash, before anything is applied.
+5. **It fits both switches the maintainer runs, but code space and CPU are
+   tight, not RAM or TCP.** The inform POST is several KB (4.7–6.2 KB of
+   JSON for 6–10 ports in the lab). It needs no compression, and responses
+   are never compressed (both **confirmed in the lab**). A provisioning
+   response is 2.2–7.6 KB on the wire.
+   - Memory: the RTL8373 and RTL8370N builds each have about 28 KB of free
+     XDATA, and the UniFi client needs about 13 KB.
+   - TCP: a second uIP connection for inform and a third for metrics cost
+     30 B each plus their buffers.
+   - Code: the RTL8373 build has 17 KB of free code in fragments, so the
+     client needs a fifth code bank. The flash slot for it is empty on both
+     images.
+   - CPU: AES-128-GCM in C costs about 72,000 8051 cycles per 16 bytes
+     (measured in a simulator), so the inform must be trimmed and the crypto
+     run in small steps from the main loop. See
+     [Feasibility](#feasibility-on-rtl837x--8051).
 6. **Several of the gaps above are filled by work done for an OpenWrt switch.**
    A parallel investigation for an OpenWrt-based RTL930x switch (LG510S-4T2XS)
    found the projects listed in [Additional projects](#additional-projects):
@@ -741,35 +747,236 @@ Firmware version and update handling:
 
 ## Feasibility on RTL837x / 8051
 
-The resource facts come from this repo. XDATA is about 64 KB, with
-`--xram-size 49151` for the linker (`Makefile:336`). Code is banked over 4 MB of
-flash (`doc/hardware.md`). uIP has `UIP_CONF_BUFFER_SIZE 1556`,
-`UIP_CONF_MAX_CONNECTIONS 1` and `UIP_CONF_MAX_LISTENPORTS 1`
-(`uip/uip-conf.h:97,119,133`). `UIP_ACTIVE_OPEN` is 1 (`uip/uipopt.h:233`), but
-no module currently calls `uip_connect`. The existing crypto is ChaCha20 only
-(`crypto/`). DNS (`dns.c`), DHCP, LLDP neighbours (`rtl837x_lldp.h:115-139`) and
-flash write access are already present.
+All numbers in this section come from the two images the maintainer runs:
+`MOKERLINK_ZX_SWTGW218AS` (RTL8373, 8 x 2.5G + 1 x SFP+, reported as
+`USWED36`) and `TPLINK_TL_SG108PE_V5` (RTL8370N, 8 x 1G with PoE on ports 1–4,
+reported as `USL8LP`). Both were built from `e9f09fc5` with SNMP and
+Prometheus enabled. The memory figures come from the linker's `.mem` and `.map`
+files. Crypto timings come from an 8051 simulator, not from hardware.
 
-| Need | Option | Cost estimate | Risk |
+### Measured resources
+
+| Resource | RTL8373 (`MOKERLINK_ZX_SWTGW218AS`) | RTL8370N (`TPLINK_TL_SG108PE_V5`) |
+| --- | --- | --- |
+| XDATA used (`XSEG`+`XISEG`) | 20,885 B (`0x0001`–`0x5195`) | 19,919 B (`0x0001`–`0x4DCF`) |
+| XDATA free below `0xBF00` | **28,010 B** | **28,976 B** |
+| Internal RAM | Full. 140 B left for the stack | Full. 130 B left for the stack |
+| Free code: HOME / BANK1 / BANK2 / BANK3 / BANK4 | 4,014 / 5,669 / 3,410 / **851** / 3,177 B | 4,249 / 10,155 / 14,650 / 15,712 / 9,203 B |
+| Free code, total | **17,121 B**, in five pieces, the largest 5.7 KB | 53,969 B |
+| Flash `0x34000`–`0x3FFFF` | Empty: room for exactly one more 48 KB bank (BANK5) before the web files at `0x40000` | Same |
+
+Notes:
+
+- The linker gets `--xram-size 49151` (`Makefile:336`), so `0x0000`–`0xBFFF`
+  is what the firmware uses. The RTL8370N datasheet gives 48 KB of data memory
+  (`doc/tl-sg108pe-v5-firmware.md`). `doc/hardware.md` says 64 KB for the
+  RTL837x, but no build uses anything above `0xBFFF`. `0xBF00`–`0xBFFF` holds
+  the ChaCha20 state (`crypto/chacha20.c:14`). That code is linked into BANK4,
+  but nothing calls it.
+- The largest XDATA users are `config_buf` (4,480 B), `outbuf` (2,500 B),
+  `lldp_nb` (2,074 B), `cmd_history` (2,048 B) and `uip_buf` (1,560 B).
+- `imagebuilder` packs bank N at flash `(N-1) * 0xC000 + 0x4000`, so BANK5 is
+  flash `0x34000`. Neither image has a non-blank byte there. The stock
+  RTL8370N firmware uses 15 code banks, so the bank register has room for
+  more.
+- **Memory is not the constraint. Code space on the RTL8373 build is.** The
+  UniFi client does not fit into the free fragments there, so it needs BANK5:
+  add `-Wl-bBANK5=0x54000` to the link line. `imagebuilder` derives the bank
+  count from the image size. Use the same layout on both builds.
+
+### TCP connections
+
+uIP itself is cheap per connection. Each `struct uip_conn` is 30 bytes (with the
+2-byte `httpd_state`). One `uip_buf` serves all connections, because uIP handles
+one packet at a time. uIP does not keep sent data, so on a retransmit the
+application must send the same bytes again. The httpd keeps its whole
+response in the global `outbuf` (2,500 B), with global cursors (`slen`, `o_idx`,
+`cont_len`, `cont_addr`, `metrics_more`). That is why the httpd can serve one
+connection at a time, and why `UIP_CONF_MAX_CONNECTIONS` is 1
+(`uip/uip-conf.h:93-97`: "TODO: Increase this, but also make the socket
+state/buffer per-connection").
+
+**Second connection (UniFi inform): yes.** The inform client is an active open
+(`uip_connect`, `UIP_ACTIVE_OPEN` is already 1) to the controller's port 8080.
+It has its own buffer and state, so the httpd does not change. Needed:
+
+- `UIP_CONF_MAX_CONNECTIONS 2`.
+- A `UIP_APPCALL` dispatcher that sends a connection whose remote port is 8080
+  to `unifi_appcall()` and everything else to `httpd_appcall()`.
+  `uip_tcp_appstate_t` becomes a union of both states.
+- At most one port-80 connection at a time. Today the single slot enforces
+  this. With more slots, a second browser connection would take a slot and
+  then find the httpd's global buffer in use. Refuse a SYN to port 80 while a
+  port-80 connection exists. This is a small check in the SYN path of
+  `uip.c`.
+- Extend the `health` TCP dump, which stops the build when `UIP_CONNS != 1`
+  (`cmd_parser.c:2664`).
+
+**Third connection (metrics): yes, on a separate port.** Today a Prometheus
+scrape and the web UI take turns on the one httpd slot. To separate them:
+
+- Serve `/metrics` on a second listening port as well
+  (`UIP_CONF_MAX_LISTENPORTS 2`).
+- Give that connection its own TX buffer of one MSS (1,472 B) and its own
+  cursor.
+- Have `metrics_fill()` write to a buffer passed in, not `outbuf`. It
+  already produces the scrape chunk by chunk, so the existing retransmit
+  logic carries over.
+
+The cost is about 1.5 KB XDATA, 30 B for the connection and a few hundred
+bytes of code. Making the httpd itself multi-connection would be the larger
+change: every global cursor would move into per-connection state, and each
+connection would need its own `outbuf`.
+
+The uIP receive window is one MSS (`uip/uipopt.h:314`), so every transfer is
+stop-and-wait. On a LAN, a 7.6 KB `system_cfg` response is six round trips,
+which is fine.
+
+### Crypto cost (measured in a simulator)
+
+Method: forward-only AES-128 in C, AES-128-GCM with two GHASH variants, built
+with SDCC 4.6.0 `--model-large` and run in ucsim (`s51`). Both variants
+reproduce NIST GCM test case 2 (K = 0, IV = 0^96, P = 0^128, tag
+`ab6e47d42cec13bdf53a67b21257bddf`). The cycle counts are 8051 machine cycles
+(ucsim ticks / 12). The code size includes the test harness and the SDCC
+`memcpy`/`memset`, so it is an upper bound.
+
+| GHASH variant | Cycles per 16-byte block (CTR + GHASH) | Code + tables | XDATA |
 | --- | --- | --- | --- |
-| AES-128 | Forward cipher only, when GCM is used | About 1.5–3 KB code, 256 B S-box (code space), key schedule on the fly or 176 B XDATA. **Estimate.** | Low. |
-| GHASH | GF(2^128) multiply. Bitwise, or 4-bit Shoup tables (256 B XDATA per key) | Thousands of 8051 instructions per 16-byte block. A few KB of payload means a few hundred blocks. **Estimate.** | Medium (CPU time). Fine at a 10–30 s interval. |
-| AES-CBC instead | Needs the inverse cipher for responses (another 256 B table and InvMixColumns) | More code than GCM | The controller pushes `use_aes_gcm=true`. Whether a device may stay on CBC is **unverified**. |
-| IV / nonce | 16 random bytes per packet | — | **Security-critical for GCM.** A repeated nonce under one key breaks it. Needs an entropy source or a persisted counter. |
-| Compression (TX) | None: uncompressed informs are accepted (**confirmed in the lab**). zlib stored blocks remain a trivial fallback | 0 | Low. |
-| Decompression (RX) | None: 10.6.109 never compressed a response (**confirmed in the lab**) | 0 | Low. A later controller build could change this. |
-| JSON (TX) | Printf-style generator, run twice (a counting pass for Content-Length and TNBU length, then an emit pass) from a counter snapshot taken once per inform | Small | uIP regenerates data on retransmit, so output must be deterministic. GCM-CTR can seek to any block. The tag is computed once and kept (16 B). 64-bit counters need `long long` or manual decimal formatting. |
-| JSON (RX) | Streaming tokenizer. Decrypt each segment with CTR, unescape the `system_cfg` string, and feed a line parser for `key=value` | Small to medium | The GCM tag is only known at the end. **Do not apply anything before the tag verifies.** Either stage parsed settings in XDATA and commit after the tag, or spool the ciphertext to a flash scratch area and parse in a second pass. |
-| HTTP client | Hand-written `POST /inform HTTP/1.1`, `Content-Length`, read the status line and the body | Small | uIP needs `UIP_CONNS` ≥ 2, or an inform client that shares the slot with httpd. |
-| Payload size | Synthetic estimate: about 4.4 KB JSON for 5 ports and 8.1 KB for 10 ports, each port with ~30 fields and 3 MAC entries, plus one LLDP entry | 3–6 TCP segments | Drop optional fields first. unifi-simulator was Connected with only 6 fields per port. |
-| Response size | `setparam` with `system_cfg`: 4.1–7.0 KB of `system_cfg` and 4.7–7.6 KB on the wire for 6–10 ports in the lab, growing with VLANs and overrides | — | Streaming is mandatory. Do not buffer it whole. |
-| Memory | Snapshot counters (~10 ports × 8 × 8 B), staged config, AES/GHASH state, inform state (key 16 B, cfgversion ≤ 32 B, URL) | About 1–2 KB XDATA | Current free XDATA was **not measured**, because the build has no `.mem` map for the main image. |
+| Bitwise | ≈168,700 | 2,318 + 256 B | ≈0.4 KB |
+| 4-bit table (Shoup) | **≈72,100** (AES ≈24,000, GHASH ≈48,000) | 2,723 + 288 B | ≈0.6 KB (256 B table) |
 
-Overall: a minimal "Connected with live port stats" version looks practical:
-AES-GCM, stored-zlib, a TX JSON generator, `noop` and `setparam` handling for
-`mgmt_cfg` only, and L3 adoption. Applying `system_cfg` (VLANs, PVIDs,
-enable/disable, speed) is the larger second step. It depends on a streaming
-parser and on capturing a real `system_cfg` for the chosen model.
+The UniFi IV is 16 bytes, not 12, so J0 costs two more GHASH blocks per
+message. That is negligible.
+
+Wall time depends on the 8051's real instruction rate, which is **not
+measured**. The DW8051 core takes 4 clocks per machine cycle. The timer
+divider comment (`rtl837x_regs.h:66`) suggests a 125 MHz clock, which would
+give at most 31 M cycles/s. Code is fetched from SPI flash through a small
+cache, so the real rate can be lower. The table assumes 31 M and 10 M
+cycles/s and uses the 4-bit variant:
+
+| Message | Size | Cycles | At 31 M/s | At 10 M/s |
+| --- | --- | --- | --- | --- |
+| Full inform (lab payload, 8–10 ports) | ≈6 KB | ≈27 M | 0.9 s | 2.7 s |
+| Trimmed inform (target, see below) | ≈2.5 KB | ≈11.5 M | 0.4 s | 1.2 s |
+| `system_cfg`, `USWED36` default site | 5.8 KB | ≈26 M | 0.8 s | 2.6 s |
+| Largest `system_cfg` seen | 7.6 KB | ≈34 M | 1.1 s | 3.4 s |
+| `noop` | 163 B | ≈0.8 M | < 0.1 s | < 0.1 s |
+
+The controller sets the inform interval through `noop` (10–32 s in the lab).
+At 10 s, a full inform in C costs 9–27 % of the CPU and a trimmed one 4–12 %.
+`system_cfg` only arrives when something changes. An assembly AES and GHASH,
+written the way `crypto/chacha_8051.asm` is, should be several times faster
+(**estimate**). Whatever the speed, the crypto must not run inside one uIP
+callback, because a 1.4 KB segment is about 6.6 M cycles. It has to run from
+the main loop, at most 2 blocks (≈144 K cycles, 5–14 ms) per pass. LACP's
+timers run 50 times per second.
+
+**Next measurement:** add a CLI command that times 100 AES blocks against the
+5 ms system tick on each switch. This replaces the 31 M / 10 M assumption with
+the real figure.
+
+### Compact protocol design
+
+This design fits both switches:
+
+1. **AES-128-GCM only, forward cipher only.** The device sends GCM from its
+   first inform. It sends no CBC, so it needs no inverse cipher, and it uses
+   no zlib or snappy in either direction. All three are lab-confirmed.
+2. **One message buffer, used half-duplex (10 KB XDATA).**
+   - Outbound: the inform JSON is built into the buffer from one counter
+     snapshot and encrypted in place, 2 blocks per main-loop pass. The
+     40-byte header is the GCM AAD. Then it is sent, and retransmits resend
+     from the buffer. Nothing is regenerated, so the JSON generator does not
+     need to be deterministic.
+   - Inbound: the response lands in the same buffer once the request is
+     acknowledged. It is decrypted and hashed in place, 2 blocks per pass,
+     and nothing is used until the tag verifies.
+   - A response larger than the buffer is dropped and logged. The largest
+     seen was 7.6 KB.
+3. **Apply `system_cfg` through the existing CLI.**
+   - Translate the keys into the commands `config.txt` already uses
+     (`vlan`, `pvid`, port enable, speed and so on).
+   - Run them through `cmd_parser`. Do this only after the tag verifies and
+     the whole response has parsed.
+   - This avoids a second implementation of every setting. The existing
+     config save makes the result persistent.
+4. **Trim the inform.** Send only what the controller needs. Earlier in this
+   document, `port_table` with
+   `port_idx`/`up`/`enable`/`speed`/`rx_bytes`/`tx_bytes` was enough, and
+   unifi-simulator was Connected with 6 fields per port. The target is about
+   2.5 KB, against 5–6 KB for the full lab payload (**estimate**). This
+   halves the recurring crypto cost.
+5. **Make nonces unique by construction.** The 16-byte IV is a 4-byte boot
+   counter kept in flash, a 4-byte message counter and 8 bytes from the
+   hardware RNG (`get_random_32()`, the RLDP random register). The RNG's
+   quality and its state after a reset are unknown. The `authkey` survives
+   reboots, and a repeated IV under one key breaks GCM.
+
+Budget, per switch:
+
+| Item | XDATA | Code (estimate) |
+| --- | --- | --- |
+| Message buffer | 10,240 B | — |
+| AES round keys, GHASH table, GCM state | ≈640 B | ≈3 KB in C (measured upper bound above) |
+| UniFi state (authkey, cfgversion, inform URL, counters, port snapshot) | ≈1,000 B | — |
+| HTTP client, TNBU framing, inform JSON, `system_cfg` to CLI translation | — | ≈8–13 KB |
+| Two more `uip_conn` slots, dispatcher | 60 B | ≈0.5 KB |
+| Metrics port TX buffer | ≈1,500 B | ≈0.5 KB |
+| **Total** | **≈13.4 KB of 28 KB free** | **≈12–17 KB: BANK5 on the RTL8373 build** |
+
+### Admin password protection
+
+What happens today:
+
+- The password is stored in plain text: the `passwd` line of the
+  configuration, at most 20 characters (`httpd/httpd.c:83`). So it is in
+  every configuration download and backup.
+- The login form posts it in clear (`pwd=`, `httpd/httpd.c:658`).
+- A password change sends it in clear (`postCmd("passwd " + a)`,
+  `html/app.js:5942`).
+- The default comes from the `PASSWORD` build macro.
+
+Constraints:
+
+- TLS is out of reach: the handshake needs public-key operations that take
+  minutes on this core.
+- Browsers only offer WebCrypto (`crypto.subtle`) in a secure context, meaning
+  HTTPS or localhost. The browser side therefore needs plain-JavaScript
+  crypto.
+- The session cookie also travels in clear, so someone sniffing the network
+  can still take over a session. What can be protected is the password itself,
+  and logins can be made impossible to replay.
+
+Proposal, using only AES so it shares the UniFi AES code:
+
+- **Stored form:** `passwd $a1$<iterations>$<salt>$<K>`, where
+  K = PBKDF2(password, 16-byte random salt, iterations) with AES-CMAC-PRF-128
+  (RFC 4615) as the PRF. The plain password is never stored.
+- **Login:** the login page gets the salt, the iteration count and a fresh
+  single-use 16-byte challenge. The browser derives K and sends
+  AES-CMAC(K, challenge). The device computes the same value and compares in
+  constant time. Neither the password nor K crosses the wire, a captured login
+  cannot be replayed, and offline guessing costs a full PBKDF2 per guess.
+- **Password change:** the browser sends the new salt, the new iteration
+  count, and the new K encrypted under the old K (AES-CTR with the
+  challenge as nonce) plus a CMAC tag. The device needs the forward cipher
+  only.
+- **Serial `passwd <password>` and the build default:** the device runs
+  PBKDF2 itself with a small iteration count. At ≈24,000 cycles per AES
+  block, 1,000 iterations are ≈24 M cycles, about 1–2.5 s once. Passwords set
+  from the web UI can use a much larger count, because the browser does the
+  work. A plain `passwd <password>` line in an existing configuration is
+  still accepted and converted on the next save.
+- **Cost:** about 0.3–0.6 KB of device code on top of AES (CMAC, PBKDF2 and the
+  parser), and about 2–3 KB of minified JavaScript (AES, CMAC, PBKDF2). All
+  of these are **estimates**.
+- **What it does not protect:**
+  - Anyone who reads K from the configuration can log in to this switch. They
+    cannot learn the password itself, which may be reused elsewhere.
+  - Session cookies can still be stolen by sniffing.
+  - Keeping management on its own VLAN remains the defence for the transport.
 
 ## Lab results (UniFi Network 10.6.109, emulated)
 
