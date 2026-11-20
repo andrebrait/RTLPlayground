@@ -608,7 +608,7 @@ Default is identity. Planned non-identity cases:
 | --- | --- | --- |
 | 8 x 2.5G + 1 x SFP+ | `USWED36` | 1–8 identity; UniFi 9 = our SFP+ port; UniFi 10 unmapped (other half of the combo slot) |
 | TL-SG108PE V5 | `USL8LP` | Identity if the USL8LP PoE ports are 1–4. Otherwise map its PoE `port_idx` values to our ports 1–4 |
-| 5 x 2.5G + 1 x SFP+ | `US6XG150` | 1–5 identity; UniFi 6 = our SFP+ port. UniFi shows port 5 as SFP+ |
+| 5 x 2.5G + 1 x SFP+ | `US6XG150` | 1–5 identity; UniFi 6 = our SFP+ port. UniFi shows port 5 as SFP+. Untested on real hardware |
 
 ### Candidate models from uidb 10.6.109 (USW, up to 12 ports)
 
@@ -636,6 +636,12 @@ Default is identity. Planned non-identity cases:
 | `USWED77` | USW-Pro-XG-10-PoE | 10 standard, plus [11,12] | — | 10000 | |
 
 Suggested mapping for the layouts in `doc/supported_devices.md`:
+
+Hardware test coverage: the maintainer can test `USWED36` (8 x 2.5G + 1 x SFP+)
+and `USL8LP` (TL-SG108PE V5) on real switches. The `US6XG150` targets (4 + 2
+and 5 + 1 boards) can only be validated against a lab controller with an
+emulator. They stay **untested on real hardware** until someone with such a
+board tests them.
 
 | RTLPlayground layout | Best model | Fit |
 | --- | --- | --- |
