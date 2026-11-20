@@ -17,8 +17,12 @@ Scope and method:
   classes were listed with `javap -v`. No decompilation was done. Statements
   that rest on string constants alone are marked *(string evidence)*. They show
   that a check or key exists, but not exactly how it is used.
-- Nothing here was tested against a real controller by this project. Claims
-  taken from other projects' lab results are attributed to them. Items marked
+- Most of this note was written without a running controller. A later lab
+  run against a stock UniFi Network 10.6.109 controller with *emulated*
+  switches is reported in
+  [Lab results](#lab-results-unifi-network-106109-emulated). Items it settled
+  are marked **confirmed in the lab** or **refuted in the lab**. Claims taken
+  from other projects' lab results are attributed to them. Items marked
   **unverified** have no primary source or only one weak source.
 
 ## Summary
@@ -62,12 +66,12 @@ Scope and method:
    the 8051 that is the cheaper choice compared with CBC, which needs both
    directions.
 5. **It looks feasible on the 8051, but the hard parts are TCP and memory, not
-   crypto.** The inform POST is several KB (estimated 4–8 KB uncompressed for
-   5–10 ports with small MAC tables). Device-to-controller compression can be
-   zlib "stored" blocks (only Adler-32, no deflate). Two independent sources
-   indicate controller responses are encrypted but *not* compressed, so no
-   inflate is needed. This is **unverified** against a stock controller. The
-   blockers are elsewhere. uIP is configured for one TCP connection, and the
+   crypto.** The inform POST is several KB (4.7–6.2 KB of JSON for 6–10
+   ports in the lab). The controller accepts an encrypted inform with no
+   compression at all, so no zlib code is needed on the device. Controller
+   responses are encrypted but never compressed, so no inflate is needed
+   either (both **confirmed in the lab**). A provisioning response is
+   2.2–7.6 KB on the wire. The blockers are elsewhere. uIP is configured for one TCP connection, and the
    httpd already uses it. uIP regenerates data on retransmit. The `system_cfg`
    response must be decrypted, tag-checked and parsed as a stream, or spooled to
    flash, before anything is applied.
@@ -204,6 +208,12 @@ amd989 `unifi_protocol.py:30-124`, unifi-stubd `docs/en/protocol-notes.md:74-90`
   ([openUF `PROTOCOL-VALIDATION.md`](https://github.com/yesrab/openUF/blob/3da571983b/PROTOCOL-VALIDATION.md)
   lines 529–565). CBC is therefore only needed, if at all, for the first
   inform with the default key. GCM-only should be tested first.
+  **Confirmed in the lab:** a device that sends AES-GCM from its very first
+  inform (default key, flags `0x09` or `0x0b`) is adopted and provisioned
+  normally. The controller answers each inform in the mode it was sent in (a
+  CBC adoption inform gets a `0x01` reply, a GCM one gets `0x09`), so a
+  GCM-only device never needs the AES inverse cipher. Staying on CBC after
+  `use_aes_gcm=true` was not tested.
 - Unencrypted informs are rejected by 10.6.109 (`Plain text inform is not
   supported`, `Unencrypted payload is not allowed`, *string evidence*). This
   matches the older fxkr and jrjparks notes.
@@ -216,10 +226,14 @@ amd989 `unifi_protocol.py:30-124`, unifi-stubd `docs/en/protocol-notes.md:74-90`
   failed: uncompressed size exceeds limit for default authkey`
   *(string evidence)*, so payloads sent under the default key have a size cap of
   unknown value.
-- Whether an *uncompressed* encrypted inform (flags `0x01` or `0x09` only) is
-  accepted is **unverified**. TNBU's decoder handles it
-  (`InformPacket.cs:94-96`), but the stock controller has not been checked.
-  A safe option is a zlib stream made of deflate *stored* blocks (RFC 1950/1951:
+- An *uncompressed* encrypted inform (flags `0x01` or `0x09` only) is
+  accepted by 10.6.109, before and after adoption (**confirmed in the lab**,
+  CBC and GCM). A zlib-compressed pre-adoption inform that inflates to
+  5.5 KB was also accepted under the default key, so the "limit for default
+  authkey" is above that. Uncompressed pre-adoption informs were only tested
+  at about 0.4 KB. The fallback, should a
+  later build refuse uncompressed informs, is a zlib stream made of deflate
+  *stored* blocks (RFC 1950/1951:
   `78 01`, then `[BFINAL|BTYPE=00] LEN NLEN data`, then Adler-32). It is valid
   zlib that any `java.util.zip.Inflater` accepts, and it needs no compressor.
 - Controller to device: TNBU's alternative controller sends `IsZLIB=false,
@@ -227,8 +241,9 @@ amd989 `unifi_protocol.py:30-124`, unifi-stubd `docs/en/protocol-notes.md:74-90`
   USW-Pro-48-PoE accept that. unifi-stubd's client goes further and *rejects*
   compressed responses while working against 10.5.67
   (`protocol-notes.md:121-130`). That suggests stock controller responses are
-  uncompressed. amd989 and the TNBU simulator still decode zlib and snappy
-  responses, so this is **likely but unverified**.
+  uncompressed. **Confirmed in the lab:** all 474 controller responses
+  captured from 10.6.109 had flags `0x01` (CBC) or `0x09` (GCM), never zlib
+  or snappy, including every `system_cfg`.
 
 ### Adoption flow (layer 3, no SSH)
 
@@ -246,12 +261,23 @@ amd989 `unifi_protocol.py:30-124`, unifi-stubd `docs/en/protocol-notes.md:74-90`
    `report_crash`, and `selfrun_guest_mode` (TNBU `ManagementConfig.cs:10-40`,
    `InformResponse.cs:4-13`; amd989 `unifi_gateway.py:363-389`). The reply is
    still encrypted with the *default* key. Later traffic uses the new key.
+   In the lab (10.6.109) the adoption `mgmt_cfg` had exactly `capability`,
+   `selfrun_guest_mode=pass`, `cfgversion`, `led_enabled=true`, `stun_url`,
+   `mgmt_url`, `authkey`, `use_aes_gcm=true` and `report_crash=true`. It had
+   **no `inform_url`**, so the device keeps the URL it already uses. The
+   emulator sent `state` 1 while pending and 4 once adopted, and the
+   controller accepted both.
 3. The device informs with the new key and echoes the `cfgversion`. The
    controller sends `setparam` with `system_cfg` (the full device config) and
    `mgmt_cfg`. The device applies it and reports the new `cfgversion`. After
    that the controller sends `noop` with an `interval`. Whenever the device's
    `cfgversion` differs from the controller's, the controller resends
    `setparam` (TNBU controller logic, `DeviceManagerService.cs:216-246`).
+   **Confirmed in the lab**, including the loop: a device that never echoes
+   the `cfgversion` gets the full `setparam` again on every inform, never a
+   `noop`, and `stat/device` shows it in state 5 (provisioning) with
+   `known_cfgversion` `"0"`. The `mgmt_cfg` in this second `setparam` no
+   longer carries `authkey`.
    10.6.109 strings confirm the same states (`Device adoption - initial
    mgmt_cfg sent for device[{}]`, `Device[{}] adoption - completed`,
    `wait_for_initial_inform`, *string evidence*).
@@ -320,7 +346,9 @@ keep informing. After a `cmd`, inform again immediately (openUF
 `PROTOCOL-VALIDATION.md` lines 606–638). unifi-emu also describes a
 `setstate` reply carrying `port_table` / `port_overrides`, which openUF's
 reading of `InformServlet` (10.4.57) does not list. Which is right for a USW
-on 10.6 is **unverified**. For `upgrade`, unifi-openwrt and openUF report the
+on 10.6 is **unverified**. In the lab, 10.6.109 sent only `setparam` and
+`noop` to emulated switches (479 responses), including after every port
+override change, so port overrides arrive in `system_cfg`. For `upgrade`, unifi-openwrt and openUF report the
 offered version afterwards so that the controller stops offering it nightly.
 That differs from the "keep reporting the same version" approach below. Test
 both.
@@ -372,7 +400,8 @@ Switch tables (TNBU `BaseInformBody.cs:51-59,234-242,265-334,398-402`):
     `2097152`. The real USW-Pro-24 sends `1048623` on copper and `1048928` on
     SFP+ (pixiedust capture). For an RTLPlayground 2.5G copper port this
     gives `1048682` (autoneg, 10F, 100F, 1000F, 2.5G), and `288` (1G and 10G)
-    for SFP+. Both are **derived, not tested**.
+    for SFP+. Both were accepted by 10.6.109 in the lab (emulated), stored as
+    sent, and used to validate forced speeds.
   - `switch_caps.feature_caps`: L3 routing `1`, 802.1X `2`, port isolation
     `4`, storm control `8`, LLDP-MED `16`, egress rate limit `32`, STP `64`,
     DHCP snooping `128`, IGMP snooping `256`, port security `512`, LACP `8192`,
@@ -466,32 +495,42 @@ these per-port keys: `status`, `name`, `opmode`, `speed`, `duplex`,
 `switch.lag.%d.lacp`, `switch.igmp_snooping.*`, `switch.multicast.*`,
 `switch.lldp.*`, `switch.qos.*`, `switch.acl.*`, `switch.dhcp_guard.*`,
 `switch.radius.*`, `switch.routing_interface.*`, `switch.ptp.*`,
-`switch.mclag.*`, `switch.oob.*` and `switch.etherlight.*`. This answers which
-key carries IGMP snooping. Value vocabularies beyond those in the capture are
-**unverified**. This is the firmware for the same Realtek switch family
+`switch.mclag.*`, `switch.oob.*` and `switch.etherlight.*`. The firmware
+parses `switch.igmp_snooping.*`, but the 10.6.109 controller sent IGMP
+snooping as per-VLAN `switch.vlan.K.igmp_*` keys in the lab. Value
+vocabularies beyond those seen in the lab are **unverified**. This is the firmware for the same Realtek switch family
 (RTL930x), not for RTL837x.
 
 On VLAN membership, openUF diffed five controller states. It found that
 `switch.vlan.K` is a slot whose `.id` is the VID. The per-VLAN, per-port
 matrix (`switch.vlan.K.port.N.mode`) is authoritative, and an absent per-port
 key means "default" (openUF `PROTOCOL-VALIDATION.md` lines 932–1006).
+**Confirmed in the lab for a USW:** the slot's own `switch.vlan.K.mode` is
+the default for every port without an explicit line. With all ports on the
+"Allow all" default no per-port lines are sent at all. The first override on
+a port emits a line for that port in every VLAN slot.
 
 Mapping onto RTLPlayground:
 
 | UniFi intent (port profile, port override, network) | system_cfg key | RTLPlayground feature |
 | --- | --- | --- |
 | Native VLAN / untagged network | `switch.port.N.pvid`, `switch.vlan.K.port.N.mode=untagged` | `vlan.c` PVID and untagged membership |
-| Tagged networks ("Allow all" / custom) | `switch.vlan.K.port.N.mode=tagged` | `vlan.c` tagged membership |
+| Tagged networks ("Allow all" / custom) | `switch.vlan.K.port.N.mode=tagged` (`exclude` for blocked VLANs) | `vlan.c` tagged membership |
 | Port disable | `switch.port.N.status=disabled` | port enable or disable |
-| Speed / duplex / autoneg | `switch.port.N.speed`, `autoneg`, `duplex` (exact values **unverified**) | `rtl837x_port.c` / PHY |
-| Link aggregation | `opmode=aggregate`, `lag` | LACP / `link_aggregation.md` |
-| STP | `switch.stp.*`, `switch.port.N.stp.*` | `rtl837x_stp.c` |
-| Storm control | `switch.port.N.stormctrl*` | `rtl837x_storm.c` |
-| Port mirroring | `mirror_port` | mirroring |
-| Port isolation | `isolation` | not checked here |
-| PoE mode | `switch.port.N.poe=auto/shutdown` | `poe.h` on PoE boards |
-| Management VLAN, MTU, jumbo frames | `switch.managementvlan`, `switch.mtu`, `switch.jumboframes` | existing settings |
-| IGMP snooping, DHCP snooping/guard | `switch.dhcp_snoop.status`, `switch.dhcp_guard.*` (IGMP key not seen) | `rtl837x_igmp.c`, `rtl837x_dhcp_snoop.c` |
+| Speed / duplex / autoneg | `switch.port.N.autoneg=disabled`, `duplex=enabled` (full) or `disabled` (half), `speed=<Mb/s>`, `ld_mode=disabled` (lab) | `rtl837x_port.c` / PHY |
+| Link aggregation | `opmode=aggregate`, `lag=<n>` on each member, no global `switch.lag.*` key (lab) | LACP / `link_aggregation.md` |
+| STP | `switch.stp.{status,version,priority}`, `switch.port.N.stp.{port_mode,edge,bpdu_guard}` | `rtl837x_stp.c` |
+| Storm control | `switch.port.N.stormctrl.{status,type,bcast,mcast,ucast}` | `rtl837x_storm.c` |
+| Port mirroring | `opmode=mirror`, `mirror_port=<source>` on the destination port (lab) | mirroring |
+| Port isolation | `switch.port.N.isolation=enabled` | not checked here |
+| Egress rate limit | `switch.port.N.egress_rate_limit_kbps=<n>` | `rtl837x_bandwidth.c` |
+| PoE mode | `switch.port.N.poe=auto/shutdown/passive24v` | `poe.h` on PoE boards |
+| Management VLAN, MTU, jumbo frames | `switch.managementvlan`, `switch.mtu` (always 9216), `switch.jumboframes` | existing settings |
+| IGMP snooping, DHCP snooping/guard | `switch.vlan.K.igmp_*`, `switch.multicast.*`, `switch.dhcp_snoop.status` (lab) | `rtl837x_igmp.c`, `rtl837x_dhcp_snoop.c` |
+
+All key spellings above were observed in the lab. The full list, with the
+API change that produced each one, is in
+[Lab results](#lab-results-unifi-network-106109-emulated).
 
 Unsupported settings: the protocol has no per-setting rejection. The device
 acknowledges a whole `system_cfg` by echoing its `cfgversion`. Not echoing it
@@ -504,11 +543,17 @@ The device then reports what the hardware actually does: the real `speed` in
 `port_table`, `speed_caps` limited to real modes, and `poe_caps=0`. Skipped
 or clamped keys go to a local "unhandled" log, as unifi-openwrt does
 (`docs/internals.md:129-135`). Whether the controller flags a mismatch
-between a configured and a reported speed is **unverified**.
+between a configured and a reported speed is **unverified**. Clamping is
+rarely needed, though: the controller API refuses a forced speed or duplex
+that the port's reported `speed_caps` does not include
+(`api.err.InvalidInterfaceSpeedDuplex`, **confirmed in the lab**). With
+honest `speed_caps` no 5G/10G setting can reach a 2.5G copper port.
 
 Things not established:
 
-- A real `system_cfg` captured from a stock controller for one of the
+- *(Settled in the lab for emulated devices, see
+  [Lab results](#lab-results-unifi-network-106109-emulated).)*
+  A real `system_cfg` captured from a stock controller for one of the
   candidate models. The pixiedust capture has one for a `US24PRO2` (Broadcom),
   and TNBU's output is a re-creation. The exact value spellings (`speed=2500`?
   `autoneg=true`?) and the size of a real file are unknown. TNBU's simulator
@@ -557,8 +602,9 @@ Things not established:
 - When `port_table` has fewer ports than the model: on an AP, openUF saw that
   the `switch.port.N` inventory in `system_cfg` follows the model's port count,
   while the Ports view and per-port settings follow the reported `port_table`
-  (`PROTOCOL-VALIDATION.md` lines 932–1006). For a USW this is
-  **unverified**.
+  (`PROTOCOL-VALIDATION.md` lines 932–1006). **Confirmed in the lab for a
+  USW** (emulated `USWED36` reporting 9 of 10 ports): `stat/device` stores the
+  9 reported ports, `system_cfg` still carries `switch.port.10.*`.
 
 ### Reporting a port layout that differs from the model
 
@@ -590,7 +636,9 @@ What the controller does with a reported layout that differs from the model:
 - Things that come from uidb, not from the device, presumably still follow
   the model: the front-panel diagram, product image, port-category labels
   (`standard`/`plus`/`sfp`) and the `switch.port.N` inventory.
-  **Unverified** for a USW.
+  The inventory and the port names (`SFP+ 1/2` on `US6XG150`) are
+  **confirmed in the lab** to follow the model. The UI drawing was not
+  checked.
 
 So a borrowed model code plus a port_table describing the real hardware is a
 workable route when no model matches exactly. The cost is a wrong front-panel
@@ -658,7 +706,7 @@ board tests them.
 
 | RTLPlayground layout | Best model | Fit |
 | --- | --- | --- |
-| 4 x 2.5G + 2 x SFP+ (most common) | `US6XG150` | Exact topology (4 RJ45, then 2 SFP+). The model is PoE and its RJ45 ports are 10G. Per port, report `poe_caps=0` and `port_poe=false` (no PoE), and `speed_caps=1048682` on copper (autoneg, 10F, 100F, 1000F, 2.5G) and `288` on SFP+ (1G, 10G). That the UI then hides PoE controls and offers no speeds above 2.5G on copper is **unverified**, because uidb still says `features.poe: true`. uidb's `ethernetMaxSpeed` of 1000 is odd for an XG product, so **check whether the UI shows 2.5G/10G**. |
+| 4 x 2.5G + 2 x SFP+ (most common) | `US6XG150` | Exact topology (4 RJ45, then 2 SFP+). The model is PoE and its RJ45 ports are 10G. Per port, report `poe_caps=0` and `port_poe=false` (no PoE), and `speed_caps=1048682` on copper (autoneg, 10F, 100F, 1000F, 2.5G) and `288` on SFP+ (1G, 10G). In the lab (emulated) the controller then sent no PoE keys and refused 5G/10G on copper through the API (`InvalidInterfaceSpeedDuplex`), while 10G stayed allowed on SFP+. What the web UI shows was not checked. |
 | 4 x 2.5G + 2 x 10G RJ45 (ZX310S-4T2XT) | `US6XG150` | Ports 5 and 6 are drawn as SFP+. |
 | 5 x 2.5G + 1 x SFP+ | no exact match | `US6XG150` (port 5 drawn as SFP+) or `USWED36` with ports 6–8 permanently down. |
 | 5 x 2.5G (no SFP) | `USWED35` | Exact, and the same switch silicon. |
@@ -674,7 +722,9 @@ some risks:
   numbers (`minimumFirmwareRequired` 1.1.0 / 1.2.1). The 4.x/6.x/7.x versions
   belong to the Linux USW firmware.
 - Their inform and `system_cfg` may differ from the Linux USWs. Nobody has
-  published a capture.
+  published a capture of the real firmware. On the controller side, the lab
+  showed the same `system_cfg` format for `USWED36` as for `USL8LP` and
+  `US6XG150` (emulated devices).
 
 Firmware version and update handling:
 
@@ -706,13 +756,13 @@ flash write access are already present.
 | GHASH | GF(2^128) multiply. Bitwise, or 4-bit Shoup tables (256 B XDATA per key) | Thousands of 8051 instructions per 16-byte block. A few KB of payload means a few hundred blocks. **Estimate.** | Medium (CPU time). Fine at a 10–30 s interval. |
 | AES-CBC instead | Needs the inverse cipher for responses (another 256 B table and InvMixColumns) | More code than GCM | The controller pushes `use_aes_gcm=true`. Whether a device may stay on CBC is **unverified**. |
 | IV / nonce | 16 random bytes per packet | — | **Security-critical for GCM.** A repeated nonce under one key breaks it. Needs an entropy source or a persisted counter. |
-| Compression (TX) | zlib stored blocks: 2-byte header, 5 bytes per ≤65535-byte block, Adler-32 | Trivial | Low. Possibly not needed at all if uncompressed is accepted (**unverified**). |
-| Decompression (RX) | Probably none, since responses look uncompressed (TNBU, unifi-stubd) | 0 | If wrong: inflate needs about 2–4 KB of code and an output window that may not fit, so the response would have to be spooled to flash. |
+| Compression (TX) | None: uncompressed informs are accepted (**confirmed in the lab**). zlib stored blocks remain a trivial fallback | 0 | Low. |
+| Decompression (RX) | None: 10.6.109 never compressed a response (**confirmed in the lab**) | 0 | Low. A later controller build could change this. |
 | JSON (TX) | Printf-style generator, run twice (a counting pass for Content-Length and TNBU length, then an emit pass) from a counter snapshot taken once per inform | Small | uIP regenerates data on retransmit, so output must be deterministic. GCM-CTR can seek to any block. The tag is computed once and kept (16 B). 64-bit counters need `long long` or manual decimal formatting. |
 | JSON (RX) | Streaming tokenizer. Decrypt each segment with CTR, unescape the `system_cfg` string, and feed a line parser for `key=value` | Small to medium | The GCM tag is only known at the end. **Do not apply anything before the tag verifies.** Either stage parsed settings in XDATA and commit after the tag, or spool the ciphertext to a flash scratch area and parse in a second pass. |
 | HTTP client | Hand-written `POST /inform HTTP/1.1`, `Content-Length`, read the status line and the body | Small | uIP needs `UIP_CONNS` ≥ 2, or an inform client that shares the slot with httpd. |
 | Payload size | Synthetic estimate: about 4.4 KB JSON for 5 ports and 8.1 KB for 10 ports, each port with ~30 fields and 3 MAC entries, plus one LLDP entry | 3–6 TCP segments | Drop optional fields first. unifi-simulator was Connected with only 6 fields per port. |
-| Response size | `setparam` with `system_cfg`: **unknown**. Estimated as a few KB to tens of KB. | — | Streaming is mandatory. Do not buffer it whole. |
+| Response size | `setparam` with `system_cfg`: 4.1–7.0 KB of `system_cfg` and 4.7–7.6 KB on the wire for 6–10 ports in the lab, growing with VLANs and overrides | — | Streaming is mandatory. Do not buffer it whole. |
 | Memory | Snapshot counters (~10 ports × 8 × 8 B), staged config, AES/GHASH state, inform state (key 16 B, cfgversion ≤ 32 B, URL) | About 1–2 KB XDATA | Current free XDATA was **not measured**, because the build has no `.mem` map for the main image. |
 
 Overall: a minimal "Connected with live port stats" version looks practical:
@@ -721,34 +771,390 @@ AES-GCM, stored-zlib, a TX JSON generator, `noop` and `setparam` handling for
 enable/disable, speed) is the larger second step. It depends on a streaming
 parser and on capturing a real `system_cfg` for the chosen model.
 
+## Lab results (UniFi Network 10.6.109, emulated)
+
+Lab date: 2026-11-20. **All results in this section are against emulated
+devices, not real switches.** They show what a stock controller sends and
+accepts. They do not show what real Ubiquiti firmware for these models
+sends, or what the real `USWED36` MCU firmware does with this config.
+
+### Setup
+
+- Controller: `ghcr.io/jamesbraid/unifi-network:seeded` (image version
+  `10.6.109-1`, UniFi Network 10.6.109, classic API on 8443, inform on 8080).
+  Its seeded login is `admin` / `unifi-containers-seeded`, not `admin` /
+  `admin` as unifi-emu's test suite assumes. The controller ran on an
+  internal Docker bridge with no outbound access.
+- Devices: [unifi-emu](https://github.com/jamesbraid/unifi-emu) at `a538889`,
+  built locally with small lab-only patches: a per-device JSON overlay merged
+  into every inform (used to send a realistic `port_table` and
+  `switch_caps`), switches for "no compression", "AES-GCM from the first
+  inform" and "never echo `cfgversion`", and a dump of every request and
+  response. The emulator adopted itself through the classic API
+  (`SIM_ADOPT`).
+- Models: `USWED36`, `USL8LP` and `US6XG150`, one device each, plus extra
+  single-device probes. All three reached Connected (`stat/device` state 1).
+- Capture: tcpdump in the controller's network namespace on TCP 8080 from the
+  first inform on. A small decoder (stdlib Go: pcap, TCP reassembly, HTTP,
+  CBC/GCM, zlib) decrypted all 495 captured exchanges with the default key
+  plus the per-device `x_authkey` values, which `stat/device` returns to an
+  admin. The decoded payloads matched the emulator's own dumps.
+
+Inform payload used for the main runs (sent from the first inform on in the
+fresh-adoption runs):
+
+- `port_table[]` entries with `port_idx, name, ifname, media` (`GE` or
+  `SFP+`), `up, enable, speed, full_duplex, autoneg, speed_caps, port_caps,
+  is_uplink, flowctrl_rx/tx, jumbo, stp_state, stp_pathcost, lag_member`,
+  rx/tx byte, packet, error, drop, broadcast and multicast counters,
+  `mac_table: []`, `poe_caps`, plus `port_poe, poe_enable, poe_mode,
+  poe_good, poe_power, poe_voltage, poe_current, poe_class` on PoE ports and
+  `sfp_found` on SFP+ ports.
+- `switch_caps`: `feature_caps` 1582078 (802.1X, isolation, storm control,
+  LLDP-MED, egress rate limit, STP, DHCP snooping, IGMP snooping, port
+  security, LACP, jumbo, keepalive), `max_aggregate_sessions` 4,
+  `max_mirror_sessions` 1, `stp_caps` 11, `vlan_caps` 7,
+  `storm_control_caps` 0.
+- Top level as unifi-emu sends it (`mac, serial, model, model_display,
+  version, ip, hostname, inform_url, uptime, time, cfgversion, default,
+  state, fw_caps, isolated, locating, selfrun_beacon`, plus `bootrom_version,
+  sys_stats, ethernet_table` after adoption) and `stp_priority`,
+  `has_temperature`, `has_fan`, `overheating`. No `udapi_version` was sent.
+  The controller still stored `switch_caps` for the 7.x-versioned `USL8LP`
+  and `US6XG150` profiles.
+
+### Wire format
+
+- **Encryption.** Pending informs get HTTP 404 with `Content-Length: 0`. The
+  adoption reply to a CBC inform is CBC (flags `0x01`), and to a GCM inform it
+  is GCM (`0x09`), both under the default key. After `use_aes_gcm=true` every
+  reply was GCM. Across the whole capture, response flags were `0x01` (7
+  times) or `0x09` (467 times).
+- **Compression.** No response was ever compressed. Informs were accepted
+  with flags `0x01`, `0x03`, `0x09` and `0x0b`, so the device may send
+  uncompressed CBC or GCM from the first inform on.
+- **GCM from the first inform** with the default key works. Adoption and
+  provisioning were identical to the CBC-first case.
+- **HTTP.** Responses carry `Content-Type: application/x-binary` and a
+  `Content-Length`, never chunked encoding. The controller keeps connections
+  alive.
+- **Sizes.** An encrypted GCM response is the JSON plaintext plus 56 bytes
+  (40-byte header, 16-byte tag). The JSON wrapper adds about 540 bytes to the
+  `system_cfg` (escaping, `mgmt_cfg`, `cfgversion`, `server_time_in_utc`).
+
+| Case | `system_cfg` | Encrypted response |
+| --- | --- | --- |
+| Emulator default inform (no `switch_caps`, no `speed_caps`), any of the three models | 2178–2286 B | 2704–2816 B |
+| Realistic inform with `switch_caps`, default site, `USWED36` / `USL8LP` / `US6XG150` | 5226 / 4780 / 4106 B | 5822 / 5383 / 4689 B |
+| Same, after adding two VLAN networks | 5376 / 4930 / 4256 B | — |
+| Largest seen (many overrides, IGMP snooping on two VLANs), `USWED36` | 6953 B | 7602 B |
+| Adoption reply (`mgmt_cfg` only) | — | 408 B (CBC), 418 B (GCM) |
+| `noop` | — | 163 B |
+
+Device-to-controller informs with the realistic payload were 4.7 KB (6
+ports) to 6.2 KB (10 ports) of JSON before compression.
+
+### mgmt_cfg
+
+Adoption reply, then the first provisioning reply. The second one has no
+`authkey` and no `inform_url`:
+
+```text
+capability=notif,fastapply-bg,notif-assoc-stat
+selfrun_guest_mode=pass
+cfgversion=cfe5c9df7757b6f5
+led_enabled=true
+stun_url=stun://10.213.77.10:3478/
+mgmt_url=https://10.213.77.10:8443/manage/site/default
+authkey=<32 hex digits>              # adoption reply only
+use_aes_gcm=true
+report_crash=true
+```
+
+The response JSON is `{"_type":"setparam","mgmt_cfg":…,"server_time_in_utc":"…"}`
+for adoption and `{"_type":"setparam","cfgversion":…,"system_cfg":…,"mgmt_cfg":…,"server_time_in_utc":…}`
+for provisioning. `noop` looks like
+`{"_type":"noop","interval":18,"live_update":false,"include_blocks":[],"server_time_in_utc":"…"}`.
+The `interval` varied from 10 to 32 s as more devices were added.
+
+### system_cfg
+
+The three models got the same format. The `MCU_BASED` `USWED36` was not
+treated differently from the Linux-based `USL8LP` and `US6XG150`. Example:
+`USWED36`, realistic inform, default site with two extra VLAN networks
+(IDs, keys and hashes shortened, ports 3–8 and 10 elided because they repeat
+port 2):
+
+```text
+# unifi
+unifi.version=10.6.109
+unifi.anonymous_controller_id=<uuid>
+unifi.anonymous_site_id=<uuid>
+unifi.reporterid=<uuid>
+unifi.siteid=<site id>
+unifi.idp=enabled
+unifi.mcip=239.254.127.63
+unifi.key=<32 hex>
+unifi.feature.always_send_crash_logs=enabled
+# system
+system.timezone=UTC0
+locale.timezone=UTC0
+# users
+users.status=enabled
+users.1.name=admin
+users.1.password=<crypt hash of the site SSH password>
+users.1.status=enabled
+users.2.name=nobody
+users.2.password=x
+users.2.shell=/bin/false
+users.2.status=enabled
+# vlan
+vlan.status=disabled
+# bridge
+bridge.status=disabled
+# netconf
+netconf.status=enabled
+netconf.1.status=enabled
+netconf.1.devname=eth0
+netconf.1.ip=0.0.0.0
+netconf.1.autoip.status=disabled
+netconf.1.promisc=enabled
+netconf.1.up=enabled
+# dhcpc
+dhcpc.status=enabled
+dhcpc.1.status=enabled
+dhcpc.1.devname=eth0
+# route
+route.status=enabled
+# resolv
+resolv.status=enabled
+resolv.nameserver.1.status=disabled
+resolv.nameserver.2.status=disabled
+# switch
+switch.power_source.status=disabled
+switch.managementvlan=1
+switch.wevent.idp=enabled
+switch.wevent.mcip=239.254.127.63
+switch.wevent.key=<32 hex, same as unifi.key>
+switch.jumboframes=disabled
+switch.mtu=9216
+switch.stp.version=rstp
+switch.stp.priority=32768
+switch.stp.status=enabled
+switch.dot1x.status=disabled
+switch.vlan.1.id=1
+switch.vlan.1.mode=untagged
+switch.vlan.1.status=enabled
+switch.vlan.2.id=10
+switch.vlan.2.mode=tagged
+switch.vlan.2.status=enabled
+switch.vlan.3.id=20
+switch.vlan.3.mode=tagged
+switch.vlan.3.status=enabled
+switch.dhcp_snoop.status=enabled
+switch.routing_enabled=false
+switch.port.1.name=Port 1
+switch.port.1.lldpmed.opmode=enabled
+switch.port.1.lldpmed.topology_notify=disabled
+switch.port.1.stp.port_mode=enabled
+switch.port.1.stp.edge=auto
+switch.port.1.stp.bpdu_guard=disabled
+switch.port.1.keepalive=disabled
+switch.port.1.eee=disabled
+switch.port.1.opmode=switch
+switch.port.1.port-security=disabled
+switch.port.2.name=Port 2
+…                                   (same ten lines for ports 2–10)
+# ntpclient
+ntpclient.status=enabled
+ntpclient.1.status=enabled
+ntpclient.1.server=0.ubnt.pool.ntp.org
+…                                   (servers 2–4: 1–3.ubnt.pool.ntp.org)
+# misc
+```
+
+Per-model differences in the default config:
+
+- `USL8LP`: `switch.port.N.poe=auto` (between `opmode` and `port-security`)
+  on ports 1–4 only, which are the ports that reported `poe_caps` 7. Ports
+  5–8 reported `poe_caps` 0 and got no `poe` line.
+- `US6XG150`: ports 5 and 6 are named `SFP+ 1` and `SFP+ 2` by the
+  controller (from the model, not from the inform). `poe=auto` on ports 1–4
+  when they report `poe_caps` 7.
+- `USWED36`: ports 1–10 as above, no `poe` lines.
+
+Without `switch_caps` in the inform (the emulator's default) the switch
+section shrinks to `power_source`, `managementvlan`, `wevent.*`,
+`jumboframes`, `mtu`, the VLAN slots, `routing_enabled`, and only `name` and
+`opmode` per port. The `stp.*`, `dot1x`, `dhcp_snoop`, `lldpmed`, `keepalive`,
+`eee` and `port-security` keys appear only once the matching capability is
+claimed. So the capability bits directly control which keys the device must
+parse. When `speed_caps` is missing the controller stores 1048623 (gigabit
+copper) for the port.
+
+The `users`, `unifi.*`, `ntpclient`, `netconf`, `dhcpc`, `route` and
+`resolv` sections are not switch configuration and can be ignored by
+RTLPlayground. `users.1.password` is a crypt hash of the site's device SSH
+password.
+
+### Settings changed through the API, and the resulting keys
+
+One change at a time, through `PUT /api/s/default/rest/device/<_id>`
+(`port_overrides` or device fields), `PUT /api/s/default/rest/setting/<key>/<_id>`
+(site settings) or a port profile. Each row is the diff of `system_cfg`
+against the previous state. `N` is the overridden port, `K` a VLAN slot.
+Results were identical on all three models unless a model is named.
+
+| Change (API field) | `system_cfg` diff |
+| --- | --- |
+| Native VLAN 10 (`native_networkconf_id`) | `+switch.port.N.pvid=10`; a line for port N in *every* slot: `switch.vlan.<VID 10 slot>.port.N.mode=untagged`, the others `=tagged` |
+| Block all tagged (`tagged_vlan_mgmt=block_all`) | other slots' `port.N.mode` become `exclude` |
+| Custom tagged, VLAN 20 excluded (`tagged_vlan_mgmt=custom`, `excluded_networkconf_ids`) | VLAN 1 back to `tagged`, VLAN 20 stays `exclude` |
+| Port disable (`forward=disabled`, `native_networkconf_id=""`) | `+switch.port.N.status=disabled` |
+| Forced speed (`autoneg=false, speed=1000, full_duplex=true`) | `+switch.port.N.autoneg=disabled`, `+duplex=enabled`, `+speed=1000`, `+ld_mode=disabled` |
+| Half duplex (`full_duplex=false, speed=100`) | `duplex=disabled`, `speed=100` |
+| Speed 2500 / 5000 / 10000 | `speed=2500` / `5000` / `10000`, only where `speed_caps` allows it (see below) |
+| Back to autoneg (`autoneg=true`) | the four lines above are removed |
+| PoE off / passive 24 V (`poe_mode=off` / `pasv24`) | `switch.port.N.poe=shutdown` / `passive24v` (default `auto`) |
+| LAG on ports A,B (`op_mode=aggregate`, `aggregate_members=[A,B]` on A) | `switch.port.{A,B}.opmode=aggregate`, `switch.port.{A,B}.lag=1`. No global LAG key. On `US6XG150` port B also inherited port A's forced-speed lines |
+| Mirror (`op_mode=mirror`, `mirror_port_idx=2` on port 4) | `switch.port.4.opmode=mirror`, `+switch.port.4.mirror_port=2` |
+| STP off on a port (`stp_port_mode=false`) | `stp.port_mode=disabled`, and `stp.edge` / `stp.bpdu_guard` lines removed |
+| Edge + BPDU guard (`stp_edge_state=enabled`, `stp_bpdu_guard_enabled=true`) | `stp.edge=enabled`, `stp.bpdu_guard=enabled` |
+| Bridge priority (device `stp_priority=4096`) | `switch.stp.priority=4096` |
+| STP version (site `global_switch.stp_version`) | `switch.stp.version=stp`; `disabled` also sets `switch.stp.status=disabled` |
+| Storm control, level mode, bcast 10 % | without `storm_control_caps` bit 1: `stormctrl.status=enabled`, `stormctrl.type=rate`, `stormctrl.bcast=100` (the level was not passed through). With `storm_control_caps=1` and bcast 10 / mcast 20 %: `stormctrl.type=level`, `stormctrl.bcast=10`, `stormctrl.mcast=20` |
+| Storm control, rate mode (mcast 1000, ucast 2000) | `stormctrl.mcast=1000`, `stormctrl.ucast=2000` |
+| Port isolation (`isolation=true`) | `+switch.port.N.isolation=enabled` |
+| Egress limit (`egress_rate_limit_kbps_enabled=true`, `egress_rate_limit_kbps=10000`) | `+switch.port.N.egress_rate_limit_kbps=10000` |
+| LLDP-MED off (`lldpmed_enabled=false`) | `lldpmed.opmode=disabled`, `topology_notify` line removed |
+| LLDP-MED notify (`lldpmed_notify_enabled=true`) | `lldpmed.topology_notify=enabled` |
+| EEE (`eee_enabled=true`) | `switch.port.N.eee=enabled` |
+| Per-port flow control (`flow_control_enabled=true`) | nothing |
+| Site flow control (`global_switch.flowctrl_enabled=true`) | `+switch.port.N.flowctrl=enabled` on every port |
+| Port security with one MAC | `port-security=enabled`, `+port-security.mac.1=00:11:22:33:44:55` |
+| Loop protection (`port_keepalive_enabled=true`) | `keepalive=enabled` |
+| Port name | `switch.port.N.name=<name>` |
+| Jumbo frames (site `global_switch.jumboframe_enabled`) | `switch.jumboframes=enabled`; `switch.mtu` stays 9216 |
+| DHCP snooping off (site `global_switch.dhcp_snoop=false`) | `switch.dhcp_snoop.status=disabled` |
+| Management VLAN (device `mgmt_network_id` = VLAN 10 network) | `switch.managementvlan=10` |
+| IGMP snooping on for VLAN 1 and 10 (site `igmp_snooping.enabled`, `network_ids`) | per slot K: `switch.vlan.K.igmp_snooping=true`, `igmp_fastleave=false`, `igmp_maxresponse=10`, `igmp_mcrtrexpiretime=180`, `igmp_groupmembership=260`, `igmp_supression=false`, `igmp_querier_status=true`, `igmp_querier=` (empty); plus `switch.multicast.forward_unk_mcast_router_ports=true` |
+
+Notes on the API:
+
+- Device-level `stp_version`, `jumboframe_enabled` and `flowctrl_enabled`
+  are refused (`api.err.SpanningTreeChangeNotAllowed`,
+  `api.err.JumboFrameChangeNotAllowed`, `api.err.FlowControlChangeNotAllowed`).
+  They are site settings (`global_switch`).
+- A port override with only `forward=disabled` was stored as
+  `forward=all`, and a port profile with `forward=disabled` was stored the
+  same way. The override was only kept as disabled when it also had
+  `native_networkconf_id=""` (and `setting_preference=manual`,
+  `tagged_vlan_mgmt=block_all`, which may not all be needed).
+- IGMP fast-leave and flood-unknown lists (`fastleave_for_network_ids`,
+  `flood_unknown_multicast_for_network_ids`) produced no change. Their keys
+  are still unknown.
+- A forced speed or duplex not covered by the port's reported `speed_caps`
+  is refused with `api.err.InvalidInterfaceSpeedDuplex` (field `port_idx`).
+  Observed: 100 half refused on ports with `speed_caps` 1048682 and 1049064;
+  2500/5000/10000 refused on `USL8LP` (1048623); 5000/10000 refused on
+  `USWED36` copper (1048682); on SFP+ ports with `speed_caps` 288, 10000
+  accepted and 100, 2500 and 5000 refused.
+
+### Port layout differing from the model
+
+Two fresh devices were adopted while reporting the RTLPlayground layout from
+their first inform: `USWED36` with 9 ports (8 × 2.5G copper with
+`speed_caps` 1048682, port 9 `SFP+` with `speed_caps` 288, no port 10) and
+`US6XG150` with 4 × 2.5G copper (`speed_caps` 1048682, `poe_caps` 0) plus 2
+`SFP+` (288).
+
+- **Stored port table.** `stat/device` `port_table` held exactly the reported
+  ports, with the reported `speed_caps`, `poe_caps` 0 and no `port_poe` /
+  `poe_mode`. The `USWED36` had 9 entries.
+- **system_cfg inventory follows the model.** The 9-port `USWED36` still got
+  the full `switch.port.10.*` block. A name set on port 10 through the API
+  was accepted and sent (`switch.port.10.name=ghost`). A forced speed on port
+  10 was refused (`InvalidInterfaceSpeedDuplex`), because there is no
+  `speed_caps` for it. The `US6XG150` ports 5 and 6 stay named `SFP+ 1/2`.
+- **PoE.** With `poe_caps` 0 on every port, the fresh `US6XG150` got no
+  `switch.port.N.poe` line at all, and `poe_mode=off` on such a port was
+  accepted by the API but changed nothing. On the *already adopted*
+  `US6XG150` whose ports changed from `poe_caps` 7 to 0, ports that had a
+  PoE-related override kept a line, rewritten to `poe=shutdown`, and
+  `stat/device` kept stale `port_poe` / `poe_mode` values. Report the real
+  `poe_caps` from the first inform.
+- **10G / 5G.** With `speed_caps` 1048682 on copper, 5000 and 10000 are
+  refused by the API, so no 10G or 5G speed key can reach a 2.5G port. With
+  the model-like `speed_caps` 1049064 the same port accepted 5000 and 10000.
+- On already adopted devices, the controller kept a port that disappeared
+  from the inform (port 10) in `stat/device` with stale `speed_caps` and
+  null `up` / `speed`. LAG members show `masked: true`.
+- What the web UI draws (front panel, PoE controls) was not checked. Only
+  the API and `system_cfg` were.
+
+### Not echoing cfgversion
+
+A device that applies nothing and keeps reporting `cfgversion` `"0"`: the
+controller sends the same full `setparam` (same `cfgversion`) on every
+inform, never a `noop`, at a 10 s interval. `stat/device` shows state 5
+(provisioning) and `known_cfgversion` `"0"`. The device is never shown as
+Connected.
+
+### Status of earlier unverified items
+
+- Responses uncompressed: **confirmed**. Uncompressed informs accepted:
+  **confirmed** (CBC and GCM). GCM from the first inform: **confirmed**.
+- Adoption reply in the request's mode: **confirmed**.
+- `mgmt_cfg` contains `inform_url`: **refuted** for 10.6.109.
+- `setstate` for switch port config: **not seen**; port overrides arrive in
+  `system_cfg`.
+- Speed, duplex and autoneg value formats: **settled** (`autoneg=disabled`,
+  `duplex=enabled|disabled`, `speed=<Mb/s>`, `ld_mode=disabled`).
+- IGMP snooping keys: **settled**, per VLAN slot (`switch.vlan.K.igmp_*`),
+  not `switch.igmp_snooping.*`.
+- Fewer ports than the model, for a USW: **confirmed** to behave as openUF
+  saw on an AP (stored table follows the inform, `system_cfg` inventory
+  follows the model).
+- `MCU_BASED` models get a reduced `system_cfg`: **refuted** at the
+  controller side. `USWED36` gets the same format as the Linux USWs.
+- Configured-versus-reported speed mismatch: avoided by the API, which
+  refuses speeds outside `speed_caps`.
+
 ## Open questions and gaps
 
-1. A real `system_cfg` (and `mgmt_cfg`) from a stock controller for
+1. *(Done for emulated `US6XG150`, `USWED36` and `USL8LP`, see
+   [Lab results](#lab-results-unifi-network-106109-emulated); `USWED35` not
+   run.)* A real `system_cfg` (and `mgmt_cfg`) from a stock controller for
    `US6XG150` / `USWED36` / `USWED35`, and its size. Quickest path: run
    unifi-emu against a lab controller with `SIM_MODELS=US6XG150` (and the
    other candidates) and decrypt the traffic with pixiedust. Then change each
    switch setting in the UI and diff `system_cfg` after each change, as openUF
    did for VLANs. That diff is the specification for the config parser.
-2. Whether stock controller *responses* are ever compressed. Two sources say
-   no; one stock capture would settle it.
-3. Whether an encrypted but uncompressed inform is accepted, and the "limit
-   for default authkey" on payload size before adoption.
+2. *(Settled: never, on 10.6.109.)* Whether stock controller *responses* are
+   ever compressed.
+3. *(Settled: accepted.)* Whether an encrypted but uncompressed inform is
+   accepted. Still open: the exact "limit for default authkey" (above 5.5 KB
+   inflated).
 4. Whether a device may stay on CBC after `use_aes_gcm=true`. Per openUF
    (10.4.57), it may not: provisioning waits for a GCM inform.
 5. `switch_caps`, `speed_caps` and `port_caps` are answered by unifi-emu's
    `capability_bits.json`. The effect of each bit in the 10.6 UI, and the
    meaning of `vlan_caps`, `fw_caps` and `hw_caps` for switches, are still
    open.
-6. Whether `MCU_BASED` models use a reduced inform or `system_cfg`.
+6. Whether `MCU_BASED` models use a reduced inform or `system_cfg`. The
+   controller sends them the full format (lab); what their real firmware
+   reports is still unknown.
 7. The `state` field values before and after adoption (0, 1, 2 and 4 are all in
-   use across projects).
-8. Value formats for speed, duplex and autoneg overrides. The IGMP snooping
-   key family is `switch.igmp_snooping.*` (Ubiquiti `ubntbox`); its values are
-   still unknown.
+   use across projects). 1 while pending and 4 once adopted work (lab).
+8. *(Settled in the lab, see the key table there.)* Value formats for speed,
+   duplex and autoneg overrides, and the IGMP snooping keys. Still open: the
+   keys for IGMP fast-leave and unknown-multicast flooding, and the 802.1X
+   and voice-VLAN keys, which were not exercised.
 9. How the controller UI and auto-update behave when an `upgrade` is ignored.
-10. How the controller treats a device whose `port_table` has fewer ports
-    than the model (for example 9 on `USWED36`). Reporting the extra ports as
-    `enable=false, up=false` is the safe default.
+10. *(Settled for the API and `system_cfg`, see the lab.)* How the
+    controller treats a device whose `port_table` has fewer ports than the
+    model. Omitting port 10 on `USWED36` works; the device must still accept
+    and ignore `switch.port.10.*`. The UI view was not checked.
 11. Help-centre pages for ports and adoption methods (help.ui.com) could not be
     fetched (HTTP 403).
 12. The controller analysis is limited to string constants of one build
