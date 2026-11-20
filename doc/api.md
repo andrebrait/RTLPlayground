@@ -22,9 +22,9 @@ The following endpoints are supported:
  * /vlan.json?vid=<VLANID>
  * /vlanlist.json
 
-A build with `PROMETHEUS=1` also serves [`/metrics`](prometheus.md), and a build
-with `SNMP=1` serves `/snmp_config`, the SNMP part of the configuration as text
-(see [SNMP](snmp.md)).
+A build with `SNMP=1` also serves `/snmp_config`, the SNMP part of the
+configuration as text (see [SNMP](snmp.md)). A build with `PROMETHEUS=1` serves
+[`/metrics`](prometheus.md) on its own port, 9100.
 
 On an RTL836x switch a counter the chip cannot read is `null`, in `/traffic.json`
 and in `/counters.json`, and `/counters.json` lists that family's own counters.

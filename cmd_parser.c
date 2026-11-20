@@ -2628,6 +2628,7 @@ static void ph_line(__code const char *name, __xdata uint8_t id)	/* id in xdata:
 
 void health_show(void) __banked
 {
+	static __xdata struct uip_conn * __xdata health_conn;
 	__xdata uint8_t i;
 	__xdata uint32_t up;
 
@@ -2661,35 +2662,32 @@ void health_show(void) __banked
 	print_byte(i);
 	write_char('\n');
 
-	/* The TCP connection slot. One on this configuration; a build with more
-	 * has to say which slot each line is, so make that a visible decision. */
-#if UIP_CONNS != 1
-#error "health: the tcp dump prints a single slot, extend it for UIP_CONNS > 1"
-#endif
-	i = 0;
-	{
+	/* The TCP connection slots: the httpd's, and with PROMETHEUS the
+	 * exporter's. lport tells them apart. Through an xdata pointer:
+	 * indexing uip_conns[i] costs internal RAM some builds do not have. */
+	for (health_conn = uip_conns; health_conn != uip_conns + UIP_CONNS; health_conn++) {
 		print_string("tcp ");
 		print_string("st ");
-		print_byte(uip_conns[i].tcpstateflags);
+		print_byte(health_conn->tcpstateflags);
 		print_string(" tmr ");
-		print_byte(uip_conns[i].timer);
+		print_byte(health_conn->timer);
 		print_string(" rtx ");
-		print_byte(uip_conns[i].nrtx);
+		print_byte(health_conn->nrtx);
 		print_string(" rto ");
-		print_byte(uip_conns[i].rto);
+		print_byte(health_conn->rto);
 		print_string(" len ");
-		print_short(uip_conns[i].len);
+		print_short(health_conn->len);
 		print_string(" mss ");
-		print_short(uip_conns[i].mss);
+		print_short(health_conn->mss);
 		write_char('\n');
 		print_string("  lport ");
-		print_short(HTONS(uip_conns[i].lport));
+		print_short(HTONS(health_conn->lport));
 		print_string(" rport ");
-		print_short(HTONS(uip_conns[i].rport));
+		print_short(HTONS(health_conn->rport));
 		print_string(" rip ");
-		print_short(HTONS(uip_conns[i].ripaddr[0]));
+		print_short(HTONS(health_conn->ripaddr[0]));
 		write_char(' ');
-		print_short(HTONS(uip_conns[i].ripaddr[1]));
+		print_short(HTONS(health_conn->ripaddr[1]));
 		write_char('\n');
 	}
 

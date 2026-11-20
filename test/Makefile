@@ -103,11 +103,11 @@ $(BUILDDIR)/test_cable_836x: test_cable_836x.c $(SRCROOT)/rtl837x_cabletest.c $(
 
 # Prometheus exporter: metrics.c is included by the test, metrics_cli.c is linked.
 TESTS += $(BUILDDIR)/test_metrics
-$(BUILDDIR)/test_metrics: test_metrics.c $(SRCROOT)/metrics.c $(SRCROOT)/metrics_cli.c $(SRCROOT)/httpd/html_out.c $(SRCROOT)/metrics.h | $(BUILDDIR)
-	$(CC) $(CFLAGS) -DPROMETHEUS test_metrics.c $(SRCROOT)/metrics_cli.c $(SRCROOT)/httpd/html_out.c -o $@ $(LDFLAGS)
+$(BUILDDIR)/test_metrics: test_metrics.c $(SRCROOT)/metrics.c $(SRCROOT)/metrics_cli.c $(SRCROOT)/metrics.h | $(BUILDDIR)
+	$(CC) $(CFLAGS) -DPROMETHEUS test_metrics.c $(SRCROOT)/metrics_cli.c -o $@ $(LDFLAGS)
 TESTS += $(BUILDDIR)/test_metrics_http
-$(BUILDDIR)/test_metrics_http: test_metrics_http.c test_httpd_tx.c $(SRCROOT)/httpd/httpd.c $(SRCROOT)/httpd/html_out.c $(SRCROOT)/uip/uip.c $(SRCROOT)/sessions.c $(SRCROOT)/timer.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) -DPROMETHEUS test_metrics_http.c $(SRCROOT)/httpd/httpd.c $(SRCROOT)/httpd/html_out.c $(SRCROOT)/uip/uip.c $(SRCROOT)/sessions.c $(SRCROOT)/timer.c -o $@ $(LDFLAGS)
+$(BUILDDIR)/test_metrics_http: test_metrics_http.c test_httpd_tx.c $(SRCROOT)/metrics_tcp.c $(SRCROOT)/httpd/httpd.c $(SRCROOT)/httpd/html_out.c $(SRCROOT)/uip/uip.c $(SRCROOT)/sessions.c $(SRCROOT)/timer.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) -DPROMETHEUS test_metrics_http.c $(SRCROOT)/metrics_tcp.c $(SRCROOT)/httpd/httpd.c $(SRCROOT)/httpd/html_out.c $(SRCROOT)/uip/uip.c $(SRCROOT)/sessions.c $(SRCROOT)/timer.c -o $@ $(LDFLAGS)
 TESTS += $(BUILDDIR)/test_prometheus_status_json
 $(BUILDDIR)/test_prometheus_status_json: test_prometheus_status_json.c test_page_json.c $(TABLE_ENV) hw_mock.h | $(BUILDDIR)
 	$(CC) $(CFLAGS) -DPROMETHEUS test_prometheus_status_json.c $(filter %.c,$(TABLE_ENV)) -o $@ $(LDFLAGS)

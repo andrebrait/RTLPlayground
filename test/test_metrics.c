@@ -16,18 +16,8 @@
 #include "snmp_hw.h"
 #include "metrics.h"
 
-__xdata uint8_t outbuf[TCP_OUTBUF_SIZE];
-__xdata uint16_t slen;
-
-/* copied verbatim from rtlplayground.c: html_out.c's str_code_to_html() calls it */
-uint16_t strtox(__xdata uint8_t *dst, __code const char *s)
-{
-	__xdata uint8_t *b = dst;
-	while (*s)
-		*dst++ = *s++;
-	*dst = 0;
-	return dst - b;
-}
+__xdata uint8_t metrics_buf[METRICS_BUF_SIZE];
+__xdata uint16_t metrics_len;
 
 #include "../metrics.c"
 
@@ -98,27 +88,27 @@ static void fixture(void)
 static char scrape[65536];
 static size_t scrape_len;
 
-/* One response, outbuf by outbuf, as the TCP sender drains it. Between two
+/* One response, buffer by buffer, as the TCP sender drains it. Between two
  * fills, between_fills() may change the switch. */
 static const char *render(bool mib, void (*between_fills)(void))
 {
-	size_t hdr;
+	static const char header[] = "HTTP/1.1 200 OK\r\nConnection: close\r\n"
+		"Content-Type: text/plain; version=0.0.4; charset=utf-8\r\n\r\n";
+	size_t hdr = sizeof(header) - 1;
 	metrics_start(mib);
-	assert(slen <= TCP_OUTBUF_SIZE);
-	hdr = strstr((char *)outbuf, "\r\n\r\n") + 4 - (char *)outbuf;
-	assert(!strncmp((char *)outbuf, "HTTP/1.1 200 OK\r\nConnection: close\r\n"
-		       "Content-Type: text/plain; version=0.0.4; charset=utf-8\r\n\r\n", hdr));
+	assert(metrics_len <= METRICS_BUF_SIZE && metrics_len >= hdr);
+	assert(!memcmp(metrics_buf, header, hdr));
 	scrape_len = 0;
-	memcpy(scrape, outbuf + hdr, slen - hdr);
-	scrape_len = slen - hdr;
+	memcpy(scrape, metrics_buf + hdr, metrics_len - hdr);
+	scrape_len = metrics_len - hdr;
 	while (metrics_more) {
 		if (between_fills)
 			between_fills();
-		slen = 0;
+		metrics_len = 0;
 		metrics_fill();
-		assert(slen <= TCP_OUTBUF_SIZE && scrape_len + slen < sizeof(scrape));
-		memcpy(scrape + scrape_len, outbuf, slen);
-		scrape_len += slen;
+		assert(metrics_len <= METRICS_BUF_SIZE && scrape_len + metrics_len < sizeof(scrape));
+		memcpy(scrape + scrape_len, metrics_buf, metrics_len);
+		scrape_len += metrics_len;
 	}
 	scrape[scrape_len] = 0;
 	return scrape;
@@ -337,9 +327,9 @@ static void run_cmd(const char *s)
 
 static void expect_out(const char *want)
 {
-	outbuf[slen] = 0;
-	if (strcmp((char *)outbuf, want)) {
-		fprintf(stderr, "got \"%s\", want \"%s\"\n", outbuf, want);
+	metrics_buf[metrics_len] = 0;
+	if (strcmp((char *)metrics_buf, want)) {
+		fprintf(stderr, "got \"%s\", want \"%s\"\n", metrics_buf, want);
 		assert(0);
 	}
 }
@@ -348,14 +338,14 @@ static void expect_u64(const uint8_t b[8], const char *want)
 {
 	struct snmp_counter c;
 	memcpy(c.bytes, b, 8);
-	slen = 0;
+	metrics_len = 0;
 	put_u64(&c);
 	expect_out(want);
 }
 
 static void expect_fixed(int32_t v, uint8_t decimals, const char *want)
 {
-	slen = 0;
+	metrics_len = 0;
 	put_fixed(v, decimals);
 	expect_out(want);
 }

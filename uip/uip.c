@@ -411,7 +411,7 @@ uip_init(void) __banked
 /*---------------------------------------------------------------------------*/
 #if UIP_ACTIVE_OPEN
 __xdata struct uip_conn *
-uip_connect(__xdata uip_ipaddr_t *ripaddr, __xdata u16_t rport) __banked
+uip_connect(__xdata uip_ipaddr_t * __xdata ripaddr, __xdata u16_t rport) __banked
 {
   __xdata struct uip_conn *conn, *cconn;
   
@@ -1341,6 +1341,19 @@ uip_process(u8_t flag) __banked
      CLOSED connections are found. Thanks to Eddie C. Dost for a very
      nice algorithm for the TIME_WAIT search. */
   uip_connr = 0;
+#if UIP_CONNS > 1
+  /* One live connection per listening port: the httpd and the exporter
+     each keep a single connection's state. The client retransmits its
+     SYN and gets in once the current one is done. */
+  for(c = 0; c < UIP_CONNS; ++c) {
+    if(uip_conns[c].tcpstateflags != UIP_CLOSED &&
+       uip_conns[c].tcpstateflags != UIP_TIME_WAIT &&
+       uip_conns[c].lport == BUF->destport) {
+      UIP_STAT(++uip_stat.tcp.syndrop);
+      goto drop;
+    }
+  }
+#endif
   for(c = 0; c < UIP_CONNS; ++c) {
     if(uip_conns[c].tcpstateflags == UIP_CLOSED) {
       uip_connr = &uip_conns[c];

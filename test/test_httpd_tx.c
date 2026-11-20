@@ -34,6 +34,7 @@
 /* Private to uip.c, and the client needs them to build segments. */
 #define TCP_FIN 0x01
 #define TCP_SYN 0x02
+#define TCP_RST 0x04
 #define TCP_PSH 0x08
 #define TCP_ACK 0x10
 
@@ -254,6 +255,8 @@ extern u16_t uip_listenports[UIP_LISTENPORTS];
 static uint32_t cli_seq;	/* next sequence number we send */
 static uint32_t cli_rcv_nxt;	/* next sequence number we expect */
 static uint16_t cli_window;	/* what we advertise */
+static uint16_t cli_mss = MSS_FULL;	/* the MSS option of our SYN */
+static uint16_t cli_sport = 40000, cli_dport = 80;
 
 static uint8_t stream[STREAM_MAX];	/* bytes accepted from the server */
 static int stream_len;
@@ -352,8 +355,8 @@ static void client_send(uint8_t flags, const char *payload, int plen)
 	TCPH->ipchksum = 0;
 	TCPH->srcipaddr[0] = hton16(0x0a00); TCPH->srcipaddr[1] = hton16(0x0002);
 	TCPH->destipaddr[0] = hton16(0x0a00); TCPH->destipaddr[1] = hton16(0x0001);
-	TCPH->srcport = hton16(40000);
-	TCPH->destport = hton16(80);
+	TCPH->srcport = hton16(cli_sport);
+	TCPH->destport = hton16(cli_dport);
 	wr32(TCPH->seqno, cli_seq);
 	wr32(TCPH->ackno, cli_rcv_nxt);
 	TCPH->tcpoffset = (uint8_t)((hlen / 4) << 4);
@@ -366,7 +369,7 @@ static void client_send(uint8_t flags, const char *payload, int plen)
 		uint8_t *opt = &uip_buf[UIP_LLH_LEN + 40];
 
 		opt[0] = 2; opt[1] = 4;			/* kind = MSS, length 4 */
-		opt[2] = MSS_FULL >> 8; opt[3] = MSS_FULL & 0xff;
+		opt[2] = cli_mss >> 8; opt[3] = cli_mss & 0xff;
 	}
 	if (plen > 0)
 		memcpy(&uip_buf[UIP_LLH_LEN + 20 + hlen], payload, plen);
@@ -388,11 +391,12 @@ static void client_ack(uint16_t window)
 
 static void run_periodic(int rounds)
 {
-	for (int i = 0; i < rounds; i++) {
-		uip_periodic(0);
-		trace("timer");
-		harvest();
-	}
+	for (int i = 0; i < rounds; i++)
+		for (int c = 0; c < UIP_CONNS; c++) {
+			uip_periodic(c);
+			trace("timer");
+			harvest();
+		}
 }
 
 static void session_start(uint16_t window)
