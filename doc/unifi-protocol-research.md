@@ -645,7 +645,7 @@ board tests them.
 
 | RTLPlayground layout | Best model | Fit |
 | --- | --- | --- |
-| 4 x 2.5G + 2 x SFP+ (most common) | `US6XG150` | Exact topology (4 RJ45, then 2 SFP+). The model is PoE: report `port_poe=false`. uidb's `ethernetMaxSpeed` of 1000 is odd for an XG product, so **check whether the UI shows 2.5G/10G**. |
+| 4 x 2.5G + 2 x SFP+ (most common) | `US6XG150` | Exact topology (4 RJ45, then 2 SFP+). The model is PoE and its RJ45 ports are 10G. Per port, report `poe_caps=0` and `port_poe=false` (no PoE), and `speed_caps=1048682` on copper (autoneg, 10F, 100F, 1000F, 2.5G) and `288` on SFP+ (1G, 10G). That the UI then hides PoE controls and offers no speeds above 2.5G on copper is **unverified**, because uidb still says `features.poe: true`. uidb's `ethernetMaxSpeed` of 1000 is odd for an XG product, so **check whether the UI shows 2.5G/10G**. |
 | 4 x 2.5G + 2 x 10G RJ45 (ZX310S-4T2XT) | `US6XG150` | Ports 5 and 6 are drawn as SFP+. |
 | 5 x 2.5G + 1 x SFP+ | no exact match | `US6XG150` (port 5 drawn as SFP+) or `USWED36` with ports 6–8 permanently down. |
 | 5 x 2.5G (no SFP) | `USWED35` | Exact, and the same switch silicon. |
