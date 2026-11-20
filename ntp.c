@@ -63,9 +63,22 @@ static uint8_t ntp_divmod(uint8_t d) __reentrant
 }
 
 
+/* y % 100 and y % 400 without a 16-bit division: for y divisible by 4,
+ * y % 100 is zero when (y / 4) % 25 is, and then y % 400 is zero when y % 16
+ * is. */
 static uint8_t ntp_leap(uint16_t y) __reentrant
 {
-	return !(y % 4) && ((y % 100) || !(y % 400));
+	uint16_t q;
+
+	if (y & 3)
+		return 0;
+	q = div16_small(y >> 2, 5);
+	if (div_rem)
+		return 1;
+	div16_small(q, 5);
+	if (div_rem)
+		return 1;
+	return !(y & 15);
 }
 
 
@@ -78,7 +91,8 @@ static void ntp_split(uint32_t t) __reentrant
 	ntp_min = ntp_divmod(60);
 	ntp_hour = ntp_divmod(24);
 	days = ntp_t;
-	ntp_wday = (days + 4) % 7;
+	div16_small(days + 4, 7);
+	ntp_wday = div_rem;
 	for (ntp_year = 1970; days >= 365 + ntp_leap(ntp_year); ntp_year++)
 		days -= 365 + ntp_leap(ntp_year);
 	for (ntp_mon = 1; ; ntp_mon++) {
@@ -93,12 +107,14 @@ static void ntp_split(uint32_t t) __reentrant
 
 static uint8_t ntp_sunday(uint8_t n) __reentrant
 {
-	uint8_t first = (uint16_t)(ntp_wday + 36 - ntp_mday) % 7U;
+	/* Every operand is a byte (mday <= 31, mlen <= 31), so these divide
+	 * with DIV AB */
+	uint8_t first = (uint8_t)(ntp_wday + 36 - ntp_mday) % (uint8_t)7;
 
-	first = 1 + (uint16_t)(7 - first) % 7U;
+	first = 1 + (uint8_t)(7 - first) % (uint8_t)7;
 	if (n)
 		return first + 7 * (n - 1);
-	return first + 7 * ((uint16_t)(ntp_mlen - first) / 7U);
+	return first + 7 * ((uint8_t)(ntp_mlen - first) / (uint8_t)7);
 }
 
 
@@ -131,9 +147,10 @@ static void ntp_print_offset(int16_t off) __reentrant
 	uint16_t a = off < 0 ? -off : off;
 
 	write_char(off < 0 ? '-' : '+');
-	ntp_print2(a / 60);
+	/* a / 60 is (a / 4) / 15, and a % 60 is 4 * ((a / 4) % 15) + a % 4 */
+	ntp_print2(div16_small(a >> 2, 15));
 	write_char(':');
-	ntp_print2(a % 60);
+	ntp_print2((div_rem << 2) | (a & 3));
 }
 
 

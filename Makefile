@@ -152,6 +152,7 @@ SRCS = \
 	cmd_editor.c \
 	cmd_parser.c \
 	dhcp.c \
+	div_small.c \
 	html_data.c \
 	rtlplayground.c \
 	boot.c \

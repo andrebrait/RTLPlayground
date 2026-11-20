@@ -317,7 +317,10 @@ void stp_status(void) __banked
 		write_char(' ');
 		print_byte((uint8_t)stp_cnt[STP_CNT_TX][stp_i]);
 		write_char(' ');
-		stp_scratch16 = stp_bpdu_age[stp_i] / STP_HZ;
+#if STP_HZ != 50
+#error "the division below is / 2 / 5 / 5"
+#endif
+		stp_scratch16 = div16_small(div16_small(stp_bpdu_age[stp_i] >> 1, 5), 5);
 		itoa(stp_scratch16 > 255 ? 255 : (uint8_t)stp_scratch16);
 		write_char('\n');
 	}

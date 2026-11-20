@@ -21,6 +21,8 @@ ifeq ($(findstring clang,$(shell $(CC) --version 2>/dev/null)),)
 CFLAGS  += -Wno-builtin-declaration-mismatch
 endif
 LDFLAGS  = -fsanitize=address,undefined
+# Firmware modules call the HOME division helpers; every test links them.
+LDFLAGS += $(SRCROOT)/div_small.c
 # Use the native linker's supported dead-code flag for mixed firmware benches.
 # Neither GNU --gc-sections nor -no-pie is forced on non-GNU linkers.
 GC_LDFLAGS := $(shell printf 'int main(void){return 0;}\n' | $(CC) -x c - -o /dev/null -Wl,--gc-sections >/dev/null 2>&1 && printf '%s' '-Wl,--gc-sections')
@@ -84,6 +86,10 @@ $(BUILDDIR)/test_rx_bounds: test_rx_bounds.c $(SRCROOT)/uip/uip_rx.h | $(BUILDDI
 TESTS += $(BUILDDIR)/test_trap_lldp0 $(BUILDDIR)/test_trap_lldp1
 $(BUILDDIR)/test_trap_lldp%: test_trap_defaults.c $(SRCROOT)/rtl837x_trap.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) -DMACHINE_DEFAULT_LLDP=$* $< -o $@ $(LDFLAGS)
+
+TESTS += $(BUILDDIR)/test_div_small
+$(BUILDDIR)/test_div_small: test_div_small.c $(SRCROOT)/div_small.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS)
 
 TESTS += $(BUILDDIR)/test_cable_836x
 $(BUILDDIR)/test_cable_836x: test_cable_836x.c $(SRCROOT)/rtl837x_cabletest.c $(SRCROOT)/timer.c | $(BUILDDIR)

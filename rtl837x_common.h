@@ -153,6 +153,16 @@ void print_byte(uint8_t a);
 void itoa(uint8_t v);
 void itoa_no_syslog(uint8_t v);
 void itoa_short(uint16_t v);
+/* div_small.c: division by 2 <= d <= 16 without SDCC's 16/32-bit library
+ * division. div_small() divides the len-byte big-endian n in place and
+ * returns the remainder. div16_small() returns v / d and leaves v % d in
+ * div_rem. u16_to_dec() writes the digits of v to the end of dec_digits and
+ * returns the index of the first one. Both overwrite div_rem. */
+extern __xdata uint8_t div_rem;
+extern __xdata char dec_digits[5];
+uint8_t div_small(__xdata uint8_t *n, uint8_t len, uint8_t d);
+uint16_t div16_small(uint16_t v, uint8_t d);
+uint8_t u16_to_dec(uint16_t v);
 void print_sfr_data(void);
 void print_phy_data(void);
 void print_cmd_prompt(void);

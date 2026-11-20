@@ -541,15 +541,10 @@ static void lldp_put(uint8_t c, bool html) __reentrant
 
 static void lldp_put_dec(uint16_t v, bool html) __reentrant
 {
-    uint8_t digits[5];
-    uint8_t n = 0;
+    uint8_t i = u16_to_dec(v);
 
-    do {
-        digits[n++] = '0' + v % 10;
-        v /= 10;
-    } while (v);
-    while (n)
-        lldp_put(digits[--n], html);
+    while (i < sizeof(dec_digits))
+        lldp_put(dec_digits[i++], html);
 }
 
 static void lldp_put_string(__xdata char *s, bool html) __reentrant
@@ -731,9 +726,10 @@ void lldp_show(void) __banked __reentrant
             }
             if (lldp_nb[i].poe_req) {
                 write_char(' ');
-                lldp_put_dec(lldp_nb[i].poe_req / 10, false);
+                lldp_put_dec(div16_small(lldp_nb[i].poe_req, 10), false);
                 write_char('.');
-                lldp_put_dec(lldp_nb[i].poe_req % 10, false);
+                div16_small(lldp_nb[i].poe_req, 10);
+                write_char('0' + div_rem);
                 print_string(" W");
             }
         }

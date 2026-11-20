@@ -134,11 +134,30 @@ bool rtl_phy_cable_test_get_status(uint8_t port) __banked
 		ct_len[ct_pair] = SFR_DATA_U16;
 #if SOC_FAMILY == RTL836X
 		ct_ctrl = ct_pair & 1 ? RTCT_LEN_ZERO_BD : RTCT_LEN_ZERO;
-		ct_len[ct_pair] = ct_len[ct_pair] > ct_ctrl ?
-			((uint32_t)(ct_len[ct_pair] - ct_ctrl) * 5 + RTCT_LEN_PER_50CM / 2) / RTCT_LEN_PER_50CM : 0;
+		if (ct_len[ct_pair] > ct_ctrl) {
+#if RTCT_LEN_PER_50CM != 36
+#error "the division below is / 4 / 9"
+#endif
+			__xdata uint32_t x = ((uint32_t)(ct_len[ct_pair] - ct_ctrl) * 5 + RTCT_LEN_PER_50CM / 2) >> 2;
+			__xdata uint8_t b[3];
+
+			/* At most (65535 * 5 + 18) / 4: three bytes */
+			b[0] = x >> 16;
+			b[1] = x >> 8;
+			b[2] = x;
+			div_small(b, 3, 9);
+			ct_len[ct_pair] = ((uint16_t)b[1] << 8) | b[2];
+		} else {
+			ct_len[ct_pair] = 0;
+		}
 #else
 		ct_len[ct_pair] = ct_len[ct_pair] > RTCT_LEN_ZERO ? ct_len[ct_pair] - RTCT_LEN_ZERO : 0;
-		ct_len[ct_pair] = ct_len[ct_pair] * 5 / RTCT_LEN_PER_50CM;
+#if RTCT_LEN_PER_50CM != 43
+#error "the multiplier below is for / 43"
+#endif
+		/* 43 is prime, so no nibble division: x / 43 is (x * 48771) >> 21
+		 * for every 16-bit x (43 * 48771 is 2^21 + 1), checked exhaustively */
+		ct_len[ct_pair] = ((uint32_t)(uint16_t)(ct_len[ct_pair] * 5) * 48771) >> 21;
 #endif
 	}
 	return true;
@@ -176,9 +195,10 @@ static void cabletest_print(void)
 			print_string(": unknown\n");
 			continue;
 		}
-		itoa_short(ct_len[ct_pair] / 10);
+		itoa_short(div16_small(ct_len[ct_pair], 10));
 		write_char('.');
-		write_char('0' + ct_len[ct_pair] % 10);
+		div16_small(ct_len[ct_pair], 10);
+		write_char('0' + div_rem);
 		print_string(" m\n");
 	}
 }
