@@ -71,6 +71,19 @@ Scope and method:
    httpd already uses it. uIP regenerates data on retransmit. The `system_cfg`
    response must be decrypted, tag-checked and parsed as a stream, or spooled to
    flash, before anything is applied.
+6. **Several of the gaps above are filled by work done for an OpenWrt switch.**
+   A parallel investigation for an OpenWrt-based RTL930x switch (LG510S-4T2XS)
+   found the projects listed in [Additional projects](#additional-projects):
+   two OpenWrt packages that already get adopted by Network 10.6 as access
+   points ([antoniocosta/unifi-openwrt](https://github.com/antoniocosta/unifi-openwrt),
+   [yesrab/openUF](https://github.com/yesrab/openUF)), a switch emulator with
+   per-model profiles and a full capability-bit dictionary
+   ([jamesbraid/unifi-emu](https://github.com/jamesbraid/unifi-emu)), and a
+   real USW-Pro-24 adoption capture in
+   [jda/pixiedust](https://github.com/jda/pixiedust). It also extracted the
+   complete device-side `switch.*` key set from Ubiquiti's own Realtek RTL930x
+   switch firmware. Those findings are folded into the sections below and
+   attributed to their sources. They were not re-checked for this note.
 
 ## Projects
 
@@ -106,6 +119,20 @@ The USW-Flex-2.5G-5 uses a Realtek RTL8372N plus an RTL8221B
 ([ServeTheHome review, 2025-11-14](https://www.servethehome.com/ubiquiti-flex-mini-2-5g-review-ubiquiti-does-a-cheap-5-port-2-5gbe-switch/)).
 That is the same switch silicon RTLPlayground targets. Reader comments there
 report an ESP32 as the management CPU, which is **unverified**.
+
+### Additional projects
+
+Found by the OpenWrt investigation. Last activity is the GitHub push date on
+2026-11-20.
+
+| Name | URL | Language, licence | Last activity | What it covers | Usefulness here |
+| --- | --- | --- | --- | --- | --- |
+| unifi-openwrt | https://github.com/antoniocosta/unifi-openwrt | Go, GPL-2.0 | 2026-11-20 | OpenWrt package adopted as an AP (default `U7PG2`) on Network 10.6. Discovery, SSH and L3 adoption, full provisioning, a `system_cfg` to UCI translator with rollback, an "unhandled keys" ledger, and refusal to apply Ubiquiti firmware. | **High** for the structure of client and translator (`docs/internals.md`, `internal/inform`, `internal/translate`). |
+| openUF | https://github.com/yesrab/openUF (fork of https://github.com/jonasevcik/openUF, MIT) | Lua, GPL-3.0 | 2026-11-18 | OpenWrt AP agent validated on a UCG Ultra running Network 10.6. `PROTOCOL-VALIDATION.md` is the most thorough live-controller log found: the AES-GCM provisioning gate, both adoption paths, the per-port VLAN `switch.*` keys and the `port_table` contract. | **High.** Read `PROTOCOL-VALIDATION.md` before writing code. |
+| unifi-emu | https://github.com/jamesbraid/unifi-emu | Go, MIT | 2026-11-19 | Software emulation of APs, **switches** and gateways for controller tests. Per-model profiles (including `US6XG150`, `USL8A`, `USWED76`), and `capability_bits.json` with every capability bitmap the controller tests. | **High.** It answers the capability-bit question, and is the quickest way to watch a candidate model in a real controller. |
+| open-unifi | https://github.com/lucavb/open-unifi | Go, MIT | 2026-11-19 | Alternative controller that adopts a real `U7PG2`. Protocol docs cite controller bytecode, including UDP 10001 discovery (`docs/PROTOCOL-discovery.md`). | Medium. |
+| pixiedust capture | https://github.com/jda/pixiedust/blob/a4356227df/unifi-fresh-usw.pcap | pcap | 2026-08-12 | A real USW-Pro-24 (`US24PRO2`, firmware 4.3.22) adoption, with the switch's full inform payload and the controller's `system_cfg`. pixiedust can recover the authkey and decrypt it. | **High.** It is the only real switch capture found. |
+| USW-Aggregation firmware 7.5.15 | `https://fw-download.ubnt.com/data/unifi-firmware/127c-USL8A-7.5.15-dc23f38c-6be7-470e-ac36-fe6ec832275c.bin` | Ubiquiti binary | — | `USL8A`, platform `US.rtl930x`. Plaintext initramfs with `mcad` (the inform agent), `syswrapper.sh`, `mca-dump`, and in `ubntbox` the full `switch.*` key set. LEDE 17.01 based. | **High** for interoperability facts (key names). Do not copy its code. |
 
 ## Protocol reference
 
@@ -170,6 +197,13 @@ amd989 `unifi_protocol.py:30-124`, unifi-stubd `docs/en/protocol-notes.md:74-90`
   refused (`InformServlet` *string evidence*, quoted above). The adoption reply
   is encrypted in the mode the request used (TNBU controller:
   `inform_resp.IsGCM = req.IsGCM`, `TNBU.GUI/Services/DeviceManagerService.cs:214`).
+- **GCM is required for provisioning.** openUF found that Network 10.4.57 does
+  not provision a device until it has received a genuinely GCM-encrypted
+  inform. The `x_aes_gcm` flag is set only from the wire flag. A device stuck
+  on CBC shows a new `cfgversion` on every cycle and stays "Adopting"
+  ([openUF `PROTOCOL-VALIDATION.md`](https://github.com/yesrab/openUF/blob/3da571983b/PROTOCOL-VALIDATION.md)
+  lines 529–565). CBC is therefore only needed, if at all, for the first
+  inform with the default key. GCM-only should be tested first.
 - Unencrypted informs are rejected by 10.6.109 (`Plain text inform is not
   supported`, `Unencrypted payload is not allowed`, *string evidence*). This
   matches the older fxkr and jrjparks notes.
@@ -226,8 +260,16 @@ amd989 `unifi_protocol.py:30-124`, unifi-stubd `docs/en/protocol-notes.md:74-90`
    inform_ip` when the JSON `inform_url` used a hostname. Sending the resolved
    IPv4 address fixed it (`docs/protocol-research.md:139-157`). 10.6.109 has
    `dev[{}] invalid inform_ip {}` and `[{}] Skipped invalid inform_ip update`
-   *(string evidence)*.
-5. Ways for the device to learn the inform URL: manual configuration (the
+   *(string evidence)*. unifi-emu documents the same failure as `invalid
+   inform_ip` ([`docs/PROTOCOL.md`](https://github.com/jamesbraid/unifi-emu/blob/a538889cce/docs/PROTOCOL.md),
+   "Three things that trip up an implementer").
+5. Accept a key from `mgmt_cfg` only while still on the factory key. Some
+   builds deliver the key as `{"_type":"cmd","cmd":"set-adopt","key":…,"uri":…}`
+   instead of `setparam` (unifi-emu `docs/PROTOCOL.md`, "The two
+   key-delivery channels"). `mgmt_url` is the controller's web UI link, not an
+   inform URL. Treating it as one loses the controller (openUF
+   `PROTOCOL-VALIDATION.md` lines 600–604).
+6. Ways for the device to learn the inform URL: manual configuration (the
    web UI or CLI here), DHCP option 43 sub-option 1 carrying the IPv4 address
    (fxkr README), and the DNS name `unifi` (the default URL). Ubiquiti's help
    articles on adoption and ports
@@ -271,7 +313,17 @@ amd989 `unifi_gateway.py:189-251`. Every response has `_type` and
 | `upgrade` | `url`, `md5sum`, `version`, `datetime`, `device_id` | Ignore. Do not change the reported version. See the firmware notes in the model section. |
 | `reboot` | optional `reboot_type: hard` | Possibly honour it. It is harmless. |
 | `cmd` | `cmd`: `set-locate`, `unset-locate`, `power-cycle` (with `port`), `spectrum-scan`, mesh commands | Locate means blink the LEDs. `power-cycle` is a PoE port bounce. Ignore the rest. |
-| `setdefault` | none | Forget the authkey and go back to the pending state. Possibly also reset the switch config. |
+| `setdefault` | none | The operator clicked Remove. Forget the authkey and go back to the pending state. Do not factory-reset the switch (unifi-openwrt and openUF both keep the local config). |
+
+The controller can only answer the device's next inform, so the device must
+keep informing. After a `cmd`, inform again immediately (openUF
+`PROTOCOL-VALIDATION.md` lines 606–638). unifi-emu also describes a
+`setstate` reply carrying `port_table` / `port_overrides`, which openUF's
+reading of `InformServlet` (10.4.57) does not list. Which is right for a USW
+on 10.6 is **unverified**. For `upgrade`, unifi-openwrt and openUF report the
+offered version afterwards so that the controller stops offering it nightly.
+That differs from the "keep reporting the same version" approach below. Test
+both.
 
 ### Inform JSON (device to controller)
 
@@ -312,8 +364,43 @@ Switch tables (TNBU `BaseInformBody.cs:51-59,234-242,265-334,398-402`):
 - Capability bitmasks: the controller reads `fw_caps`, `hw_caps`,
   `switch_caps`, `vlan_caps` and others (`devmgr/nHhxEfQQGSLumjGc.class`,
   `devmgr/TocwLJhQU.class`, *string evidence*). amd989 sends `fw_caps: 3` for
-  a USG. **The bit meanings for switches are unknown.** They probably gate UI
-  features such as VLAN or STP options.
+  a USG. The bit meanings are in unifi-emu's
+  [`capability_bits.json`](https://github.com/jamesbraid/unifi-emu/blob/a538889cce/capability_bits.json),
+  read from controller 10.4.57:
+  - `port_table[].speed_caps`: 10H `1`, 10F `2`, 100H `4`, 100F `8`, 1000H
+    `16`, 1000F `32`, 2.5G `64`, 5G `128`, 10G `256`, autoneg `1048576`, FEC
+    `2097152`. The real USW-Pro-24 sends `1048623` on copper and `1048928` on
+    SFP+ (pixiedust capture). For an RTLPlayground 2.5G copper port this
+    gives `1048682` (autoneg, 10F, 100F, 1000F, 2.5G), and `288` (1G and 10G)
+    for SFP+. Both are **derived, not tested**.
+  - `switch_caps.feature_caps`: L3 routing `1`, 802.1X `2`, port isolation
+    `4`, storm control `8`, LLDP-MED `16`, egress rate limit `32`, STP `64`,
+    DHCP snooping `128`, IGMP snooping `256`, port security `512`, LACP `8192`,
+    FEC `65536`, bridge VLAN filter `262144`, jumbo `524288`, keepalive loop
+    protection `1048576`. Higher bits cover EtherLighting, MC-LAG, BGP,
+    stacking, VRRP, OOB port and PTP. The USW-Pro-24 capture sends
+    `{"feature_caps":1023,"max_aggregate_sessions":6,"max_l3_intf":64,"max_mirror_sessions":1,"max_reserved_routes":62,"max_static_routes":2}`.
+  - `switch_caps.stp_caps`: BPDU guard `1`, auto edge `2`, port cost `8`.
+    `port_table[].port_caps`: EEE `1`.
+
+  **Claim only what the firmware can do.** A claimed bit makes the controller
+  show the control and send its configuration. A claimed but unimplemented
+  feature fails silently (openUF
+  [`REVERSE-ENGINEERING.md`](https://github.com/yesrab/openUF/blob/3da571983b/REVERSE-ENGINEERING.md),
+  "Aim and ground rules"; unifi-emu `docs/PROTOCOL.md`, "Capability
+  bitmaps"). RTLPlayground already has code for STP (`64`), storm control
+  (`8`), DHCP snooping (`128`), IGMP snooping (`256`), LACP (`8192`), egress
+  rate limit (`32`, `rtl837x_bandwidth.c`) and mirroring. Each bit should be
+  claimed only after its `system_cfg` keys are applied and tested.
+- Other top-level fields in the real USW-Pro-24 inform (pixiedust capture):
+  `fw_caps`, `hw_caps`, `general_temperature`, `has_fan`, `has_temperature`,
+  `overheating`, `gateway_ip`, `gateway_mac`, `kernel_version`,
+  `stp_priority`, `sys_stats` (`loadavg_1/5/15`, `mem_total`, `mem_used`,
+  `mem_buffer`), `system-stats` (`cpu`, `mem`, `uptime` as strings),
+  `satisfaction` and `total_max_power`. Its `port_table` entries nest
+  `lldp_table` (`lldp_chassis_id`, `lldp_port_id`, `lldp_system_name`) per
+  port. That differs from the top-level `lldp_table` described next, so
+  capture both forms before choosing one.
 - unifi-simulator found the controller "relatively forgiving". A minimal
   `port_table` with `port_idx/up/enable/speed/rx_bytes/tx_bytes` was enough for
   Connected and for port rates (`docs/protocol-research.md:90-101,161-175`).
@@ -367,6 +454,28 @@ ucast/mcast/bcast level and rate), `switch.port.\u0001.pq.\u0001`, `voice_vlan`,
 `\u0001` is a Java string-concatenation placeholder for an index. Another
 config class (`ubntconf/NDxSQTDwni.class`) adds `switch.port.\u0001.trusted_port`.
 
+The device side agrees. `bin/ubntbox` in Ubiquiti's USW-Aggregation 7.5.15
+firmware (`USL8A`, `US.rtl930x`, header `UBNTUS.rtl930x.v7.5.15+17146`) parses
+these per-port keys: `status`, `name`, `opmode`, `speed`, `duplex`,
+`autoneg`, `flowctrl`, `eee`, `fec`, `mtu`, `pvid`, `ingressfilter`,
+`isolation`, `lag`, `mirror_port`, `egress_rate_limit_kbps`,
+`stormctrl.{status,type,bcast,mcast,ucast}`,
+`stp.{port_mode,cost,edge,bpdu_guard,root_guard,loopback_detection}`,
+`lldp.opmode`, `lldpmed.*`, `dot1x.*`, `port-security*`, `keepalive`,
+`link_debounce`, `qos`, `dscp`, `acl.*`, `poe` and `mclag`. Global keys:
+`switch.lag.%d.lacp`, `switch.igmp_snooping.*`, `switch.multicast.*`,
+`switch.lldp.*`, `switch.qos.*`, `switch.acl.*`, `switch.dhcp_guard.*`,
+`switch.radius.*`, `switch.routing_interface.*`, `switch.ptp.*`,
+`switch.mclag.*`, `switch.oob.*` and `switch.etherlight.*`. This answers which
+key carries IGMP snooping. Value vocabularies beyond those in the capture are
+**unverified**. This is the firmware for the same Realtek switch family
+(RTL930x), not for RTL837x.
+
+On VLAN membership, openUF diffed five controller states. It found that
+`switch.vlan.K` is a slot whose `.id` is the VID. The per-VLAN, per-port
+matrix (`switch.vlan.K.port.N.mode`) is authoritative, and an absent per-port
+key means "default" (openUF `PROTOCOL-VALIDATION.md` lines 932–1006).
+
 Mapping onto RTLPlayground:
 
 | UniFi intent (port profile, port override, network) | system_cfg key | RTLPlayground feature |
@@ -386,8 +495,9 @@ Mapping onto RTLPlayground:
 
 Things not established:
 
-- A real `system_cfg` captured from a stock controller for a USW. TNBU's
-  output is a re-creation. The exact value spellings (`speed=2500`?
+- A real `system_cfg` captured from a stock controller for one of the
+  candidate models. The pixiedust capture has one for a `US24PRO2` (Broadcom),
+  and TNBU's output is a re-creation. The exact value spellings (`speed=2500`?
   `autoneg=true`?) and the size of a real file are unknown. TNBU's simulator
   saves whatever the controller sends to `system_cfg_<model>.txt`
   (`TNBU.Simulator/DeviceSimulator.cs:121-123`). Running it, or
@@ -424,6 +534,18 @@ Things not established:
   overwritten on upgrade. Impersonating an existing model is the practical
   route. No supported way to define custom models was found, and no official
   "third-party managed switch" feature was found.
+- The OpenWrt investigation disassembled the model enum (`javap -c -p`). Each
+  constant carries device type, capability set, chipset, system ID, port
+  count and Ethernet class. Examples: `US6XG150` is BROADCOM, 6 ports,
+  GIGABIT_ETHERNET, sysid `0xeb23`. `USWED76` is REALTEK, 10 ports,
+  TEN_GIGABIT_ETHERNET, sysid `0xed76`. `USL8A` is REALTEK, 8 ports, sysid
+  `0xed2d`. Whether the controller changes behaviour by `chipset` is
+  **unverified**.
+- When `port_table` has fewer ports than the model: on an AP, openUF saw that
+  the `switch.port.N` inventory in `system_cfg` follows the model's port count,
+  while the Ports view and per-port settings follow the reported `port_table`
+  (`PROTOCOL-VALIDATION.md` lines 932–1006). For a USW this is
+  **unverified**.
 
 ### Candidate models from uidb 10.6.109 (USW, up to 12 ports)
 
@@ -520,20 +642,27 @@ parser and on capturing a real `system_cfg` for the chosen model.
 ## Open questions and gaps
 
 1. A real `system_cfg` (and `mgmt_cfg`) from a stock controller for
-   `US6XG150` / `USWED36` / `USWED35`, and its size. Get it with the TNBU
-   simulator or unifi-simulator in a lab.
+   `US6XG150` / `USWED36` / `USWED35`, and its size. Quickest path: run
+   unifi-emu against a lab controller with `SIM_MODELS=US6XG150` (and the
+   other candidates) and decrypt the traffic with pixiedust. Then change each
+   switch setting in the UI and diff `system_cfg` after each change, as openUF
+   did for VLANs. That diff is the specification for the config parser.
 2. Whether stock controller *responses* are ever compressed. Two sources say
    no; one stock capture would settle it.
 3. Whether an encrypted but uncompressed inform is accepted, and the "limit
    for default authkey" on payload size before adoption.
-4. Whether a device may stay on CBC after `use_aes_gcm=true`.
-5. Meaning of `switch_caps`, `vlan_caps`, `fw_caps` and `hw_caps` for switches,
-   and whether they gate UI features such as VLAN or STP options.
+4. Whether a device may stay on CBC after `use_aes_gcm=true`. Per openUF
+   (10.4.57), it may not: provisioning waits for a GCM inform.
+5. `switch_caps`, `speed_caps` and `port_caps` are answered by unifi-emu's
+   `capability_bits.json`. The effect of each bit in the 10.6 UI, and the
+   meaning of `vlan_caps`, `fw_caps` and `hw_caps` for switches, are still
+   open.
 6. Whether `MCU_BASED` models use a reduced inform or `system_cfg`.
 7. The `state` field values before and after adoption (0, 1, 2 and 4 are all in
    use across projects).
-8. Value formats for speed, duplex and autoneg overrides, and which key carries
-   IGMP snooping.
+8. Value formats for speed, duplex and autoneg overrides. The IGMP snooping
+   key family is `switch.igmp_snooping.*` (Ubiquiti `ubntbox`); its values are
+   still unknown.
 9. How the controller UI and auto-update behave when an `upgrade` is ignored.
 10. How the controller treats a device whose `port_table` has fewer ports
     than the model (for example 9 on `USWED36`). Reporting the extra ports as
@@ -584,6 +713,15 @@ Projects (source files read at the revisions current on 2026-11-20):
   https://github.com/foxt/unispi, https://github.com/nitefood/python-ubnt-discovery
 - https://jrjparks.github.io/unofficial-unifi-guide/protocols/inform.html and
   https://jrjparks.github.io/unofficial-unifi-guide/print.html
+- Added from the OpenWrt (LG510S-4T2XS) investigation, not re-read here:
+  https://github.com/antoniocosta/unifi-openwrt (`8e87294191`: `docs/internals.md`,
+  `internal/inform/packet.go`), https://github.com/yesrab/openUF (`3da571983b`:
+  `PROTOCOL-VALIDATION.md`, `REVERSE-ENGINEERING.md`),
+  https://github.com/jamesbraid/unifi-emu (`a538889cce`: `docs/PROTOCOL.md`,
+  `capability_bits.json`), https://github.com/lucavb/open-unifi (`c1d8ebc604`:
+  `docs/PROTOCOL-discovery.md`), https://github.com/jda/pixiedust (`a4356227df`:
+  `unifi-fresh-usw.pcap`), and the USW-Aggregation 7.5.15 firmware image
+  (`bin/ubntbox`, `bin/mcad`)
 - Wireshark UBDP dissector: https://gitlab.com/wireshark/wireshark/-/raw/master/epan/dissectors/packet-ubdp.c
 - nmap: https://nmap.org/nsedoc/scripts/ubiquiti-discovery.html
 
