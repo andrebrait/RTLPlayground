@@ -22,8 +22,8 @@ CFLAGS  += -Wno-builtin-declaration-mismatch
 endif
 LDFLAGS  = -fsanitize=address,undefined
 # Firmware modules call the HOME division helpers, so every test links them.
-# .EXTRA_PREREQS (GNU make 4.3+) rebuilds every target when they change,
-# without adding them to $^.
+# .EXTRA_PREREQS (GNU make 4.3+; older makes ignore it) rebuilds every
+# target when they change, without adding them to $^.
 LDFLAGS += $(SRCROOT)/div_small.c
 .EXTRA_PREREQS = $(SRCROOT)/div_small.c
 # Use the native linker's supported dead-code flag for mixed firmware benches.
@@ -91,10 +91,10 @@ $(BUILDDIR)/test_trap_lldp%: test_trap_defaults.c $(SRCROOT)/rtl837x_trap.c | $(
 	$(CC) $(CFLAGS) -DMACHINE_DEFAULT_LLDP=$* $< -o $@ $(LDFLAGS)
 
 TESTS += $(BUILDDIR)/test_div_small $(BUILDDIR)/test_ntp_time
-$(BUILDDIR)/test_div_small: test_div_small.c | $(BUILDDIR)
+$(BUILDDIR)/test_div_small: test_div_small.c $(SRCROOT)/div_small.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS)
 # ntp.c is included by the test
-$(BUILDDIR)/test_ntp_time: test_ntp_time.c $(SRCROOT)/ntp.c | $(BUILDDIR)
+$(BUILDDIR)/test_ntp_time: test_ntp_time.c $(SRCROOT)/ntp.c $(SRCROOT)/div_small.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS)
 
 TESTS += $(BUILDDIR)/test_cable_836x

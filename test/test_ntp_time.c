@@ -8,6 +8,8 @@
 
 #include "../ntp.c"
 
+_Static_assert(sizeof(time_t) >= 8, "gmtime() must reach 2106");
+
 /* What ntp.c needs from the rest of the firmware */
 __xdata struct dns_state dns_state;
 void *uip_appdata;
@@ -33,15 +35,18 @@ static int failures;
 int main(void)
 {
 	for (uint32_t day = 0; day <= 0xffffffffu / 86400; day++) {
-		time_t t = (time_t)day * 86400;
+		/* A different time of day each day, kept inside 32 bits */
+		time_t t = (time_t)day * 86400 + (day * 7919u) % (day < 49710 ? 86400 : 6295);
 		struct tm *tm = gmtime(&t);
 
 		ntp_split((uint32_t)t);
 		if ((ntp_year != tm->tm_year + 1900 || ntp_mon != tm->tm_mon + 1 ||
-		     ntp_mday != tm->tm_mday || ntp_wday != tm->tm_wday) && failures++ < 10)
-			printf("FAIL ntp_split day %u: %u-%u-%u wday %u\n", day, ntp_year, ntp_mon, ntp_mday, ntp_wday);
+		     ntp_mday != tm->tm_mday || ntp_wday != tm->tm_wday || ntp_hour != tm->tm_hour ||
+		     ntp_min != tm->tm_min || ntp_sec != tm->tm_sec) && failures++ < 10)
+			printf("FAIL ntp_split day %u: %u-%u-%u %u:%u:%u wday %u\n", day, ntp_year, ntp_mon,
+			       ntp_mday, ntp_hour, ntp_min, ntp_sec, ntp_wday);
 	}
-	puts("PASS ntp_split: every day from 1970 to 2106, leap years and weekday");
+	puts("PASS ntp_split: every day from 1970 to 2106, time of day, leap years and weekday");
 
 	for (int off = -840; off <= 840; off++) {
 		char want[16];
