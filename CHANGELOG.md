@@ -184,6 +184,9 @@
 ## Changed
 
 - Move Prometheus exporter settings into System → Services.
+- The Prometheus exporter serves `/metrics` on its own TCP port, 9100, next to
+  the web server on port 80, so a scrape and the web interface run at the
+  same time.
 
 - Devices
   - The TL-SG108PE V5 board definition is named after its PCB marking: `machine/pcb/2060500741.c`
@@ -288,6 +291,10 @@
 - Networking
   - Wildcard UDP listeners reply to the current sender without retaining its
     address or transmitting stale replies during periodic polls.
+  - The web server answers a request that arrives in the segment completing the
+    TCP handshake, as it does when the client's ACK of the SYNACK is lost. It
+    used to acknowledge the request and wait until the idle timeout reset the
+    connection.
 - SNMP
   - Valid requests exceeding the stored varbind limit return tooBig instead of timing out.
   - A transient hardware timeout no longer disables monitoring until reboot;

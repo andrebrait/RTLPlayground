@@ -399,7 +399,8 @@ static void run_periodic(int rounds)
 		}
 }
 
-static void session_start(uint16_t window)
+/* A fresh uIP and httpd, and the client's SYN */
+static void session_syn(uint16_t window)
 {
 	uip_init();
 	httpd_init();
@@ -412,6 +413,11 @@ static void session_start(uint16_t window)
 	last_tx_len = 0;
 
 	client_send(TCP_SYN, NULL, 0);
+}
+
+static void session_start(uint16_t window)
+{
+	session_syn(window);
 	client_ack(window);
 }
 
@@ -497,6 +503,17 @@ static void scenario_steady_window(void)
 	      "control: the whole file arrives");
 	CHECK(first_body_mismatch() == -1,
 	      "control: file content without duplicates or gaps");
+}
+
+/* The client's ACK of the SYNACK is lost; the request completes the handshake */
+static void scenario_httpd_request_on_handshake(void)
+{
+	session_syn(MSS_FULL);
+	request_file(MSS_FULL);
+	drain(MSS_FULL);
+	CHECK(body_offset() >= 0 && stream_len == body_offset() + FILE_LEN &&
+	      first_body_mismatch() == -1,
+	      "httpd_request_on_handshake: a request in the handshake's last segment is served");
 }
 
 static void scenario_empty_asset(void)
@@ -1543,6 +1560,9 @@ int main(int argc, char **argv)
 {
 	if (argc > 1 && !strcmp(argv[1], "-v"))
 		verbose = 1;
+
+	printf("== httpd: connection setup ==\n");
+	scenario_httpd_request_on_handshake();
 
 	printf("== httpd: accounting for the bytes actually sent ==\n");
 	scenario_empty_asset();
