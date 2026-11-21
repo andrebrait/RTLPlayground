@@ -455,6 +455,25 @@ button.danger{background:var(--bad);color:#fff;border-color:transparent}
       </div>
     </section>
 
+    <section class="tab" id="tab-unifi">
+      <div class="grid2">
+        <div class="card" id="un-card"><h2 data-i18n="un_ctl">UniFi controller</h2>
+          <label class="row" style="justify-content:space-between"><span data-i18n="un_enable">Inform the controller</span>
+            <span class="switch"><input type="checkbox" id="un-on"><i></i></span></label>
+          <label class="row"><span class="lb" data-i18n="un_url">Inform URL</span><input class="in" id="un-url" maxlength="107" placeholder="http://192.168.1.2:8080/inform"></label>
+          <div style="display:flex;gap:10px;margin-top:8px">
+            <button class="ctl pri" id="un-apply" data-i18n="c_apply">Apply</button>
+            <button class="ctl" id="un-refresh" data-i18n="c_refresh">Refresh</button>
+          </div>
+          <p class="small mut" style="margin-top:8px" data-i18n="un_note">The switch presents itself to a UniFi Network controller, which can then adopt it. Save to flash to keep these settings.</p>
+        </div>
+        <div class="card"><h2 data-i18n="un_dev">Device as the controller sees it</h2>
+          <table class="t" id="un-status"></table>
+          <button class="ctl" id="un-forget" style="margin-top:8px" data-i18n="un_forget">Forget the controller</button>
+        </div>
+      </div>
+    </section>
+
     <section class="tab" id="tab-system">
       <div class="grid2">
         <div class="card"><h2 data-i18n="sy_network">Network</h2>

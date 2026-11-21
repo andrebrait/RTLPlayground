@@ -13,6 +13,29 @@ var LANG = {
         nav_bw: "Bandwidth",
         nav_system: "System",
         nav_fw: "Firmware",
+        nav_unifi: "UniFi",
+        un_ctl: "UniFi controller",
+        un_enable: "Inform the controller",
+        un_url: "Inform URL",
+        un_note: "The switch presents itself to a UniFi Network controller, which can then adopt it. Save to flash to keep these settings.",
+        un_url_err: "Use http://<address>[:<port>][/<path>], for example http://192.168.1.2:8080/inform",
+        un_dev: "Device as the controller sees it",
+        un_model: "Shown as",
+        un_version: "Firmware version",
+        un_state: "State",
+        un_adopted: "Adopted, AES-GCM",
+        un_pending: "Not adopted",
+        un_addr: "Controller address",
+        un_cfgver: "Configuration version",
+        un_interval: "Inform interval",
+        un_informs: "Informs sent / failed",
+        un_reply: "Last reply",
+        un_error: "Last error",
+        un_flash: "Saved state",
+        un_unsaved: "Not saved to flash",
+        un_forget: "Forget the controller",
+        un_forget_q: "Forget the UniFi controller?",
+        un_forget_d: "The switch goes back to the default key and waits to be adopted again. Its configuration does not change.",
         nav_lldp: "LLDP",
         hdr_dirty: "unsaved changes",
         hdr_dirty_t: "Running config differs from startup config",
@@ -2498,6 +2521,9 @@ var CONF_CMDS = [
     /^syslog\s+port\s+\d{1,5}$/,
     /^session\s+\d{1,5}$/,
     /^dns\s+server\s+(\d{1,3}\.){3}\d{1,3}(\s+(\d{1,3}\.){3}\d{1,3})?$/,
+    /^unifi\s+(on|off)$/,
+    /* as loose as the firmware's parser: a line it took must survive Save */
+    /^unifi\s+inform\s+http:\/\/[A-Za-z0-9._-]{1,47}(:\d+)?(\/[^ "\\]*)?$/,
     /^ntp\s+(on|off)$/,
     /^ntp\s+server\s+[A-Za-z0-9.-]{1,47}$/,
     /^ntp\s+interval\s+\d{1,4}$/,
@@ -2731,6 +2757,10 @@ var TABS = [{
         icon: "M4 18a8 8 0 0116 0M12 18l4-6"
     },
     {
+        id: "unifi",
+        icon: "M4 15a8 8 0 0116 0M8 15a4 4 0 018 0M12 15v.01M2 19h20"
+    },
+    {
         id: "system",
         icon: "M12 8a4 4 0 100 8 4 4 0 000-8zM4 12h2M18 12h2M12 4v2M12 18v2M6 6l1.5 1.5M16.5 16.5L18 18M18 6l-1.5 1.5M7.5 16.5L6 18"
     },
@@ -2765,6 +2795,7 @@ function showTab(id) {
 TABS.forEach(function(tb) {
     $("navlist").appendChild(h("li", {
         id: "nv-" + tb.id,
+        style: tb.id === "unifi" ? "display:none" : "",
         onclick: function() {
             showTab(tb.id)
         }
@@ -3167,7 +3198,8 @@ function pollInfo() {
         if (familyChanged) i18nApply();
         renderInfo();
         renderSnmp(j.snmp);
-        renderPrometheus(j.prometheus)
+        renderPrometheus(j.prometheus);
+        $("nv-unifi").style.display = j.unifi ? "" : "none"
     });
 }
 
@@ -6155,9 +6187,10 @@ var CONF_OVERWRITE = [
     /^stp\s+(prio|hello|maxage|fwd|txhold|version)\b/,
     /^stp\s+(port\s+\d{1,2}|lag\s+[1-4])\s+(edge|cost|prio|guard|filter|p2p)\b/,
     /^igmp\b/, /^mtu\s+\d{1,2}\b/, /^storm\s+\d{1,2}\s+(bcast|mcast|ucast|umcast)\b/,
+    /^unifi\s+inform\b/,
     /^acl\s+\d{1,2}\b/, /^acl\s+(meter|field)\s+\d{1,2}\b/, /^acl\s+counter\s+\d{1,2}\s+(mode|width)\b/, /^acl\s+gpio\s+([0-3]|polarity)\b/, /^acl\s+default\b/, /^dhcp\s+snooping\s+trust\b/,
 ];
-var CONF_TOGGLE = [/^(dhcp snooping)\s+(on|off)$/, /^(snmp)\s+(on|off)$/, /^(prometheus)\s+(on|off)$/, /^(syslog)\s+(on|off)$/, /^(ntp)\s+(on|off)$/, /^(stp)\s+(on|off)$/, /^(lldp)\s+(on|off)$/, /^(lldp\s+tlv\s+\w+)\s+(on|off)$/, /^(stp\s+(port\s+\d{1,2}|lag\s+[1-4]))\s+(on|off)$/];
+var CONF_TOGGLE = [/^(unifi)\s+(on|off)$/, /^(dhcp snooping)\s+(on|off)$/, /^(snmp)\s+(on|off)$/, /^(prometheus)\s+(on|off)$/, /^(syslog)\s+(on|off)$/, /^(ntp)\s+(on|off)$/, /^(stp)\s+(on|off)$/, /^(lldp)\s+(on|off)$/, /^(lldp\s+tlv\s+\w+)\s+(on|off)$/, /^(stp\s+(port\s+\d{1,2}|lag\s+[1-4]))\s+(on|off)$/];
 
 function mergeConf(base, texts) {
     var conf = [],
@@ -6683,6 +6716,89 @@ function fwSettle(st, knownGood) {
     setTimeout(probe, 3000);
 }
 tabHooks.fw = {};
+
+/* UniFi: the "unifi" command's report, parsed. The firmware keeps that
+ * query out of the command log, so polling it does not crowd out unsaved
+ * settings. force: also replace the form, edited or not. */
+function unifiLoad(force) {
+    return api("/cmd", {
+        method: "POST",
+        body: "unifi"
+    }).then(function(r) {
+        var a = r.body.match(/UniFi (on|off), inform (\S+), address ([\d.]+)/),
+            b = r.body.match(/(Adopted|Not adopted), cfgversion (\S+), interval (\d+) s/),
+            c = r.body.match(/Shown as (.+), version (\S+)/),
+            d = r.body.match(/Informs sent (\d+), last reply (\d+)(?: (.*?))?, failed (\d+), last error: ([^,\n]+)(, state not saved)?/);
+        if (!a || !b || !c || !d) return;
+        var rows = [
+            ["un_model", c[1]],
+            ["un_version", c[2]],
+            ["un_state", t(b[1] === "Adopted" ? "un_adopted" : "un_pending")],
+            ["un_addr", a[3] === "0.0.0.0" ? "-" : a[3]],
+            ["un_cfgver", b[2] === "?" ? "-" : b[2]],
+            ["un_interval", b[3] + " s"],
+            ["un_informs", d[1] + " / " + d[4]],
+            ["un_reply", d[2] === "0" ? "-" : d[2] + (d[3] ? " " + d[3] : "")],
+            ["un_error", d[5]]
+        ];
+        if (d[6]) rows.push(["un_flash", t("un_unsaved")]);
+        var tb = $("un-status");
+        tb.innerHTML = "";
+        rows.forEach(function(x) {
+            tb.appendChild(h("tr", null, [h("td", {
+                class: "mut",
+                text: t(x[0])
+            }), h("td", {
+                class: "mono",
+                text: x[1]
+            })]));
+        });
+        if ($("un-card").dataset.dirty && force !== true) return;
+        delete $("un-card").dataset.dirty;
+        $("un-on").checked = a[1] === "on";
+        $("un-url").value = a[2];
+    }).catch(function() {});
+}
+["change", "input"].forEach(function(ev) {
+    $("un-card").addEventListener(ev, function() {
+        this.dataset.dirty = "1"
+    })
+});
+$("un-apply").addEventListener("click", function() {
+    var url = $("un-url").value.trim();
+    /* As loose as the firmware's parser, which reports what it refuses */
+    if (!/^http:\/\/[A-Za-z0-9._-]{1,47}(:\d+)?(\/[^ "\\]*)?$/.test(url)) {
+        toast(t("un_url_err"), "err");
+        return;
+    }
+    var on = $("un-on").checked;
+    postCmds(["unifi inform " + url, "unifi " + (on ? "on" : "off")]).then(function() {
+        /* edits made while the commands ran stay */
+        if ($("un-url").value.trim() === url && $("un-on").checked === on) delete $("un-card").dataset.dirty;
+        return unifiLoad()
+    }).catch(function(e) {
+        toast(e.message || String(e), "err")
+    });
+});
+$("un-refresh").addEventListener("click", function() {
+    unifiLoad(true)
+});
+$("un-forget").addEventListener("click", function() {
+    confirmModal(t("un_forget_q"), t("un_forget_d"), function() {
+        postCmds(["unifi forget"]).then(unifiLoad).catch(function(e) {
+            toast(e.message || String(e), "err")
+        });
+    });
+});
+var unifiPoller = new Poller(unifiLoad, 10000);
+tabHooks.unifi = {
+    enter: function() {
+        unifiPoller.start()
+    },
+    leave: function() {
+        unifiPoller.stop()
+    }
+};
 
 window.addEventListener("hashchange", function() {
     var id = location.hash.slice(1);

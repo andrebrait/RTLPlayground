@@ -10,6 +10,7 @@
 #define UNIFI_PATH_LEN	48
 #define UNIFI_TYPE_LEN	16
 #define UNIFI_CFGVER_LEN	17	/* 16 hex digits */
+#define UNIFI_VERSION_LEN	24	/* the reported firmware version */
 
 struct uip_conn;
 
@@ -31,6 +32,7 @@ struct unifi_state {
 	uint8_t flash_fails;	/* saves that did not read back */
 	uint32_t boot;		/* boot counter, part of the IV */
 	char cfgver[UNIFI_CFGVER_LEN];	/* the controller's cfgversion, echoed */
+	char version[UNIFI_VERSION_LEN];	/* reported; an upgrade the controller offers sets it */
 	uint16_t interval;	/* seconds between two informs */
 	uint32_t next;		/* uptime seconds of the next inform */
 	uint32_t count;		/* informs sent */

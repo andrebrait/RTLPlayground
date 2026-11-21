@@ -767,9 +767,12 @@ Firmware version and update handling:
   provisioning is skipped (`dev[{}] (unsupported) provisioning skipped, device
   now stale`). Both are *string evidence*. The current version per model can be
   looked up on `fw-update.ui.com` (the same API used to find the controller).
-- Ignore `upgrade`, and keep reporting the same version. unifi-simulator and
-  unifi-stubd do this. How the controller UI behaves when an upgrade "never
-  finishes", and whether auto-update keeps retrying, is **unverified**.
+- **Chosen:** acknowledge `upgrade` the way the OpenWrt `unifi-agent` does.
+  The switch downloads nothing, but reports the offered `version` from then
+  on and keeps it in flash, so the controller considers the upgrade done and
+  stops offering it. The maintainer found this works well with the OpenWrt
+  agent. (unifi-simulator and unifi-stubd instead keep reporting the same
+  version; how the controller behaves then is **unverified**.)
 
 ## Feasibility on RTL837x / 8051
 
@@ -969,6 +972,21 @@ This design fits both switches:
      `none`, applies nothing and only logs. A change in a category that is
      not selected is logged as `not applied:`. This way, for example, the
      controller can manage the VLANs while the port settings stay local.
+   - In an area that is applied, the controller's settings win over local
+     edits, as on a real UniFi switch.
+   - Applied settings are written to `config.txt` by the firmware, so they
+     come back at boot without the controller. The firmware has no config
+     writer yet: today the web interface builds the file and uploads it. The
+     writer replaces the lines of the applied areas and writes the sector only
+     when something changed.
+   - The controller also sends EEE and flow control for SFP ports. The firmware
+     has neither for SFP ports, so those keys are ignored there (the OpenWrt
+     agent found this).
+   - Per-port STP settings from the controller are not applied for now, as in
+     the OpenWrt agent.
+   - The 4 x 2.5G + 2 x SFP+ boards report `USWED36`, like the 8 + 1 boards,
+     with the ports they lack left out of `port_table`; the maintainer chose
+     this over `US6XG150`.
 4. **Trim the inform.** Send only what the controller needs. Earlier in this
    document, `port_table` with
    `port_idx`/`up`/`enable`/`speed`/`rx_bytes`/`tx_bytes` was enough, and
