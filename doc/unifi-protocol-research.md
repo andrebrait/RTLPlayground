@@ -896,7 +896,7 @@ timers run 50 times per second.
 5 ms tick): 64 AES blocks take 115–130 ms. 64 AES-GCM blocks took 210–230 ms
 with the 4-bit GHASH table and take 175 ms with the 8-bit one (4 KB XDATA),
 so one 16-byte GCM block costs about 2.7 ms, about 5.9 KB/s, and AES is now
-three quarters of it. The firmware's C differs from the simulator's (fewer
+about 70 % of it. The firmware's C differs from the simulator's (fewer
 internal-RAM locals), so these figures do not convert back to a clean cycle
 rate. Expected wall time at that speed:
 
@@ -908,7 +908,7 @@ rate. Expected wall time at that speed:
 | `noop` | 163 B | ≈30 ms |
 
 Two blocks per main-loop pass is about 5.5 ms. Building the 8-bit table at
-key setup takes 30 ms, once per key (at boot and when the controller sends a
+key setup takes about 30 ms (5 ms tick), once per key (at boot and when the controller sends a
 new `authkey`). The TL-SG108PE V5 has not been measured yet.
 
 ### Compact protocol design
@@ -965,7 +965,7 @@ Budget, per switch:
 | HTTP client, TNBU framing, inform JSON, `system_cfg` to CLI translation | — | ≈8–13 KB |
 | Two more `uip_conn` slots, dispatcher | 60 B | ≈0.5 KB |
 | Metrics port TX buffer | ≈1,500 B | ≈0.5 KB |
-| **Total** | **≈17.2 KB of 28 KB free** | **≈12–17 KB: BANK5 on the RTL8373 build** |
+| **Total** | **≈17.2 KB of 28 KB free** | **≈13–18 KB: BANK5 on the RTL8373 build** |
 
 ### Admin password protection
 
