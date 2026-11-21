@@ -23,7 +23,7 @@
 
 struct gcm_t {
 	uint8_t rk[176];	/* AES-128 round keys */
-	uint8_t m[16][16];	/* m[n] = n * H, 4-bit table */
+	uint8_t m[256][16];	/* m[n] = n * H, 8-bit table */
 	uint8_t j0[16];		/* pre-counter block */
 	uint8_t ctr[16];
 	uint8_t blk[16];	/* AES block in place; the tag after gcm_finish */
