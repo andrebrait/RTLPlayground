@@ -227,10 +227,15 @@ static void u_fail(__xdata uint8_t e)
 }
 
 
-/* Port counters: a 64-bit big-endian value, its sum, and its digits */
+/* Port counters: a 64-bit big-endian value, its sum, and its digits. The
+ * last good sums are kept per port, so that a read that fails repeats them
+ * rather than sending 0 or a partial sum, which the controller would take
+ * for a counter that went back. The same holds for the link state. */
 static __xdata struct snmp_counter u_ctr, u_acc;
+static __xdata struct snmp_counter u_last[MACHINE_MAX_PORT + 1][4];
+static __xdata uint16_t u_links;	/* last good link state, one bit per port */
 static __xdata uint8_t u_dg[20];
-static __xdata uint8_t u_ph, u_up, u_cnt, u_adm;	/* u_d is the digit helpers' */
+static __xdata uint8_t u_ph, u_up, u_cnt, u_adm, u_ok;	/* u_d is the digit helpers' */
 static __xdata uint32_t u_link;
 static __xdata uint16_t u_mbps;
 
@@ -248,60 +253,75 @@ static void u_dec64(void)
 		u_c(u_dg[--u_n]);
 }
 
-/* Adds counter sel of u_ph to u_acc; 0 when it cannot be read */
+/* Adds counter sel of u_ph to u_acc; clears u_ok when it cannot be read */
 static void u_add(__xdata uint8_t sel)
 {
-	if (!snmp_hw_stat(u_ph, sel, true, true, &u_ctr))
+	if (!snmp_hw_stat(u_ph, sel, true, true, &u_ctr)) {
+		u_ok = 0;
 		return;
-	u_d[2] = 0;	/* carry */
+	}
+	u_i = 0;	/* the carry is the high byte */
 	for (u_d[1] = 8; u_d[1]--; ) {
-		u_i = u_acc.bytes[u_d[1]] + u_ctr.bytes[u_d[1]] + u_d[2];
+		u_i = u_acc.bytes[u_d[1]] + u_ctr.bytes[u_d[1]] + (u_i >> 8);
 		u_acc.bytes[u_d[1]] = u_i;
-		u_d[2] = u_i >> 8;
 	}
 }
 
-/* "name":<sum of the counters> */
-static void u_counter(__code const char *name, __xdata uint8_t first, __xdata uint8_t last)
+/* "name":<sum of counters first..last>, or the last good sum (slot k) */
+static void u_counter(__code const char *name, __xdata uint8_t k, __xdata uint8_t first, __xdata uint8_t last)
 {
 	u_s(name);
 	memset(u_acc.bytes, 0, 8);
+	u_ok = 1;
 	for (; first <= last; first++)
 		u_add(first);
+	if (u_ok)
+		memcpy(u_last[u_ph][k].bytes, u_acc.bytes, 8);
+	else
+		memcpy(u_acc.bytes, u_last[u_ph][k].bytes, 8);
 	u_dec64();
 }
 
 /* The port table, numbered by front-panel port: the controller keys every
- * port setting on port_idx. A port with no 2.5G or SFP+ PHY reports the
- * 1G modes. Duplex is not reported: the RTL837x status the firmware reads
- * has no duplex bit. */
+ * port setting on port_idx. log_to_phys_port, despite its name, maps an
+ * ASIC port to its front-panel number, and 0 marks an unused port. On the
+ * RTL837x, ASIC port 8 and, on an RTL8372, port 3 are the 10G lanes: an
+ * SFP+ cage, or copper when the board has 10G PHYs (n_10g). Duplex is not
+ * reported: the RTL837x status the firmware reads has no duplex bit. */
 static void u_ports(void)
 {
 	u_cnt = 0;	/* entries written */
 	for (u_ph = MACHINE_MIN_PORT; u_ph <= MACHINE_MAX_PORT; u_ph++) {
-		if (!snmp_hw_link(u_ph, &u_link))
+		if (!machine.log_to_phys_port[u_ph])
 			continue;
+		if (snmp_hw_link(u_ph, &u_link)) {
+			if ((uint16_t)u_link >> u_ph & 1)
+				u_links |= (uint16_t)1 << u_ph;
+			else
+				u_links &= ~((uint16_t)1 << u_ph);
+		}
 		u_up = 0;
-		if (u_link >> u_ph & 1)
+		if (u_links >> u_ph & 1)
 			u_up = 1;
 		u_mbps = 0;
-		if (u_up && !snmp_hw_speed(u_ph, &u_mbps))
-			u_mbps = 0;
+		if (u_up)
+			snmp_hw_speed(u_ph, &u_mbps);
 		u_adm = 1;	/* admin state: up unless the PHY is powered down */
-		if (snmp_hw_admin(u_ph, &u_adm) && u_adm == 2)
-			u_adm = 2;
+		snmp_hw_admin(u_ph, &u_adm);
 		if (u_cnt++)
 			u_c(',');
 		u_s("{\"port_idx\":");
-		u_dec(machine.phys_to_log_port[u_ph] + 1);
+		u_dec(machine.log_to_phys_port[u_ph]);
 		if (machine.is_sfp[u_ph])
 			u_s(",\"media\":\"SFP+\",\"speed_caps\":288");
 #if SOC_FAMILY == RTL836X
 		else
 			u_s(",\"media\":\"GE\",\"speed_caps\":1048623");
 #else
+		else if (machine.n_10g && (u_ph == 8 || (u_ph == 3 && !machine.isRTL8373)))
+			u_s(",\"media\":\"GE\",\"speed_caps\":1049064");	/* 100M to 10G */
 		else
-			u_s(",\"media\":\"GE\",\"speed_caps\":1048682");
+			u_s(",\"media\":\"GE\",\"speed_caps\":1048682");	/* 10M to 2.5G */
 #endif
 		if (u_up)
 			u_s(",\"up\":true");
@@ -313,17 +333,17 @@ static void u_ports(void)
 			u_s(",\"enable\":true");
 		u_s(",\"speed\":");
 		u_dec(u_mbps);
-		u_counter(",\"rx_bytes\":", 0, 0);
-		u_counter(",\"tx_bytes\":", 1, 1);
-		u_counter(",\"rx_packets\":", 2, 4);
-		u_counter(",\"tx_packets\":", 5, 7);
+		u_counter(",\"rx_bytes\":", 0, 0, 0);
+		u_counter(",\"tx_bytes\":", 1, 1, 1);
+		u_counter(",\"rx_packets\":", 2, 2, 4);
+		u_counter(",\"tx_packets\":", 3, 5, 7);
 		u_c('}');
 	}
 }
 
 
 /* The inform JSON, then the TNBU header in front of it. Starts the
- * encryption. Until step 5 the port table is empty. */
+ * encryption. */
 static void u_build(void)
 {
 	unifi.pos = HROOM + TNBU_HDR;
