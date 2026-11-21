@@ -73,6 +73,34 @@ bool strstart(const uint8_t *a, const uint8_t *b)
 
 void gcm_selftest(void) { selftests++; }
 
+/* The hardware: nine ports, 1 down and powered down, 8 an SFP+ at 10G */
+const struct machine machine = {
+	.phys_to_log_port = { 0, 1, 2, 3, 4, 5, 6, 7, 8 },
+	.is_sfp = { 0, 0, 0, 0, 0, 0, 0, 0, 1 },
+};
+bool snmp_hw_link(uint8_t port, uint32_t *value)
+{
+	*value = 0x1fd;
+	return port <= 8;
+}
+bool snmp_hw_speed(uint8_t port, uint16_t *mbps)
+{
+	*mbps = port == 8 ? 10000 : 2500;
+	return true;
+}
+bool snmp_hw_admin(uint8_t port, uint8_t *state)
+{
+	*state = port == 1 ? 2 : 1;
+	return true;
+}
+bool snmp_hw_stat(uint8_t port, uint8_t selector, bool high, bool low, struct snmp_counter *value)
+{
+	uint64_t v = port == 0 && selector == 0 ? ~0ULL : port * 1000u + selector;
+	for (int i = 0; i < 8; i++)
+		value->bytes[i] = v >> (56 - 8 * i);
+	return high && low;
+}
+
 /* The UniFi state sector */
 struct flash_region_t flash_region;
 static uint8_t sector[8192];	/* both UniFi sectors */
@@ -195,7 +223,7 @@ static void ticks(void)
 }
 
 /* The request as sent */
-static uint8_t req[2048];
+static uint8_t req[8192];
 static uint16_t req_len;
 
 static void keep_sent(void)
@@ -340,7 +368,7 @@ static void test_request(void)
 	check(!strncmp((char *)req, start, sizeof(start) - 1) && body
 	      && clen == req_len - ((uint8_t *)body + 4 - req),
 	      "request: HTTP header with the body's Content-Length");
-	if (!body || clen < 56 || clen > 2048 || clen != req_len - ((uint8_t *)body + 4 - req))
+	if (!body || clen < 56 || clen > 8192 || clen != req_len - ((uint8_t *)body + 4 - req))
 		return;	/* nothing below can read a request that is not framed */
 	uint8_t *p = (uint8_t *)body + 4;
 	uint16_t plen = (uint16_t)(p[38] << 8 | p[39]);
@@ -350,7 +378,8 @@ static void test_request(void)
 	if (plen != clen - 40)
 		return;
 
-	uint8_t k[16], copy[2048];
+	uint8_t k[16];
+	static uint8_t copy[8192];
 	memcpy(copy, p, clen);
 	memcpy(k, key, 16);
 	gcm_setkey(k);
@@ -364,10 +393,23 @@ static void test_request(void)
 		"\"model_display\":\"" UNIFI_DISPLAY "\",\"version\":\"" UNIFI_VERSION "\",\"ip\":\"10.0.0.7\","
 		"\"netmask\":\"255.255.0.0\",\"hostname\":\"sw\\\"1\",\"inform_url\":\"http://10.0.0.1:8080/inform\","
 		"\"uptime\":1234,\"cfgversion\":\"?\",\"default\":true,\"state\":1,\"fw_caps\":0,"
-		"\"isolated\":false,\"locating\":false,\"selfrun_beacon\":false,\"port_table\":[]}";
-	check(!strcmp((char *)copy + 40, want), "request: the decrypted JSON");
-	if (strcmp((char *)copy + 40, want))
-		printf("  got %s\n", copy + 40);
+		"\"isolated\":false,\"locating\":false,\"selfrun_beacon\":false,\"port_table\":["
+		"{\"port_idx\":1,\"media\":\"GE\",\"speed_caps\":1048682,\"up\":true,\"enable\":true,\"speed\":2500,"
+		"\"rx_bytes\":18446744073709551615,\"tx_bytes\":1,\"rx_packets\":9,\"tx_packets\":18},"
+		"{\"port_idx\":2,\"media\":\"GE\",\"speed_caps\":1048682,\"up\":false,\"enable\":false,\"speed\":0,"
+		"\"rx_bytes\":1000,\"tx_bytes\":1001,\"rx_packets\":3009,\"tx_packets\":3018},";
+	const char *last = "{\"port_idx\":9,\"media\":\"SFP+\",\"speed_caps\":288,\"up\":true,\"enable\":true,"
+		"\"speed\":10000,\"rx_bytes\":8000,\"tx_bytes\":8001,\"rx_packets\":24009,\"tx_packets\":24018}]}";
+	const char *got = (char *)copy + 40;
+	check(!strncmp(got, want, strlen(want)) && strlen(got) > strlen(last)
+	      && !strcmp(got + strlen(got) - strlen(last), last),
+	      "request: the decrypted JSON, with the port table");
+	if (strncmp(got, want, strlen(want)))
+		printf("  got %s\n", got);
+	int ports = 0;
+	for (const char *q = got; (q = strstr(q, "\"port_idx\":")); q++)
+		ports++;
+	check(ports == 9, "request: one port_table entry per port");
 
 	static const char nf[] = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
 	appcall(UIP_NEWDATA, nf, sizeof(nf) - 1);
@@ -555,7 +597,7 @@ static uint8_t req_iv[16];
 
 static const char *req_json(void)
 {
-	static uint8_t copy[2048];
+	static uint8_t copy[8192];
 	char *body = memmem(req, req_len, "\r\n\r\n", 4);
 	if (!body)
 		return NULL;

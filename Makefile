@@ -240,8 +240,9 @@ endif
 ifeq ($(UNIFI),1)
 SRCS += crypto/aes_gcm.c crypto/gcm_selftest.c unifi.c
 endif
-# The bounded hardware readers serve both SNMP and the Prometheus exporter.
-ifneq ($(filter 1,$(SNMP) $(PROMETHEUS)),)
+# The bounded hardware readers serve SNMP, the Prometheus exporter and the
+# UniFi port table.
+ifneq ($(filter 1,$(SNMP) $(PROMETHEUS) $(UNIFI)),)
 SRCS += snmp_hw.c
 endif
 

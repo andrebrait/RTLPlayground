@@ -24,6 +24,7 @@
 #include "uip/uip.h"
 #include "dns.h"
 #include "rtl837x_flash.h"
+#include "snmp_hw.h"
 #include "crypto/aes_gcm.h"
 #include "unifi.h"
 
@@ -88,6 +89,7 @@
 #define UNIFI_FLASH_TRIES	3	/* then a broken flash is left alone */
 
 extern __xdata uint32_t uptime_secs;
+extern __code const struct machine machine;
 extern __xdata struct flash_region_t flash_region;
 extern __xdata uint8_t sfr_data[4];
 extern __xdata uint8_t cmd_words_len;
@@ -225,6 +227,101 @@ static void u_fail(__xdata uint8_t e)
 }
 
 
+/* Port counters: a 64-bit big-endian value, its sum, and its digits */
+static __xdata struct snmp_counter u_ctr, u_acc;
+static __xdata uint8_t u_dg[20];
+static __xdata uint8_t u_ph, u_up, u_cnt, u_adm;	/* u_d is the digit helpers' */
+static __xdata uint32_t u_link;
+static __xdata uint16_t u_mbps;
+
+/* u_acc in decimal; u_acc is used up */
+static void u_dec64(void)
+{
+	u_n = 0;
+	do {
+		u_dg[u_n++] = '0' + div_small(u_acc.bytes, 8, 10);
+		u_d[0] = 0;
+		for (u_d[1] = 0; u_d[1] < 8; u_d[1]++)
+			u_d[0] |= u_acc.bytes[u_d[1]];
+	} while (u_d[0]);
+	while (u_n)
+		u_c(u_dg[--u_n]);
+}
+
+/* Adds counter sel of u_ph to u_acc; 0 when it cannot be read */
+static void u_add(__xdata uint8_t sel)
+{
+	if (!snmp_hw_stat(u_ph, sel, true, true, &u_ctr))
+		return;
+	u_d[2] = 0;	/* carry */
+	for (u_d[1] = 8; u_d[1]--; ) {
+		u_i = u_acc.bytes[u_d[1]] + u_ctr.bytes[u_d[1]] + u_d[2];
+		u_acc.bytes[u_d[1]] = u_i;
+		u_d[2] = u_i >> 8;
+	}
+}
+
+/* "name":<sum of the counters> */
+static void u_counter(__code const char *name, __xdata uint8_t first, __xdata uint8_t last)
+{
+	u_s(name);
+	memset(u_acc.bytes, 0, 8);
+	for (; first <= last; first++)
+		u_add(first);
+	u_dec64();
+}
+
+/* The port table, numbered by front-panel port: the controller keys every
+ * port setting on port_idx. A port with no 2.5G or SFP+ PHY reports the
+ * 1G modes. Duplex is not reported: the RTL837x status the firmware reads
+ * has no duplex bit. */
+static void u_ports(void)
+{
+	u_cnt = 0;	/* entries written */
+	for (u_ph = MACHINE_MIN_PORT; u_ph <= MACHINE_MAX_PORT; u_ph++) {
+		if (!snmp_hw_link(u_ph, &u_link))
+			continue;
+		u_up = 0;
+		if (u_link >> u_ph & 1)
+			u_up = 1;
+		u_mbps = 0;
+		if (u_up && !snmp_hw_speed(u_ph, &u_mbps))
+			u_mbps = 0;
+		u_adm = 1;	/* admin state: up unless the PHY is powered down */
+		if (snmp_hw_admin(u_ph, &u_adm) && u_adm == 2)
+			u_adm = 2;
+		if (u_cnt++)
+			u_c(',');
+		u_s("{\"port_idx\":");
+		u_dec(machine.phys_to_log_port[u_ph] + 1);
+		if (machine.is_sfp[u_ph])
+			u_s(",\"media\":\"SFP+\",\"speed_caps\":288");
+#if SOC_FAMILY == RTL836X
+		else
+			u_s(",\"media\":\"GE\",\"speed_caps\":1048623");
+#else
+		else
+			u_s(",\"media\":\"GE\",\"speed_caps\":1048682");
+#endif
+		if (u_up)
+			u_s(",\"up\":true");
+		else
+			u_s(",\"up\":false");
+		if (u_adm == 2)
+			u_s(",\"enable\":false");
+		else
+			u_s(",\"enable\":true");
+		u_s(",\"speed\":");
+		u_dec(u_mbps);
+		u_counter(",\"rx_bytes\":", 0, 0);
+		u_counter(",\"tx_bytes\":", 1, 1);
+		u_counter(",\"rx_packets\":", 2, 4);
+		u_counter(",\"tx_packets\":", 5, 7);
+		u_c('}');
+	}
+}
+
+
 /* The inform JSON, then the TNBU header in front of it. Starts the
  * encryption. Until step 5 the port table is empty. */
 static void u_build(void)
@@ -260,7 +357,9 @@ static void u_build(void)
 	else
 		u_s("\",\"default\":true,\"state\":1,");
 	u_s("\"fw_caps\":0,\"isolated\":false,\"locating\":false,"
-	    "\"selfrun_beacon\":false,\"port_table\":[]}");
+	    "\"selfrun_beacon\":false,\"port_table\":[");
+	u_ports();
+	u_s("]}");
 	unifi.end = unifi.pos;
 
 	/* Packet version 0, then the fields that are not zero */
