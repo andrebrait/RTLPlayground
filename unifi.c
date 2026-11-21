@@ -73,15 +73,19 @@
 #define TAG_LEN		16
 #define STEP		32	/* bytes crypted per tick: two blocks, about 5.5 ms */
 
-/* The adoption survives reboots and firmware updates in its own flash
- * sector: an update rewrites flash below CONFIG_START only, and the
+/* The adoption survives reboots and firmware updates in two flash sectors
+ * of its own: an update rewrites flash below CONFIG_START only, and the
  * configuration uses the sector at CONFIG_START. Each save appends a
- * record in the next free slot, and the newest valid one counts. The
- * sector is erased only when it is full, once in 64 saves, so a power cut
- * while saving loses at most the record being written. */
+ * record in the next free slot of the current sector, and the valid record
+ * with the highest sequence number counts. When the sector is full, the
+ * other one is erased and written, so the last good record is never the
+ * one being erased. A record counts only once its commit byte, written
+ * last and on its own, reads 0: a power cut while saving loses at most the
+ * record being written. */
 #define UNIFI_STATE_START	(CONFIG_START + FLASH_SECTOR_SIZE)
 #define UNIFI_SLOT		64
 #define UNIFI_SLOTS		(FLASH_SECTOR_SIZE / UNIFI_SLOT)
+#define UNIFI_FLASH_TRIES	3	/* then a broken flash is left alone */
 
 extern __xdata uint32_t uptime_secs;
 extern __xdata struct flash_region_t flash_region;
@@ -108,15 +112,19 @@ static __code const uint8_t u_default_key[16] = {
  * Changing the layout needs a new magic. */
 struct u_rec {
 	char magic[4];
+	uint32_t seq;	/* one more on every save */
 	uint32_t boot;
 	uint8_t key[16];
 	char cfgver[UNIFI_CFGVER_LEN];
 	uint8_t sum;	/* the bytes before it add up to this */
+	uint8_t commit;	/* 0 once the record is complete */
 };
 typedef char u_rec_fits[sizeof(struct u_rec) <= UNIFI_SLOT ? 1 : -1];
 static __xdata struct u_rec u_rec, u_back;
-static __xdata uint8_t u_slot;	/* the next free slot */
-static __code const char u_magic[] = "UNF1";
+static __xdata uint8_t u_sec, u_slot;	/* the current sector and its next free slot */
+static __xdata uint8_t u_free[2];	/* the first free slot of each sector, at boot */
+static __xdata uint32_t u_seq, u_best;
+static __code const char u_magic[] = "UNF2";
 
 static __code const char u_default_host[] = "unifi";
 static __code const char u_default_path[] = "/inform";
@@ -500,28 +508,48 @@ static uint8_t u_sum(void)
 	return u_d[0];
 }
 
-/* Returns 1 when the record reads back as written */
+static uint32_t u_addr(void)
+{
+	return UNIFI_STATE_START + (uint16_t)u_sec * FLASH_SECTOR_SIZE + (uint16_t)u_slot * UNIFI_SLOT;
+}
+
+/* Writes the state as a new record. Returns 1 when it reads back as
+ * written, else leaves unifi.unsaved set for a later try. */
 static uint8_t u_save(void)
 {
+	unifi.unsaved = 1;
+	if (unifi.flash_fails >= UNIFI_FLASH_TRIES)
+		return 0;
 	memcpyc(u_rec.magic, u_magic, 4);
+	u_rec.seq = ++u_seq;
 	u_rec.boot = unifi.boot;
 	memcpy(u_rec.key, unifi.key, 16);
 	memcpy(u_rec.cfgver, unifi.cfgver, UNIFI_CFGVER_LEN);
 	u_rec.sum = u_sum();
+	u_rec.commit = 0xff;
 	if (u_slot >= UNIFI_SLOTS) {
-		flash_region.addr = UNIFI_STATE_START;
-		flash_sector_erase();
+		u_sec ^= 1;
 		u_slot = 0;
+		flash_region.addr = u_addr();
+		flash_sector_erase();
 	}
-	flash_region.addr = UNIFI_STATE_START + (uint16_t)u_slot * UNIFI_SLOT;
-	flash_region.len = sizeof(u_rec);
+	flash_region.addr = u_addr();
+	flash_region.len = sizeof(u_rec) - 1;
 	flash_write_bytes((__xdata uint8_t *)&u_rec);
-	u_slot++;
-	flash_region.addr = UNIFI_STATE_START + (uint16_t)(u_slot - 1) * UNIFI_SLOT;
+	u_rec.commit = 0;
+	flash_region.addr = u_addr() + offsetof(struct u_rec, commit);
+	flash_region.len = 1;
+	flash_write_bytes(&u_rec.commit);
+	flash_region.addr = u_addr();
 	flash_region.len = sizeof(u_back);
 	flash_read_bulk((__xdata uint8_t *)&u_back);
-	if (memcmp(&u_back, &u_rec, sizeof(u_rec)))
+	u_slot++;
+	if (memcmp(&u_back, &u_rec, sizeof(u_rec))) {
+		unifi.flash_fails++;
 		return 0;
+	}
+	unifi.flash_fails = 0;
+	unifi.unsaved = 0;
 	return 1;
 }
 
@@ -535,7 +563,8 @@ static void u_forget(void)
 	unifi.adopted = 0;
 	unifi.keyed = 0;
 	unifi.cfgver[0] = 0;
-	u_save();
+	if (!u_save())
+		print_string("Error: the UniFi state could not be saved\n");
 }
 
 
@@ -642,7 +671,7 @@ static void u_decrypted(void)
 		u_i = u_find("\"interval\":", 0, u_n);
 		if (u_i != 0xffff) {
 			for (u_j = 0; u_i < u_n && u_p[u_i] >= '0' && u_p[u_i] <= '9'; u_i++)
-				if (u_j < 10000)
+				if (u_j <= 3600)	/* larger stays larger, without overflow */
 					u_j = u_j * 10 + u_p[u_i] - '0';
 			if (u_j >= 5 && u_j <= 3600)
 				unifi.interval = u_j;
@@ -673,10 +702,9 @@ static void u_decrypted(void)
 			u_i = u_line("cfgversion=");
 		if (unifi.adopted && u_i != 0xffff && u_cfgver())
 			u_dirty = 1;
-		/* A boot counter that did not reach flash is counted again
-		 * before the next inform */
-		if (u_dirty && !u_save())
-			unifi.booted = 0;
+		/* A save that fails is tried again before the next inform */
+		if (u_dirty)
+			u_save();
 	} else if (!strcmp(unifi.type, "setdefault")) {
 		/* Removed in the controller: wait for adoption again */
 		u_dirty = unifi.adopted;
@@ -714,16 +742,16 @@ void unifi_tick(void) __banked
 		if (uptime_secs < unifi.next || dns_state.status == DNS_PENDING)
 			return;
 		if (unifi.adopted && !unifi.booted) {
-			/* One flash write per boot keeps the IVs unique. No inform
-			 * goes out under the authkey until it is saved. */
+			/* One flash write per boot keeps the IVs unique */
 			unifi.boot++;
-			if (!u_save()) {
-				unifi.err = UE_FLASH;
-				unifi.fails++;
-				u_done();
-				return;
-			}
 			unifi.booted = 1;
+			unifi.unsaved = 1;
+		}
+		/* No inform goes out until the state is in flash: under the
+		 * authkey, the boot counter in the IV must be saved first */
+		if (unifi.unsaved && !u_save()) {
+			u_fail(UE_FLASH);
+			return;
 		}
 		if (!unifi.keyed) {
 			/* About 30 ms, once per key */
@@ -804,24 +832,44 @@ void unifi_init(void) __banked
 	unifi.port = UNIFI_PORT;
 	unifi.interval = 10;
 	memcpyc(unifi.key, u_default_key, 16);
-	/* The newest valid record; the first erased slot ends the search */
+	/* The valid record with the highest sequence number, in either
+	 * sector. A save that failed can leave an erased slot between used
+	 * ones, so every slot is read, and writing goes on after the last
+	 * used one. */
 	memcpyc(u_k, u_default_key, 16);
-	for (u_slot = 0; u_slot < UNIFI_SLOTS; u_slot++) {
-		flash_region.addr = UNIFI_STATE_START + (uint16_t)u_slot * UNIFI_SLOT;
-		flash_region.len = sizeof(u_rec);
-		flash_read_bulk((__xdata uint8_t *)&u_rec);
-		if (((__xdata uint8_t *)&u_rec)[0] == 0xff && ((__xdata uint8_t *)&u_rec)[1] == 0xff)
-			break;
-		if (!strstart(u_rec.magic, u_magic) || u_rec.sum != u_sum())
-			continue;
-		unifi.boot = u_rec.boot;
-		unifi.adopted = 0;
-		if (memcmp(u_rec.key, u_k, 16))
-			unifi.adopted = 1;
-		memcpy(unifi.key, u_rec.key, 16);
-		memcpy(unifi.cfgver, u_rec.cfgver, UNIFI_CFGVER_LEN);
-		unifi.cfgver[UNIFI_CFGVER_LEN - 1] = 0;
+	u_seq = 0;
+	u_best = 0;
+	u_sec = 0;
+	for (u_d[2] = 0; u_d[2] < 2; u_d[2]++) {
+		u_free[u_d[2]] = 0;
+		for (u_d[3] = 0; u_d[3] < UNIFI_SLOTS; u_d[3]++) {
+			flash_region.addr = UNIFI_STATE_START + (uint16_t)u_d[2] * FLASH_SECTOR_SIZE
+				+ (uint16_t)u_d[3] * UNIFI_SLOT;
+			flash_region.len = sizeof(u_rec);
+			flash_read_bulk((__xdata uint8_t *)&u_rec);
+			for (u_d[4] = 0; u_d[4] < sizeof(u_rec); u_d[4]++)
+				if (((__xdata uint8_t *)&u_rec)[u_d[4]] != 0xff)
+					break;
+			if (u_d[4] == sizeof(u_rec))
+				continue;	/* erased */
+			u_free[u_d[2]] = u_d[3] + 1;
+			if (!strstart(u_rec.magic, u_magic) || u_rec.sum != u_sum() || u_rec.commit)
+				continue;
+			if (u_rec.seq <= u_best)
+				continue;
+			u_best = u_rec.seq;
+			u_sec = u_d[2];
+			unifi.boot = u_rec.boot;
+			unifi.adopted = 0;
+			if (memcmp(u_rec.key, u_k, 16))
+				unifi.adopted = 1;
+			memcpy(unifi.key, u_rec.key, 16);
+			memcpy(unifi.cfgver, u_rec.cfgver, UNIFI_CFGVER_LEN);
+			unifi.cfgver[UNIFI_CFGVER_LEN - 1] = 0;
+		}
 	}
+	u_seq = u_best;
+	u_slot = u_free[u_sec];
 }
 
 

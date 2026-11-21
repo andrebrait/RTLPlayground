@@ -75,8 +75,8 @@ void gcm_selftest(void) { selftests++; }
 
 /* The UniFi state sector */
 struct flash_region_t flash_region;
-static uint8_t sector[4096];
-static int erases, saves, cut, broken;	/* cut: the next write stops after that many bytes */
+static uint8_t sector[8192];	/* both UniFi sectors */
+static int erases, saves, cut, broken, no_commit;	/* cut: the next write stops after that many bytes */
 static uint8_t *at(void)
 {
 	uint32_t o = flash_region.addr - UNIFI_STATE_START;
@@ -88,16 +88,21 @@ static uint8_t *at(void)
 }
 void flash_sector_erase(void)
 {
-	if (flash_region.addr != UNIFI_STATE_START) {
-		printf("FAIL erase outside the UniFi sector\n");
+	if (flash_region.addr != UNIFI_STATE_START && flash_region.addr != UNIFI_STATE_START + 4096) {
+		printf("FAIL erase outside the UniFi sectors\n");
 		exit(1);
 	}
-	memset(sector, 0xff, sizeof(sector));
+	memset(at() , 0xff, 4096);
 	erases++;
 }
 void flash_write_bytes(uint8_t *p)
 {
 	uint8_t *d = at();
+	if (flash_region.len == 1) {	/* the commit byte */
+		if (!no_commit && !broken)
+			*d &= *p;
+		return;
+	}
 	saves++;
 	if (broken)
 		return;
@@ -110,12 +115,20 @@ void flash_read_bulk(uint8_t *d)
 	memcpy(d, at(), flash_region.len);
 }
 
-/* The newest record written */
+/* The complete record with the highest sequence number. Layout: magic 0,
+ * seq 4, boot 8, key 12, cfgversion 28, sum 45, commit 46. */
 static const uint8_t *last_rec(void)
 {
 	const uint8_t *r = sector;
-	for (int i = 0; i < 64 && sector[i * 64] != 0xff; i++)
-		r = sector + i * 64;
+	uint32_t best = 0, seq;
+	for (int i = 0; i < 128; i++) {
+		const uint8_t *s = sector + i * 64;
+		memcpy(&seq, s + 4, 4);
+		if (!memcmp(s, "UNF2", 4) && !s[46] && seq > best) {
+			best = seq;
+			r = s;
+		}
+	}
 	return r;
 }
 
@@ -580,8 +593,8 @@ static void test_adopt(void)
 	check(unifi.adopted && !memcmp(unifi.key, newkey, 16) && !strcmp(unifi.cfgver, "cfe5c9df7757b6f5")
 	      && unifi.next == uptime_secs && !unifi.keyed,
 	      "adopt: the authkey and cfgversion are taken, and the next inform is due");
-	check(saves == 1 && !erases && !memcmp(sector, "UNF1", 4) && !memcmp(sector + 8, newkey, 16)
-	      && !strcmp((char *)sector + 24, "cfe5c9df7757b6f5"),
+	check(saves == 1 && !erases && !memcmp(sector, "UNF2", 4) && !memcmp(sector + 12, newkey, 16)
+	      && !strcmp((char *)sector + 28, "cfe5c9df7757b6f5"),
 	      "adopt: the key and cfgversion are saved to flash");
 
 	cur_key = newkey;
@@ -626,7 +639,7 @@ static void test_adopt(void)
 
 	answer("{\"_type\":\"setdefault\"}");
 	check(!unifi.adopted && !memcmp(unifi.key, key, 16) && !unifi.cfgver[0] && saves == 4
-	      && !memcmp(last_rec() + 8, key, 16) && last_rec()[4] == 2 && unifi.next == uptime_secs,
+	      && !memcmp(last_rec() + 12, key, 16) && last_rec()[8] == 2 && unifi.next == uptime_secs,
 	      "setdefault: back to the default key, saved");
 
 	cur_key = key;
@@ -637,7 +650,7 @@ static void test_adopt(void)
 	answer("{\"_type\":\"setparam\",\"mgmt_cfg\":\"authkey=0011223344556677889900aabbccddee\\n\"}");
 	check(unifi.adopted && unifi.key[0] == 0x00 && unifi.key[15] == 0xee, "adopt: again after setdefault");
 	cmd("unifi forget");
-	check(!unifi.adopted && !memcmp(unifi.key, key, 16) && !memcmp(last_rec() + 8, key, 16),
+	check(!unifi.adopted && !memcmp(unifi.key, key, 16) && !memcmp(last_rec() + 12, key, 16),
 	      "forget: the command goes back to the default key");
 
 	inform();
@@ -671,7 +684,30 @@ static void test_adopt(void)
 	}
 	uint32_t b = unifi.boot;
 	unifi_init();
-	check(erases == 1 && unifi.boot == b && unifi.adopted, "flash: a full sector is erased and the newest record kept");
+	check(erases == 1 && unifi.boot == b && unifi.adopted && u_sec == 1,
+	      "flash: when a sector is full, the other one is erased and used");
+
+	/* A record whose commit byte never got written does not count */
+	no_commit = 1;
+	unifi.boot++;
+	u_save();
+	no_commit = 0;
+	unifi_init();
+	check(unifi.boot == b && unifi.adopted, "flash: a record without its commit byte is skipped");
+
+	/* A power cut during the erase of the other sector: the full one stays */
+	while (u_slot < 64) {
+		unifi.boot++;
+		u_save();
+	}
+	b = unifi.boot;
+	broken = 1;
+	unifi.boot++;
+	check(!u_save() && unifi.unsaved, "flash: a save that does not read back is reported");
+	broken = 0;
+	unifi_init();
+	check(erases == 2 && unifi.boot == b && unifi.adopted && u_sec == 1,
+	      "flash: an erase cut short keeps the last good record in the other sector");
 
 	unifi_reset();
 	unifi_init();
@@ -709,6 +745,9 @@ static void test_bounds(void)
 	inform();
 	answer("{\"_type\":\"noop\",\"interval\":3601}");
 	check(unifi.interval == 10, "bounds: an interval of 3601 s is ignored");
+	inform();
+	answer("{\"_type\":\"noop\",\"interval\":65541}");
+	check(unifi.interval == 10, "bounds: an interval that would wrap 16 bits is ignored");
 
 	/* A flash that does not take writes: no inform under the authkey */
 	broken = 1;
@@ -719,12 +758,30 @@ static void test_bounds(void)
 	int c = connects;
 	uptime_secs += 100;
 	ticks();
-	check(unifi.err == UE_FLASH && connects == c && unifi.phase == U_IDLE && !unifi.booted,
+	check(unifi.err == UE_FLASH && connects == c && unifi.phase == U_IDLE && unifi.unsaved,
 	      "flash: the boot counter must reach flash before an inform under the authkey");
 	broken = 0;
 	inform();
-	check(connects == c + 1 && unifi.boot == b + 2 && unifi.booted && req_json(),
-	      "flash: once it is saved, the inform goes out with the counter advanced twice");
+	check(connects == c + 1 && unifi.boot == b + 1 && !unifi.unsaved && req_json() && req_iv[11] == (uint8_t)(b + 1),
+	      "flash: once it is saved, the inform goes out with that boot counter");
+
+	/* The failed save above left an erased slot before the good one */
+	unifi_init();
+	check(unifi.boot == b + 1 && u_slot == 4, "flash: a record after an erased slot is found, and writing goes on after it");
+
+	/* A flash that never takes writes is tried three times, then left alone */
+	broken = 1;
+	unifi_init();
+	cmd("unifi inform http://10.0.0.1");
+	cmd("unifi on");
+	int before = saves;
+	for (int i = 0; i < 6; i++) {
+		uptime_secs += 100;
+		ticks();
+	}
+	check(saves == before + 3 && unifi.err == UE_FLASH && connects == c + 1,
+	      "flash: a broken flash is not worn by endless retries");
+	broken = 0;
 }
 
 int main(void)
