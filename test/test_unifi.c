@@ -65,6 +65,7 @@ void get_random_32(void)
 }
 
 void memcpyc(uint8_t *dst, const uint8_t *src, uint16_t len) { memcpy(dst, src, len); }
+uint16_t strlen_x(const char *s) { return strlen(s); }
 
 bool strstart(const uint8_t *a, const uint8_t *b)
 {
@@ -139,8 +140,8 @@ void flash_sector_erase(void)
 	}
 	if (partial) {
 		/* Cut short: bits only went up, here the top byte of each seq */
-		for (int i = 0; i < 64; i++)
-			at()[i * 64 + 7] = 0xff;
+		for (int i = 0; i < UNIFI_SLOTS; i++)
+			at()[i * UNIFI_SLOT + 7] = 0xff;
 		partial = 0;
 	} else {
 		memset(at(), 0xff, 4096);
@@ -168,15 +169,15 @@ void flash_read_bulk(uint8_t *d)
 }
 
 /* The complete record with the highest sequence number. Layout: magic 0,
- * seq 4, boot 8, key 12, cfgversion 28, sum 45, commit 47. */
+ * seq 4, boot 8, key 12, cfgversion 28, version 45, sum 69, commit 71. */
 static const uint8_t *last_rec(void)
 {
 	const uint8_t *r = sector;
 	uint32_t best = 0, seq;
-	for (int i = 0; i < 128; i++) {
-		const uint8_t *s = sector + i * 64;
+	for (int i = 0; i < 2 * UNIFI_SLOTS; i++) {
+		const uint8_t *s = sector + i * UNIFI_SLOT;
 		memcpy(&seq, s + 4, 4);
-		if (!memcmp(s, "UNF3", 4) && !s[47] && seq > best) {
+		if (!memcmp(s, "UNF4", 4) && !s[71] && seq > best) {
 			best = seq;
 			r = s;
 		}
@@ -663,7 +664,7 @@ static void test_adopt(void)
 	check(unifi.adopted && !memcmp(unifi.key, newkey, 16) && !strcmp(unifi.cfgver, "cfe5c9df7757b6f5")
 	      && unifi.next == uptime_secs && !unifi.keyed,
 	      "adopt: the authkey and cfgversion are taken, and the next inform is due");
-	check(saves == 1 && !erases && !memcmp(sector, "UNF3", 4) && !memcmp(sector + 12, newkey, 16)
+	check(saves == 1 && !erases && !memcmp(sector, "UNF4", 4) && !memcmp(sector + 12, newkey, 16)
 	      && !strcmp((char *)sector + 28, "cfe5c9df7757b6f5"),
 	      "adopt: the key and cfgversion are saved to flash");
 
@@ -677,7 +678,7 @@ static void test_adopt(void)
 	answer("{\"_type\":\"setparam\",\"cfgversion\":\"0123456789abcdef\",\"system_cfg\":\"x=1\","
 	       "\"mgmt_cfg\":\"authkey=ffffffffffffffffffffffffffffffff\\ncfgversion=0123456789abcdef\\n\"}");
 	check(!strcmp(unifi.cfgver, "0123456789abcdef") && !memcmp(unifi.key, newkey, 16) && saves == 2
-	      && last_rec() == sector + 64,
+	      && last_rec() == sector + UNIFI_SLOT,
 	      "provision: the new cfgversion is kept; a second authkey is ignored");
 
 	inform();
@@ -691,8 +692,8 @@ static void test_adopt(void)
 	answer("{\"_type\":\"noop\",\"interval\":36000}");
 	check(unifi.interval == 18, "noop: an interval above 3600 s is ignored, whatever its length");
 	inform();
-	answer("{\"_type\":\"upgrade\",\"version\":\"9.9.9\"}");
-	check(unifi.next == uptime_secs + 18 && !strcmp(unifi.type, "upgrade"),
+	answer("{\"_type\":\"reboot\",\"reboot_type\":\"soft\"}");
+	check(unifi.next == uptime_secs + 18 && !strcmp(unifi.type, "reboot"),
 	      "reply: a command not handled waits the interval");
 
 	/* A reboot: the adoption comes back, and the boot is counted again */
@@ -748,7 +749,7 @@ static void test_adopt(void)
 	      "flash: a record cut short is skipped and the previous one used");
 
 	/* A full sector is erased, and the newest record survives */
-	for (int i = 0; i < 70; i++) {
+	for (int i = 0; i < UNIFI_SLOTS + 6; i++) {
 		unifi.boot++;
 		u_save();
 	}
@@ -766,7 +767,7 @@ static void test_adopt(void)
 	check(unifi.boot == b && unifi.adopted, "flash: a record without its commit byte is skipped");
 
 	/* The write after an erase fails: the full sector stays */
-	while (u_slot < 64) {
+	while (u_slot < UNIFI_SLOTS) {
 		unifi.boot++;
 		u_save();
 	}
@@ -782,11 +783,11 @@ static void test_adopt(void)
 	/* A power cut during that erase: stale records with a raised seq stay.
 	 * Fill sector 0, so that the next save erases sector 1, which still
 	 * holds older committed records. */
-	while (!(u_sec == 0 && u_slot == 64)) {
+	while (!(u_sec == 0 && u_slot == UNIFI_SLOTS)) {
 		unifi.boot++;
 		u_save();
 	}
-	check(last_rec()[47] == 0 && sector[4096 + 47] == 0, "flash: both sectors hold committed records");
+	check(last_rec()[71] == 0 && sector[4096 + 71] == 0, "flash: both sectors hold committed records");
 	b = unifi.boot;
 	partial = 1;
 	broken = 1;
@@ -994,6 +995,37 @@ static void test_failed_reads(void)
 	stat_bump = 0;
 }
 
+/* An upgrade the controller offers is reported as done, and kept */
+static void test_upgrade(void)
+{
+	const char *j;
+
+	cur_key = unifi.adopted ? cur_key : key;
+	inform();
+	answer("{\"_type\":\"upgrade\",\"url\":\"https://fw-download.ubnt.com/x.bin\",\"md5sum\":\"00\","
+	       "\"version\":\"2.1.10.1022\",\"datetime\":\"x\"}");
+	check(!strcmp(unifi.version, "2.1.10.1022") && unifi.next == uptime_secs && !strcmp((char *)last_rec() + 45, "2.1.10.1022"),
+	      "upgrade: the offered version is reported from now on, saved, and the next inform is due");
+	inform();
+	j = req_json();
+	check(j && strstr(j, "\"version\":\"2.1.10.1022\""), "upgrade: the inform reports it");
+	answer("{\"_type\":\"upgrade\",\"version\":\"2.1.10.1022\"}");
+	check(unifi.next != uptime_secs, "upgrade: the same version again changes nothing");
+	inform();
+	answer("{\"_type\":\"upgrade\",\"version\":\"1.0\\\"x\"}");
+	check(!strcmp(unifi.version, "2.1.10.1022"), "upgrade: a version with other characters is refused");
+	inform();
+	answer("{\"_type\":\"upgrade\",\"version\":\"123456789012345678901234\"}");
+	check(!strcmp(unifi.version, "2.1.10.1022"), "upgrade: a version that does not fit is refused");
+	unifi_init();
+	check(!strcmp(unifi.version, "2.1.10.1022"), "upgrade: the version survives a reboot");
+	cmd("unifi inform http://10.0.0.1");
+	cmd("unifi on");
+	cmd("unifi");
+	check(strstr(out, "Shown as " UNIFI_DISPLAY " (" UNIFI_MODEL "), version 2.1.10.1022") != 0,
+	      "show: the model and the reported version");
+}
+
 int main(void)
 {
 	memset(sector, 0xff, sizeof(sector));
@@ -1003,16 +1035,17 @@ int main(void)
 	test_rexmit();
 	test_replies();
 	cmd("unifi");
-	check(strstr(out, "informs sent 23, last reply 404, failed 11,") != 0, "show: the informs and failures counted");
+	check(strstr(out, "Informs sent 23, last reply 404, failed 11,") != 0, "show: the informs and failures counted");
 	unifi.count = 999999;
 	unifi.fails = 0xffffffff;
 	cmd("unifi");
-	check(strstr(out, "informs sent 999999,") && strstr(out, "failed 4294967295,"),
+	check(strstr(out, "Informs sent 999999,") && strstr(out, "failed 4294967295,"),
 	      "show: the largest 32-bit count fits the digit scratch");
 	check(strstr(out, "UniFi on, inform http://10.0.0.1:8080/inform") != 0, "show: state and URL");
 	test_adopt();
 	test_bounds();
 	test_json();
 	test_failed_reads();
+	test_upgrade();
 	return failures != 0;
 }

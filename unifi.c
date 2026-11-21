@@ -85,7 +85,7 @@
  * last and on its own, reads 0: a power cut while saving loses at most the
  * record being written. */
 #define UNIFI_STATE_START	(CONFIG_START + FLASH_SECTOR_SIZE)
-#define UNIFI_SLOT		64
+#define UNIFI_SLOT		128
 #define UNIFI_SLOTS		(FLASH_SECTOR_SIZE / UNIFI_SLOT)
 #define UNIFI_FLASH_TRIES	3	/* then a broken flash is left alone */
 
@@ -98,7 +98,9 @@ extern __xdata uint8_t cmd_words_b[15];
 
 __xdata struct unifi_state unifi;
 /* unifi_init() clears it with memset(), whose length is a byte */
+#ifndef RTLP_HOST_TEST	/* host pointers are wider; the host memset takes a size_t */
 typedef char u_state_fits[sizeof(struct unifi_state) < 256 ? 1 : -1];
+#endif
 static __xdata uint8_t u_buf[UNIFI_BUF_SIZE];
 
 /* Scratch for the helpers below: internal RAM has no room for locals */
@@ -119,6 +121,7 @@ struct u_rec {
 	uint32_t boot;
 	uint8_t key[16];
 	char cfgver[UNIFI_CFGVER_LEN];
+	char version[UNIFI_VERSION_LEN];
 	uint8_t sum[2];	/* CRC-16/CCITT of the bytes before it */
 	uint8_t commit;	/* 0 once the record is complete */
 };
@@ -128,9 +131,10 @@ static __xdata struct u_rec u_rec, u_back;
 static __xdata uint8_t u_sec, u_slot;	/* the current sector and its next free slot */
 static __xdata uint8_t u_free[2];	/* the first free slot of each sector, at boot */
 static __xdata uint32_t u_seq, u_best;
-static __code const char u_magic[] = "UNF3";
+static __code const char u_magic[] = "UNF4";
 
 static __code const char u_default_host[] = "unifi";
+static __code const char u_default_version[] = UNIFI_VERSION;
 static __code const char u_default_path[] = "/inform";
 static __code const char u_hex[] = "0123456789abcdef";
 
@@ -373,7 +377,9 @@ static void u_build(void)
 	u_s("\",\"serial\":\"");
 	u_mac(0);
 	u_s("\",\"model\":\"" UNIFI_MODEL "\",\"model_display\":\"" UNIFI_DISPLAY
-	    "\",\"version\":\"" UNIFI_VERSION "\",\"ip\":\"");
+	    "\",\"version\":\"");
+	u_x(unifi.version);
+	u_s("\",\"ip\":\"");
 	u_ip((__xdata uint8_t *)uip_hostaddr);
 	u_s("\",\"netmask\":\"");
 	u_ip((__xdata uint8_t *)uip_netmask);
@@ -700,6 +706,7 @@ static uint8_t u_save(void)
 	u_rec.boot = unifi.boot;
 	memcpy(u_rec.key, unifi.key, 16);
 	memcpy(u_rec.cfgver, unifi.cfgver, UNIFI_CFGVER_LEN);
+	memcpy(u_rec.version, unifi.version, UNIFI_VERSION_LEN);
 	u_sum();
 	u_rec.sum[0] = u_d[0];
 	u_rec.sum[1] = u_d[1];
@@ -914,6 +921,25 @@ static uint8_t u_cfgver(void)
 	return 1;
 }
 
+/* The version at u_i, up to u_me: digits, letters, '.', '-' and '+'.
+ * Returns 1 when it is valid and differs from the one reported. */
+static uint8_t u_version(void)
+{
+	if (u_me <= u_i || u_me - u_i >= UNIFI_VERSION_LEN)
+		return 0;
+	for (u_j = u_i; u_j < u_me; u_j++) {
+		u_d[0] = u_p[u_j] | 0x20;
+		if ((u_d[0] < 'a' || u_d[0] > 'z') && (u_p[u_j] < '0' || u_p[u_j] > '9')
+		    && u_p[u_j] != '.' && u_p[u_j] != '-' && u_p[u_j] != '+')
+			return 0;
+	}
+	if (u_me - u_i == strlen_x(unifi.version) && !memcmp(unifi.version, u_p + u_i, u_me - u_i))
+		return 0;
+	memcpy(unifi.version, u_p + u_i, u_me - u_i);
+	unifi.version[u_me - u_i] = 0;
+	return 1;
+}
+
 /* The tag checked out: act on the reply */
 static __xdata uint8_t u_dirty;
 
@@ -964,6 +990,14 @@ static void u_decrypted(void)
 		if (unifi.adopted && u_i != 0xffff && u_cfgver())
 			u_dirty = 1;
 		/* A save that fails is tried again before the next inform */
+		if (u_dirty)
+			u_save();
+	} else if (!strcmp(unifi.type, "upgrade")) {
+		/* Report the offered version from now on, as if upgraded, so the
+		 * controller stops offering it. Kept in flash with the adoption. */
+		u_i = u_string("version");
+		if (u_i != 0xffff && u_version())
+			u_dirty = 1;
 		if (u_dirty)
 			u_save();
 	} else if (!strcmp(unifi.type, "setdefault")) {
@@ -1102,6 +1136,7 @@ void unifi_init(void) __banked
 	unifi.port = UNIFI_PORT;
 	unifi.interval = 10;
 	memcpyc(unifi.key, u_default_key, 16);
+	memcpyc(unifi.version, u_default_version, sizeof(u_default_version));
 	/* The valid record with the highest sequence number, in either
 	 * sector. A save that failed can leave an erased slot between used
 	 * ones, so every slot is read, and writing goes on after the last
@@ -1139,6 +1174,8 @@ void unifi_init(void) __banked
 			memcpy(unifi.key, u_rec.key, 16);
 			memcpy(unifi.cfgver, u_rec.cfgver, UNIFI_CFGVER_LEN);
 			unifi.cfgver[UNIFI_CFGVER_LEN - 1] = 0;
+			memcpy(unifi.version, u_rec.version, UNIFI_VERSION_LEN);
+			unifi.version[UNIFI_VERSION_LEN - 1] = 0;
 		}
 	}
 	u_seq = u_best;
@@ -1243,7 +1280,9 @@ static void u_show(void)
 		write_char('?');
 	print_string(", interval ");
 	itoa_short(unifi.interval);
-	print_string(" s\nModel " UNIFI_MODEL ", informs sent ");
+	print_string(" s\nShown as " UNIFI_DISPLAY " (" UNIFI_MODEL "), version ");
+	print_string_x(unifi.version);
+	print_string("\nInforms sent ");
 	u_print(unifi.count);
 	print_string(", last reply ");
 	itoa_short(unifi.status);

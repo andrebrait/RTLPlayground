@@ -340,6 +340,9 @@ void send_basic_info(void)
 	str_code_to_html(",\"prometheus\":");
 	bool_to_json(prometheus_enabled);
 #endif
+#ifdef UNIFI
+	str_code_to_html(",\"unifi\":1");
+#endif
 #if SOC_FAMILY == RTL836X
 	str_code_to_html(",\"mib_family\":\"rtl836x\"");
 #endif

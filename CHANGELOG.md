@@ -202,6 +202,12 @@
   - Port table. Every inform reports each port by its front-panel number: link,
     whether it is enabled, speed, supported speeds, media and byte and packet
     counters. The controller shows the ports and their traffic rates.
+  - UniFi page in the web interface: turn informing on or off, set the inform URL
+    (kept by Save to flash), and see the model and firmware version the switch
+    reports, its adoption state and its last exchange with the controller.
+  - Firmware upgrades offered by the controller are acknowledged: the switch
+    reports the offered version from then on, kept in flash, so the controller
+    stops offering it. Nothing is downloaded or installed.
 
 ## Changed
 
