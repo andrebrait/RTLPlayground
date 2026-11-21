@@ -13,9 +13,6 @@
 #include "uip.h"
 #include "uip/uip.h"
 #include "machine.h"
-#ifdef UNIFI
-#include "unifi.h"
-#endif
 #include "version.h"
 #include "timer.h"
 #include "rtl837x_trap.h"
@@ -200,7 +197,6 @@ static void lldp_send_ports(uint16_t ttl, uint16_t ports) __reentrant
 {
     __xdata uint8_t *p;
     __xdata uint8_t *tail;
-    uint8_t port_position;
 
     lldp_set_addresses();
     lldp_set_rtl_wrapper();
@@ -215,19 +211,13 @@ static void lldp_send_ports(uint16_t ttl, uint16_t ports) __reentrant
     memcpy(p, uip_ethaddr.addr, MAC_ADDR_LEN);
     p += MAC_ADDR_LEN;
 
-    //Port ID
+    //Port ID: the switch MAC on every port, as UniFi devices and lldpd send
+    //it; the Port Description tells the ports apart
     *p++ = LLDP_TYPE(LLDP_PORT_ID_TLV_TYPE);
     *p++ = LLDP_PORT_ID_TLV_LENGTH;
-#ifdef UNIFI
-    if (unifi.enabled)
-        *p++ = LLDP_PORT_ID_SUBTYPE_LOCAL;
-    else
-#endif
-    *p++ = LLDP_PORT_ID_TLV_SUBTYPE;
-    memcpyc(p, LLDP_PORT_ID_PREFIX, LLDP_PORT_ID_PREFIX_LENGTH);
-    p += LLDP_PORT_ID_PREFIX_LENGTH;
-    port_position = (p-LLDP_O->payload);
-	*p++ = '0';       // filled in per port below
+    *p++ = LLDP_PORT_ID_SUBTYPE_MAC;
+    memcpy(p, uip_ethaddr.addr, MAC_ADDR_LEN);
+    p += MAC_ADDR_LEN;
 
     //TTL
     *p++ = LLDP_TYPE(LLDP_TTL_TLV_TYPE);
@@ -269,7 +259,6 @@ static void lldp_send_ports(uint16_t ttl, uint16_t ports) __reentrant
     for (uint8_t port = MACHINE_MIN_PORT; port <= MACHINE_MAX_PORT; port++) {
 
         if ((1 << port) & ports) {
-            LLDP_O->payload[port_position] = '0' + machine.log_to_phys_port[port];
             LLDP_O->rtl_tag.pmask = HTONS((uint16_t)1 << port);
 
             p = tail;
@@ -338,12 +327,24 @@ void lldp_set_rtl_wrapper(void) __banked {
     LLDP_O->ether_type = HTONS(LLDP_ETHERTYPE);
 }
 
+/* The port name, or "Port <front-panel number>" for a port without one */
 uint8_t lldp_portdesc(__xdata uint8_t *p, uint8_t port) __banked
 {
     uint8_t name_length = strlen_x(port_names[port]);
+    uint8_t n;
 
-    if (!name_length)
-        return 0;
+    if (!name_length) {
+        n = machine.log_to_phys_port[port];
+        name_length = n >= 10 ? 7 : 6;
+        *p++ = LLDP_TYPE(LLDP_PORT_DESC_TLV_TYPE);
+        *p++ = name_length;
+        memcpyc(p, LLDP_PORT_DESC_PREFIX, 5);
+        p += 5;
+        if (n >= 10)
+            *p++ = '0' + n / 10;
+        *p = '0' + n % 10;
+        return name_length + 2;
+    }
     *p++ = LLDP_TYPE(LLDP_PORT_DESC_TLV_TYPE);
     *p++ = name_length;
     memcpy(p, port_names[port], name_length);

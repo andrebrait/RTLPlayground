@@ -13,11 +13,9 @@
 #define LLDP_FAST_TX_COUNT   4
 
 #define LLDP_PORT_ID_TLV_TYPE 2
-#define LLDP_PORT_ID_PREFIX "Port "
-#define LLDP_PORT_ID_PREFIX_LENGTH 5
-#define LLDP_PORT_ID_TLV_LENGTH (1 + LLDP_PORT_ID_PREFIX_LENGTH + 1)
+#define LLDP_PORT_DESC_PREFIX "Port "
+#define LLDP_PORT_ID_TLV_LENGTH (1 + 6)	/* subtype, MAC */
 #define LLDP_PORT_ID_TLV_SUBTYPE 0x05
-#define LLDP_PORT_ID_SUBTYPE_LOCAL 0x07	/* locally assigned, as UniFi switches send "Port N" */
 #define LLDP_PORT_ID_SUBTYPE_MAC 3
 
 #define LLDP_TTL_TLV_TYPE 3

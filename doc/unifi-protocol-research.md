@@ -729,10 +729,14 @@ module `l2g_lldp.ko` (Realtek SDK), the inform is built by `mcad` with
 - **`lldp_table` in the inform** (`libubnt`): `chassis_id`, `port_id`,
   `local_port_name`, `local_port_idx`, `is_wired` and `mgmt_ips`. No
   descriptions.
-- **What the firmware does** while UniFi is on: Port ID subtype 7 and the
-  system description `<model display>, <reported version>`. Its
-  `lldp_table` has the same members but `mgmt_ips`, whose value type was
-  not established. It sends no Ubiquiti TLV.
+- **What the firmware does:** the Port ID is the switch MAC (subtype 3) on
+  every port, as the U7-Lite access points and lldpd on OpenWrt send it,
+  and the Port Description is the port name or `Port N`, so neighbours tell
+  the ports apart by it. The switch has one MAC, not one per port as the
+  USW. While UniFi is on, the system description is `<model display>,
+  <reported version>`. Its `lldp_table` has the same members as the USW's
+  but `mgmt_ips`, whose value type was not established. It sends no
+  Ubiquiti TLV.
 
 ### Port index translation
 

@@ -211,9 +211,8 @@
     counters. The controller shows the ports and their traffic rates. The inform also
     lists the LLDP neighbours, so the controller can draw the topology, and on boards
     with PoE ports whether PoE is permitted on each; power is not measured.
-  - LLDP as a UniFi switch sends it while UniFi is on: the Port ID is locally assigned
-    (`Port N`) and the system description is the reported model and version, such as
-    `USW-Lite-8-PoE, 7.5.15.17146`.
+  - LLDP describes the switch as a UniFi one while UniFi is on: the system description is
+    the reported model and version, such as `USW-Lite-8-PoE, 7.5.15.17146`.
   - UniFi page in the web interface: turn informing on or off, set the inform URL
     (kept by Save to flash), and see the model and firmware version the switch
     reports, its adoption state and its last exchange with the controller.
@@ -223,6 +222,9 @@
 
 ## Changed
 
+- LLDP sends the switch MAC as the Port ID on every port, as lldpd on OpenWrt and UniFi
+  access points do, and always sends a Port Description: the port name, or `Port N` for a
+  port without one. The Port ID used to be `Port N`.
 - Move Prometheus exporter settings into System → Services.
 - The Prometheus exporter serves `/metrics` on its own TCP port, 9100, next to
   the web server on port 80, so a scrape and the web interface run at the
