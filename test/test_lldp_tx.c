@@ -91,6 +91,12 @@ int main(void){
     v=tlv(1,6,&n);assert(v&&n==sizeof desc-1&&!memcmp(v,desc,n));
     v=tlv(1,0,&n);assert(v&&n==0);
     puts("PASS UniFi on: Port ID subtype 7, system description " UNIFI_DISPLAY ", <version>");
+    /* An upgrade the controller offered: the longest version the state holds */
+    strcpy(unifi.version,"12345678901234567890123");emitted=0;lldp_send();
+    static const char longdesc[]=UNIFI_DISPLAY ", 12345678901234567890123";
+    v=tlv(1,6,&n);assert(v&&n==sizeof longdesc-1&&!memcmp(v,longdesc,n));
+    v=tlv(1,0,&n);assert(v&&n==0);
+    puts("PASS UniFi on: a 23-character offered version fills the description");
     unifi.enabled=0;emitted=0;lldp_send();v=tlv(1,2,&n);assert(v&&v[0]==5);
     v=tlv(1,6,&n);assert(v&&n>15&&!memcmp(v,"Host LLDP test ",15));
     puts("PASS UniFi off: subtype 5 and the firmware's own description again");

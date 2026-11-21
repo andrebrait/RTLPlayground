@@ -2,6 +2,7 @@
 #define _UNIFI_H_
 
 #include <stdint.h>
+#include "machine.h"
 #include "dns.h"
 
 /* The message buffer: one inform out, then its reply in. The largest reply
@@ -15,8 +16,7 @@
 /* The reported model. The TL-SG108PE V5 (RTL836x, 8 x 1G, PoE on 1-4)
  * maps to the USW-Lite-8-PoE, the 8 x 2.5G + SFP+ boards to the
  * USW-Flex-2.5G-8. The version is the model's current release as UniFi
- * Network 10.6.109 listed it, which is above its minimumFirmwareRequired.
- * machine.h comes first, for SOC_FAMILY. */
+ * Network 10.6.109 listed it, which is above its minimumFirmwareRequired. */
 #ifndef SOC_FAMILY
 #error "machine.h must define SOC_FAMILY"
 #endif

@@ -1382,13 +1382,13 @@ void unifi_parse(void) __banked
 		cmd_nosave = 1;	/* a status query, polled by the web page */
 		return;
 	}
-	if (cmd_words_len == 2 && u_word("on")) {
-		unifi.enabled = 1;
-		u_stop();
-		return;
-	}
-	if (cmd_words_len == 2 && u_word("off")) {
-		unifi.enabled = 0;
+	if (cmd_words_len == 2 && (u_word("on") || u_word("off"))) {
+		u_d[0] = u_word("on");
+		/* LLDP describes the switch as a UniFi one while on: neighbours
+		 * get the new frames at once, the old entry ages out */
+		if (unifi.enabled != u_d[0])
+			lldp_resend();
+		unifi.enabled = u_d[0];
 		u_stop();
 		return;
 	}

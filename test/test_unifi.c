@@ -78,6 +78,9 @@ void gcm_selftest(void) { selftests++; }
 
 uint8_t poe_admin_mask(void) { return 0x01; }
 
+static int lldp_resends;
+void lldp_resend(void) { lldp_resends++; }
+
 /* LLDP neighbours: front port 1 (ASIC 4) with a named port, front port 2
  * (ASIC 5) with a MAC port ID; skipped are a network-address chassis, an
  * expired entry, one on an unused ASIC port, one beyond the port map and
@@ -507,13 +510,17 @@ static void test_rexmit(void)
 	uptime_secs = unifi.next;
 	ticks();
 	appcall(UIP_CONNECTED, 0, 0);
+	lldp_resends = 0;
 	cmd("unifi off");
 	appcall(UIP_POLL, 0, 0);
 	int before = connects;
 	ticks();
 	check(uip_flags == UIP_ABORT && unifi.phase == U_IDLE && !unifi.conn && connects == before,
 	      "unifi off: the connection is reset and no inform starts");
+	cmd("unifi off");
 	cmd("unifi on");
+	cmd("unifi on");
+	check(lldp_resends == 2, "unifi on/off: LLDP resends once per change, not on a repeat");
 }
 
 static void test_replies(void)

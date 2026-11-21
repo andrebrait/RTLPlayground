@@ -118,6 +118,15 @@ void lldp_init(void) __banked
         lldp_nb[i].ttl = 0;
 }
 
+/* Every usable port sends on the next tick: what the frames say changed */
+void lldp_resend(void) __banked
+{
+    uint8_t i;
+
+    for (i = 0; i <= MACHINE_MAX_PORT; i++)
+        lldp_ttr[i] = 0;
+}
+
 /* 802.1AB: a transmit timer per port. A usable port sends at once and then every interval;
  * the fast frames go out only on a port that learned a new neighbour. */
 void lldp_tick(void) __banked
