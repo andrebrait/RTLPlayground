@@ -246,6 +246,8 @@ static __xdata uint32_t u_link;
 static __xdata uint16_t u_mbps;
 extern __xdata uint8_t rx_ingress;
 static __xdata uint8_t u_uplink;	/* 1 + the ASIC port the controller's replies arrive on, 0 = none yet */
+static __xdata struct lldp_neighbor *__xdata u_nb;
+static __xdata uint8_t u_mt;	/* mac_table entries written */
 #ifdef MACHINE_POE_PORTS
 static __xdata uint8_t u_poe;	/* PoE permitted, bit 0 = front port 1 */
 #endif
@@ -373,6 +375,24 @@ static void u_port_entry(void)
 	u_counter(",\"rx_packets\":", 2, 2, 4);
 	u_counter(",\"tx_packets\":", 3, 5, 7);
 #endif
+	/* The controller places the devices behind a port that is not the
+	 * uplink by the MACs in its mac_table. The L2 table is not read: the
+	 * LLDP neighbours on the port, every UniFi device among them, are
+	 * enough to place the switches and access points. */
+	u_s(",\"mac_table\":[");
+	u_mt = 0;
+	for (u_nb = lldp_nb; u_nb < lldp_nb + LLDP_NB_MAX; u_nb++) {
+		if (!u_nb->ttl || u_nb->port != u_ph || u_nb->chassis_subtype != LLDP_CHASSIS_ID_TLV_SUBTYPE
+		    || u_nb->chassis_len != 6)
+			continue;
+		if (u_mt++)
+			u_c(',');
+		u_s("{\"mac\":\"");
+		u_ma = u_nb->chassis;
+		u_mac(':');
+		u_s("\",\"age\":0,\"uptime\":0,\"static\":false}");
+	}
+	u_c(']');
 	u_c('}');
 }
 
@@ -430,8 +450,6 @@ static void u_build(void)
  * leaves nothing to escape), so LLDP_NB_MAX of them take about 2.4 KB;
  * with a port table of about 2.3 KB and the head, an inform stays under
  * 7 KB of the UNIFI_BUF_SIZE buffer. */
-static __xdata struct lldp_neighbor *__xdata u_nb;
-
 static void u_lldp(void)
 {
 	u_s("],\"lldp_table\":[");

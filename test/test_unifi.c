@@ -439,12 +439,13 @@ static void test_request(void)
 		"\"uptime\":1234,\"cfgversion\":\"?\",\"default\":true,\"state\":1,\"fw_caps\":0,"
 		"\"isolated\":false,\"locating\":false,\"selfrun_beacon\":false,\"port_table\":["
 		"{\"port_idx\":5,\"media\":\"GE\",\"speed_caps\":1049064,\"up\":true,\"enable\":true,\"poe_caps\":0,\"speed\":10000,"
-		"\"rx_bytes\":18446744073709551615,\"tx_bytes\":3001,\"rx_packets\":9009,\"tx_packets\":9018},"
+		"\"rx_bytes\":18446744073709551615,\"tx_bytes\":3001,\"rx_packets\":9009,\"tx_packets\":9018,\"mac_table\":[]},"
 		"{\"port_idx\":1,\"media\":\"GE\",\"speed_caps\":1048682,\"up\":false,\"enable\":false,"
 		"\"port_poe\":true,\"poe_caps\":7,\"poe_enable\":true,\"poe_mode\":\"auto\",\"speed\":0,"
-		"\"rx_bytes\":4000,\"tx_bytes\":4001,\"rx_packets\":12009,\"tx_packets\":12018},";
+		"\"rx_bytes\":4000,\"tx_bytes\":4001,\"rx_packets\":12009,\"tx_packets\":12018,"
+		"\"mac_table\":[{\"mac\":\"1c:2a:a3:23:d8:68\",\"age\":0,\"uptime\":0,\"static\":false}]},";
 	const char *last = "{\"port_idx\":6,\"media\":\"SFP+\",\"speed_caps\":288,\"up\":true,\"enable\":true,\"poe_caps\":0,"
-		"\"speed\":10000,\"rx_bytes\":8000,\"tx_bytes\":8001,\"rx_packets\":24009,\"tx_packets\":24018}],"
+		"\"speed\":10000,\"rx_bytes\":8000,\"tx_bytes\":8001,\"rx_packets\":24009,\"tx_packets\":24018,\"mac_table\":[]}],"
 		"\"lldp_table\":[{\"chassis_id\":\"1c:2a:a3:23:d8:68\",\"port_id\":\"Port \\\"7\\\"\","
 		"\"local_port_idx\":1,\"local_port_name\":\"Port 1\",\"is_wired\":true},"
 		"{\"chassis_id\":\"84:78:48:88:39:c9\",\"port_id\":\"84:78:48:88:39:ca\","
@@ -468,6 +469,10 @@ static void test_request(void)
 	for (const char *q = got; (q = strstr(q, "\"poe_caps\":0")); q++)
 		nopoe++;
 	check(poe == 2 && nopoe == 4, "request: PoE fields on the PoE ports, poe_caps 0 on the others");
+	const char *p3e = p3 ? strstr(p3, "}") : NULL;
+	check(p2 && p3 && strstr(p2, "\"mac_table\":[{\"mac\":\"84:78:48:88:39:c9\",") < p3
+	      && p3e && strstr(p3, "\"mac_table\":[]}") == p3e - 14,
+	      "request: each port's LLDP neighbours with a MAC chassis ID are its mac_table, the others are not");
 
 
 	static const char nf[] = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
@@ -1019,7 +1024,7 @@ static void test_failed_reads(void)
 	stat_calls = 0;
 	inform();
 	j = req_json();
-	check(j && strstr(j, "\"port_idx\":2,") && strstr(j, "\"rx_packets\":15009,") && strstr(j, "\"tx_packets\":15018}")
+	check(j && strstr(j, "\"port_idx\":2,") && strstr(j, "\"rx_packets\":15009,") && strstr(j, "\"tx_packets\":15018,")
 	      && !strstr(j, "\"rx_bytes\":0,") && !strstr(j, "\"tx_bytes\":0,"),
 	      "ports: a sum with a failed read repeats the last good sum");
 	appcall(UIP_NEWDATA, nf0, sizeof(nf0) - 1);
