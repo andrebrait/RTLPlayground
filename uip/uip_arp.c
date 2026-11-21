@@ -424,6 +424,26 @@ uip_arp_out(void) __banked
   uip_len += sizeof(struct uip_eth_hdr);
 }
 /*-----------------------------------------------------------------------------------*/
+/* An ARP request for the default router: its reply comes in through the
+ * port the router is reached through, the uplink */
+void
+uip_arp_request_draddr(void) __banked
+{
+  memset(BUF_O->ethhdr.dest.addr, 0xff, 6);
+  memset(BUF_O->dhwaddr.addr, 0x00, 6);
+  memcpy(BUF_O->ethhdr.src.addr, uip_ethaddr.addr, 6);
+  memcpy(BUF_O->shwaddr.addr, uip_ethaddr.addr, 6);
+  uip_ipaddr_copy(BUF_O->dipaddr, uip_draddr);
+  uip_ipaddr_copy(BUF_O->sipaddr, uip_hostaddr);
+  BUF_O->opcode = HTONS(ARP_REQUEST);
+  BUF_O->hwtype = HTONS(ARP_HWTYPE_ETH);
+  BUF_O->protocol = HTONS(UIP_ETHTYPE_IP);
+  BUF_O->hwlen = 6;
+  BUF_O->protolen = 4;
+  BUF_O->ethhdr.type = HTONS(UIP_ETHTYPE_ARP);
+  uip_len = sizeof(struct arp_hdr_o);
+}
+/*-----------------------------------------------------------------------------------*/
 
 /** @} */
 /** @} */

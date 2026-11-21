@@ -22,6 +22,7 @@
 #include "rtl837x_common.h"
 #include "cmd_parser.h"
 #include "uip/uip.h"
+#include "uip/uip_arp.h"
 #include "dns.h"
 #include "rtl837x_flash.h"
 #include "snmp_hw.h"
@@ -244,7 +245,7 @@ static __xdata uint8_t u_dg[20];
 static __xdata uint8_t u_ph, u_up, u_cnt, u_adm, u_ok;	/* u_d is the digit helpers' */
 static __xdata uint32_t u_link;
 static __xdata uint16_t u_mbps;
-extern __xdata uint8_t rx_ingress;
+extern __xdata uint8_t rx_ingress, rx_gateway;
 static __xdata uint8_t u_uplink;	/* 1 + the ASIC port the controller's replies arrive on, 0 = none yet */
 static __xdata struct lldp_neighbor *__xdata u_nb;
 static __xdata uint8_t u_mt;	/* mac_table entries written */
@@ -341,9 +342,15 @@ static void u_port_entry(void)
 	else
 		u_s(",\"media\":\"GE\",\"speed_caps\":1048682");	/* 10M to 2.5G */
 #endif
-	/* The port towards the controller: the controller draws the topology
-	 * from it and the LLDP neighbours, as the OpenWrt agent reports it */
-	if (u_uplink == u_ph + 1)
+	/* The uplink: the port towards the gateway, else towards the
+	 * controller. The controller leaves it out when it places the
+	 * devices behind the other ports, and shows its speed as the
+	 * switch's. The controller can hang off any port, so the gateway
+	 * decides once its ARP has been seen. */
+	u_d[0] = rx_gateway;
+	if (!u_d[0])
+		u_d[0] = u_uplink;
+	if (u_d[0] == u_ph + 1)
 		u_s(",\"is_uplink\":true");
 	if (u_up)
 		u_s(",\"up\":true");
@@ -1134,6 +1141,14 @@ void unifi_tick(void) __banked
 			/* About 30 ms, once per key */
 			gcm_setkey(unifi.key);
 			unifi.keyed = 1;
+		}
+		/* Ask for the gateway: its reply arrives through the uplink,
+		 * which the port table reports (rx_gateway). Once per inform,
+		 * so a changed layout shows within an interval. */
+		if (uip_draddr[0] | uip_draddr[1]) {
+			uip_arp_request_draddr();
+			tcpip_output();
+			uip_len = 0;
 		}
 		/* The reply fields describe the inform being made */
 		unifi.status = 0;

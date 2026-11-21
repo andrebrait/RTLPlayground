@@ -78,6 +78,11 @@ void gcm_selftest(void) { selftests++; }
 
 /* The controller's replies arrive on ASIC port 8, the SFP+ (front port 6) */
 __xdata uint8_t rx_ingress = 8;
+__xdata uint8_t rx_gateway;	/* 1 + ASIC port, set by the gateway test */
+__xdata uip_ipaddr_t uip_draddr;
+static int gw_arps;
+void uip_arp_request_draddr(void) { gw_arps++; uip_len = 42; }
+void tcpip_output(void) {}
 
 uint8_t poe_admin_mask(void) { return 0x01; }
 
@@ -1004,6 +1009,23 @@ static void test_failed_reads(void)
 	if (!j)
 		return;
 	strcpy(before, strstr(j, "\"port_table\""));
+	appcall(UIP_NEWDATA, nf0, sizeof(nf0) - 1);
+
+	/* Once the gateway answers, its port is the uplink: the controller
+	 * itself may hang off any port */
+	rx_gateway = 4 + 1;	/* ASIC 4, front port 1 */
+	inform();
+	j = req_json();
+	check(j && strstr(j, "{\"port_idx\":1,\"media\":\"GE\",\"speed_caps\":1048682,\"is_uplink\":true,")
+	      && !strstr(strstr(j, "is_uplink") + 1, "is_uplink"),
+	      "uplink: the gateway's port wins over the controller's");
+	check(!gw_arps, "uplink: no gateway, no ARP for it");
+	uip_ipaddr(&uip_draddr, 10, 0, 0, 1);
+	appcall(UIP_NEWDATA, nf0, sizeof(nf0) - 1);
+	inform();
+	check(gw_arps == 1 && !uip_len, "uplink: each inform asks for the gateway first");
+	memset(&uip_draddr, 0, sizeof(uip_draddr));
+	rx_gateway = 0;
 	appcall(UIP_NEWDATA, nf0, sizeof(nf0) - 1);
 	link_fail = 1;
 	stat_fail = 2;

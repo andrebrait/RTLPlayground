@@ -23,7 +23,8 @@ harness = r'''
 #include "uip.h"
 uint8_t uip_buf[UIP_CONF_BUFFER_ALLOC_SIZE];
 uint16_t uip_len, management_vlan, rx_packet_vlan;
-uint8_t rx_ingress;
+uint8_t rx_ingress, rx_gateway;
+uip_ipaddr_t uip_draddr;
 uint8_t tx_seq, lacpEnabled, igmpEnabled;
 bool frame_tagged, stp_enabled, lldp_enabled;
 static bool pending;
