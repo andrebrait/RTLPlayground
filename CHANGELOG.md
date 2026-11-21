@@ -214,6 +214,9 @@
   - Firmware upgrades offered by the controller are acknowledged: the switch
     reports the offered version from then on, kept in flash, so the controller
     stops offering it. Nothing is downloaded or installed.
+  - The inform no longer carries the netmask. A controller in the switch's own subnet took
+    the switch for an L2 neighbour and tried to adopt it over SSH, which fails; without the
+    netmask it adopts by inform (UniFi Network 11.1.50).
 
 ## Changed
 

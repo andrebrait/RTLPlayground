@@ -381,8 +381,9 @@ static void u_build(void)
 	u_x(unifi.version);
 	u_s("\",\"ip\":\"");
 	u_ip((__xdata uint8_t *)uip_hostaddr);
-	u_s("\",\"netmask\":\"");
-	u_ip((__xdata uint8_t *)uip_netmask);
+	/* No netmask: a controller in the subnet it describes takes the switch
+	 * for an L2 neighbour and adopts it over SSH, which this firmware lacks
+	 * (Network 11.1.50); without one it adopts by inform */
 	u_s("\",\"hostname\":\"");
 	u_x(hostname);
 	/* An address, not a name: the controller refuses a host name here */

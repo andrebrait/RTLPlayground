@@ -409,7 +409,7 @@ static void test_request(void)
 	copy[40 + plen - 16] = 0;
 	const char *want = "{\"mac\":\"02:1a:2b:3c:4d:5e\",\"serial\":\"021A2B3C4D5E\",\"model\":\"" UNIFI_MODEL "\","
 		"\"model_display\":\"" UNIFI_DISPLAY "\",\"version\":\"" UNIFI_VERSION "\",\"ip\":\"10.0.0.7\","
-		"\"netmask\":\"255.255.0.0\",\"hostname\":\"sw\\\"1\",\"inform_url\":\"http://10.0.0.1:8080/inform\","
+		"\"hostname\":\"sw\\\"1\",\"inform_url\":\"http://10.0.0.1:8080/inform\","
 		"\"uptime\":1234,\"cfgversion\":\"?\",\"default\":true,\"state\":1,\"fw_caps\":0,"
 		"\"isolated\":false,\"locating\":false,\"selfrun_beacon\":false,\"port_table\":["
 		"{\"port_idx\":5,\"media\":\"GE\",\"speed_caps\":1049064,\"up\":true,\"enable\":true,\"speed\":10000,"

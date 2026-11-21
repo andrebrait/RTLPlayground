@@ -320,8 +320,17 @@ amd989 `unifi_protocol.py:30-124`, unifi-stubd `docs/en/protocol-notes.md:74-90`
    the lab controller image. It went from pending to Connected (state 1),
    with `known_cfgversion` equal to the echoed `cfgversion`, within three
    informs. It stayed Connected across a reboot. After Forget in the
-   controller, the next reply was `setdefault`. A production controller
-   has not been tried.
+   controller, the next reply was `setdefault`.
+   **Confirmed on a production controller (UniFi Network 11.1.50, UniFi OS
+   Server):** the controller picks SSH adoption when its own address is in
+   the subnet the device reports (`ip` and `netmask` of the inform), and
+   inform adoption otherwise, logging `discovered via L3 inform, skip SSH
+   adoption` (`SumKAE` and `JxsWMGvtnwo` in `devmgr`, decompiled). A
+   TL-SG108PE V5 on the controller's own subnet that sent its netmask got
+   `SSH adopt failed … msg[unreachable]`, then `used default key in
+   ADOPT_FAILED state, reject it!` on every inform. The lab controller was
+   on a Docker network outside the switch's subnet, which is why it never
+   tried SSH. The firmware therefore sends no `netmask`.
 7. Ways for the device to learn the inform URL: manual configuration (the
    web UI or CLI here), DHCP option 43 sub-option 1 carrying the IPv4 address
    (fxkr README), and the DNS name `unifi` (the default URL). Ubiquiti's help
