@@ -367,7 +367,7 @@ static void test_request(void)
 {
 	uint8_t ip[4] = { 10, 0, 0, 7 }, mask[4] = { 255, 255, 0, 0 };
 	memcpy(uip_hostaddr, ip, 4);
-	memcpy(uip_netmask, mask, 4);
+	memcpy(uip_netmask, mask, 4);	/* set, and must stay out of the inform */
 	fake_conn.mss = 300;
 	uptime_secs = 1234;
 	cmd("unifi on");
