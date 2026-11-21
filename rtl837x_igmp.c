@@ -56,9 +56,10 @@ static __xdata uint16_t igmp_vid;
 static __xdata uint16_t igmp_vmask;
 /* IGMPv3 record walk and IPv4 checks: static, so that SDCC spills no
  * temporaries into the full internal RAM */
-static __xdata uint16_t igmp_rec, igmp_nrec, igmp_next, igmp_iplen;
+static __xdata uint16_t igmp_rec, igmp_nrec, igmp_next, igmp_rwords;
+static __xdata uint16_t igmp_end;	/* past the IPv4 datagram, Ethernet padding excluded */
 static __xdata uint8_t *__xdata igmp_p;	/* the current IGMPv3 record */
-static __xdata uint8_t igmp_rtype;
+static __xdata uint8_t igmp_rres;
 #endif
 
 #if SOC_FAMILY == RTL837X
@@ -422,31 +423,35 @@ static uint8_t igmp_ip_valid(void)
 		return 0;
 	if (NTOHS(IGMP_V->flags) & 0x3fff)
 		return 0;
-	igmp_iplen = NTOHS(IGMP_V->len);
-	if (igmp_iplen < ((IGMP_V->hlen & IGMP_IP_IHL) << 2) + 8)
+	igmp_end = NTOHS(IGMP_V->len);
+	if (igmp_end < ((IGMP_V->hlen & IGMP_IP_IHL) << 2) + 8)
 		return 0;
-	if (igmp_iplen > uip_len - IGMP_IP_HDR - igmp_vofs)
+	if (igmp_end > uip_len - IGMP_IP_HDR - igmp_vofs)
 		return 0;
+	igmp_end += IGMP_IP_HDR + igmp_vofs;
 	return 1;
 }
 
 
 /* The IGMPv3 record at igmp_rec: sets igmp_next past it and igmp_join.
- * Returns 0 to stop (it does not fit the frame, or 512 or more sources),
+ * Returns 0 to stop (it does not fit the IPv4 datagram with its sources and
+ * auxiliary data, or has 512 or more sources),
  * 1 to learn it, 2 to skip it. A leaf on statics only, so nothing spills. */
 static uint8_t igmp_record(void)
 {
 	igmp_next = igmp_rec + IGMP_V3_RECORD_LEN;
-	if (uip_len < igmp_next)
+	if (igmp_end < igmp_next)
 		return 0;
 	igmp_p = &uip_buf[igmp_rec];
 	if (igmp_p[2] >= 2)
 		return 0;
 	/* (sources + auxiliary words) * 4 past the record header */
-	igmp_iplen = igmp_p[2];
-	igmp_iplen = (igmp_iplen << 8) | igmp_p[3];
-	igmp_iplen += igmp_p[1];
-	igmp_next += igmp_iplen << 2;
+	igmp_rwords = igmp_p[2];
+	igmp_rwords = (igmp_rwords << 8) | igmp_p[3];
+	igmp_rwords += igmp_p[1];
+	igmp_next += igmp_rwords << 2;
+	if (igmp_end < igmp_next)
+		return 0;
 	switch (igmp_p[0]) {
 	case IGMP_V3_IS_INCLUDE:
 	case IGMP_V3_TO_INCLUDE:
@@ -485,17 +490,16 @@ static void igmp_snoop(void)
 		igmp_join = 0;
 		break;
 	case IGMP_V3_REPORT:
+		/* igmp_ip_valid() left at least the 8-byte IGMP header */
 		igmp_rec = igmp_grp + IGMP_V3_RECORD_OFS;
-		if (uip_len < igmp_rec)
-			return;
 		igmp_nrec = ((uint16_t)uip_buf[igmp_grp + 6] << 8) | uip_buf[igmp_grp + 7];
-		/* Every record while it fits the frame; 512 or more sources end
-		 * the walk */
+		/* Every record while it fits the IPv4 datagram; 512 or more
+		 * sources end the walk */
 		while (igmp_nrec--) {
-			igmp_rtype = igmp_record();
-			if (!igmp_rtype)
+			igmp_rres = igmp_record();
+			if (!igmp_rres)
 				return;
-			if (igmp_rtype == 1) {
+			if (igmp_rres == 1) {
 				igmp_grp = igmp_rec + IGMP_GROUP_OFS;
 				igmp_learn();
 			}
@@ -506,8 +510,6 @@ static void igmp_snoop(void)
 		return;
 	}
 	igmp_grp += IGMP_GROUP_OFS;
-	if (uip_len < igmp_grp + 4)
-		return;
 	igmp_learn();
 }
 

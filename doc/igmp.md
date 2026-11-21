@@ -105,8 +105,9 @@ multicast group.
 Before reading an IGMP message the receive handler checks the captured frame
 size, the IPv4 version and header length, that the packet is not a fragment,
 and that the IPv4 total length fits the frame. On the RTL837x every IGMPv3
-record is read while it fits the frame, so a report whose later records are
-cut short still updates the groups before them. A querier port that loses its
+record is read while it fits the IPv4 packet with its sources and auxiliary
+data, so a report whose later records are cut short still updates the groups
+before them, and Ethernet padding is never read as a record. A querier port that loses its
 link is dropped at the link change, so unknown multicast floods again without
 waiting for another IGMP message.
 

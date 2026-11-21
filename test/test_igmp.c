@@ -332,12 +332,14 @@ int main(int argc, char **argv)
 
 #define REC(i) (offsetof(struct wire_in, igmp) + 8 + (i))
 #define RECORDS(n) (uip_buf[offsetof(struct wire_in, igmp) + 7] = (n))
+/* more frame, and an IPv4 total length that covers it */
+#define GROW(n) do { uip_len += (n); uip_buf[offsetof(struct wire_in, ip) + 3] += (n); } while (0)
 #define ADD(i, t, g) do { memset(&uip_buf[REC(i)], 0, 8); uip_buf[REC(i)] = (t); memcpy(&uip_buf[REC(i) + 4], (g), 4); } while (0)
 	CLR(); build(4, v3_reports, IGMP_V3_REPORT, grp); uip_buf[REC(0)] = IGMP_V3_IS_EXCLUDE; igmp_packet_handler();
 	CHECK(DIP_OK(grp) && PM() == PORT_BIT(4), "v3 current state exclude: learned");
 	CLR(); build(4, v3_reports, IGMP_V3_REPORT, grp); uip_buf[REC(0)] = IGMP_V3_ALLOW_NEW; igmp_packet_handler();
 	CHECK(DIP_OK(grp) && PM() == PORT_BIT(4), "v3 allow new sources: learned");
-	CLR(); build(4, v3_reports, IGMP_V3_REPORT, grp); uip_buf[REC(0)] = IGMP_V3_IS_INCLUDE; uip_buf[REC(3)] = 1; uip_len += 4; igmp_packet_handler();
+	CLR(); build(4, v3_reports, IGMP_V3_REPORT, grp); uip_buf[REC(0)] = IGMP_V3_IS_INCLUDE; uip_buf[REC(3)] = 1; GROW(4); igmp_packet_handler();
 	CHECK(DIP_OK(grp) && PM() == PORT_BIT(4), "v3 include with a source: learned");
 	CLR(); tbl_writes = 0; build(4, v3_reports, IGMP_V3_REPORT, grp); uip_buf[REC(0)] = IGMP_V3_IS_INCLUDE; igmp_packet_handler();
 	CHECK(tbl_writes == 1, "v3 include without sources: leave, nothing written");
@@ -350,20 +352,26 @@ int main(int argc, char **argv)
 	CLR(); tbl_writes = 0; build(4, v3_reports, IGMP_V3_REPORT, grp); uip_buf[REC(0)] = 6; igmp_packet_handler();
 	CHECK(tbl_writes == 0, "v3 block old sources: ignored");
 	CLR(); tbl_writes = 0; build(4, v3_reports, IGMP_V3_REPORT, grp); RECORDS(2);
-	ADD(8, IGMP_V3_IS_EXCLUDE, grp2); uip_len += 8; igmp_packet_handler();
+	ADD(8, IGMP_V3_IS_EXCLUDE, grp2); GROW(8); igmp_packet_handler();
 	CHECK(DIP_OK(grp2) && tbl_writes == 4, "v3 two records: both learned");
 	CLR(); tbl_writes = 0; build(4, v3_reports, IGMP_V3_REPORT, grp2); RECORDS(2);
-	ADD(8, IGMP_V3_IS_EXCLUDE, grp); uip_len += 8; igmp_packet_handler();
+	ADD(8, IGMP_V3_IS_EXCLUDE, grp); GROW(8); igmp_packet_handler();
 	CHECK(DIP_OK(grp) && tbl_writes == 4, "v3 two records, other order: both learned");
 	CLR(); tbl_writes = 0; build(4, v3_reports, IGMP_V3_REPORT, grp); RECORDS(2); uip_buf[REC(0)] = IGMP_V3_IS_INCLUDE; uip_buf[REC(3)] = 1;
-	ADD(12, IGMP_V3_IS_EXCLUDE, grp2); uip_len += 12; igmp_packet_handler();
+	ADD(12, IGMP_V3_IS_EXCLUDE, grp2); GROW(12); igmp_packet_handler();
 	CHECK(DIP_OK(grp2) && tbl_writes == 4, "v3 record with a source, then another: both learned");
 	CLR(); tbl_writes = 0; build(4, v3_reports, IGMP_V3_REPORT, grp); RECORDS(2); uip_buf[REC(0)] = 6;
-	ADD(8, IGMP_V3_IS_EXCLUDE, grp2); uip_len += 8; igmp_packet_handler();
+	ADD(8, IGMP_V3_IS_EXCLUDE, grp2); GROW(8); igmp_packet_handler();
 	CHECK(DIP_OK(grp2) && tbl_writes == 2, "v3 unknown record, then a known one: second learned");
 	CLR(); tbl_writes = 0; build(4, v3_reports, IGMP_V3_REPORT, grp); RECORDS(2);
-	ADD(8, IGMP_V3_IS_EXCLUDE, grp2); uip_len += 4; igmp_packet_handler();
+	ADD(8, IGMP_V3_IS_EXCLUDE, grp2); GROW(4); igmp_packet_handler();
 	CHECK(DIP_OK(grp) && tbl_writes == 2, "v3 second record cut: only the first learned");
+	CLR(); tbl_writes = 0; build(4, v3_reports, IGMP_V3_REPORT, grp); RECORDS(2);
+	ADD(8, IGMP_V3_IS_EXCLUDE, grp2); uip_len += 8; igmp_packet_handler();
+	CHECK(DIP_OK(grp) && tbl_writes == 2, "v3 record in the Ethernet padding, past the IPv4 length: not learned");
+	CLR(); tbl_writes = 0; build(4, v3_reports, IGMP_V3_REPORT, grp); uip_buf[REC(0)] = IGMP_V3_IS_INCLUDE; uip_buf[REC(3)] = 2;
+	GROW(4); igmp_packet_handler();
+	CHECK(tbl_writes == 0, "v3 record with its sources cut: not learned");
 	CLR(); tbl_writes = 0; build(4, v3_reports, IGMP_V3_REPORT, grp); RECORDS(9); igmp_packet_handler();
 	CHECK(DIP_OK(grp) && tbl_writes == 2, "v3 record count beyond the frame: only what is there");
 	CLR(); tbl_writes = 0; build(4, v3_reports, IGMP_V3_REPORT, grp); uip_buf[REC(2)] = 0xff; uip_buf[REC(3)] = 0xff; igmp_packet_handler();
@@ -518,11 +526,17 @@ int main(int argc, char **argv)
 	build(6, all_hosts, IGMP_QUERY, none);
 	igmp_packet_handler();
 	CHECK(lm_act == LOOKUP_MISS_DROP_9, "querier back: unknown multicast dropped");
+	lm_act = 1;
+	link_up &= ~PORT_BIT(3);
+	igmp_link_change();
+	CHECK(lm_act == 1, "another port lost its link: the querier stays, nothing written");
+	link_up |= PORT_BIT(3);
 	link_up &= ~PORT_BIT(6);
 	igmp_link_change();
 	CHECK(lm_act == LOOKUP_MISS_FLOOD && lut == 0, "querier link lost, no IGMP after it: flooded at the link change");
+	lm_act = 1;
 	igmp_link_change();
-	CHECK(lm_act == LOOKUP_MISS_FLOOD, "link change without a querier: nothing to do");
+	CHECK(lm_act == 1, "link change without a querier: nothing written");
 	lut = -1;
 	link_up = 0x3ff;
 	lm_act = 1;
