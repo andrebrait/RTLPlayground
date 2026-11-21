@@ -296,8 +296,16 @@ static void test_rexmit(void)
 	uint8_t first[300];
 	uint16_t n = sent_len;
 	memcpy(first, sent, n);
+	fake_conn.mss = 100;	/* a smaller window since the segment went out */
 	appcall(UIP_REXMIT, 0, 0);
+	fake_conn.mss = 300;
 	check(sent_len == n && !memcmp(sent, first, n), "send: a retransmission resends the same bytes");
+	appcall(UIP_ACKDATA | UIP_NEWDATA, "HTTP/1.1 400 Bad", 16);
+	check(unifi.err == UE_HTTP && uip_flags == UIP_ABORT && !unifi.conn,
+	      "send: a reply before the request is taken fails the inform");
+	uptime_secs = unifi.next;
+	ticks();
+	appcall(UIP_CONNECTED, 0, 0);
 	unifi.enabled = 0;
 	u_stop();
 	appcall(UIP_POLL, 0, 0);
@@ -354,8 +362,12 @@ static void test_replies(void)
 	n = reply(r, noop, 1, 0);
 	deliver(r, n - 100);
 	appcall(UIP_CLOSE, 0, 0);
-	check(unifi.err == UE_HTTP && unifi.phase == U_IDLE && !unifi.conn && !unifi.status,
+	check(unifi.err == UE_HTTP && unifi.phase == U_IDLE && !unifi.conn && unifi.status == 200,
 	      "reply: a close before Content-Length is reached fails");
+
+	inform();
+	appcall(UIP_CLOSE, 0, 0);
+	check(unifi.err == UE_CONN && !unifi.status, "reply: a close without any reply is a connection failure");
 
 	inform();
 	n = reply(r, noop, 1, 0);
@@ -439,6 +451,6 @@ int main(void)
 	test_replies();
 	cmd("unifi");
 	check(strstr(out, "UniFi on, inform http://10.0.0.1:8080/inform") != 0, "show: state and URL");
-	check(strstr(out, "informs sent 21, last reply 404, failed 9,") != 0, "show: the inform count in decimal");
+	check(strstr(out, "informs sent 23, last reply 404, failed 11,") != 0, "show: the inform count in decimal");
 	return failures != 0;
 }

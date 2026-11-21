@@ -183,8 +183,6 @@ static void u_fail(__xdata uint8_t e)
 {
 	unifi.err = e;
 	unifi.fails++;
-	unifi.status = 0;
-	unifi.type[0] = 0;
 	u_done();
 }
 
@@ -370,19 +368,33 @@ void unifi_appcall(void) __banked
 		return;
 	}
 	if (unifi.phase == U_SEND) {
+		if (uip_rexmit()) {
+			/* The same bytes: uIP resends the segment's original length,
+			 * and uip_mss() may have changed since */
+			uip_send(u_buf + unifi.off, unifi.sent);
+			return;
+		}
 		if (uip_acked()) {
 			unifi.off += unifi.sent;
 			if (unifi.off == unifi.end) {
 				unifi.phase = U_RECV;
 				unifi.pos = 0;
 				unifi.hdr = 0;
-			} else if (!uip_closed()) {
+			}
+		}
+		if (unifi.phase == U_SEND) {
+			/* A reply before the whole request was taken: uIP has
+			 * acknowledged it, so it cannot be dropped silently */
+			if (uip_newdata()) {
+				unifi.conn = 0;
+				uip_abort();
+				u_fail(UE_HTTP);
+				return;
+			}
+			if (uip_acked() && !uip_closed()) {
 				u_send();
 				return;
 			}
-		} else if (uip_rexmit()) {
-			u_send();
-			return;
 		}
 	}
 	if (unifi.phase == U_RECV && uip_newdata()) {
@@ -411,7 +423,7 @@ void unifi_appcall(void) __banked
 		/* Only a reply without Content-Length may end at the close */
 		if (unifi.phase == U_RECV && unifi.hdr && unifi.clen == 0xffff)
 			u_received();
-		else if (unifi.phase == U_RECV)
+		else if (unifi.phase == U_RECV && unifi.pos)
 			u_fail(UE_HTTP);
 		else
 			u_fail(UE_CONN);
@@ -487,6 +499,9 @@ void unifi_tick(void) __banked
 			gcm_setkey(unifi.key);
 			unifi.keyed = 1;
 		}
+		/* The reply fields describe the inform being made */
+		unifi.status = 0;
+		unifi.type[0] = 0;
 		memcpy(dns_state.name, unifi.host, DNS_NAME_LEN);
 		dns_state.verbose = 0;
 		dns_lookup();
@@ -538,7 +553,8 @@ void unifi_tick(void) __banked
 
 
 /* Stops the current inform and makes the next one due. A connection is
- * reset at its next event. */
+ * reset at its next event, which for one still opening is its SYN-ACK or
+ * its timeout; the next inform waits for that. */
 static void u_stop(void)
 {
 	if (unifi.conn)
@@ -570,7 +586,8 @@ static uint8_t u_url(void)
 	if (!strstart(u_p, u_http_prefix))
 		return 0;
 	u_p += sizeof(u_http_prefix) - 1;
-	/* A host name or address: letters, digits, '.', '-' and '_' */
+	/* Letters, digits, '.', '-' and '_' only: nothing u_x() escapes. A
+	 * malformed name fails at the lookup, which "unifi" then shows. */
 	for (u_i = 0; u_p[u_i] && u_p[u_i] != ':' && u_p[u_i] != '/' && u_p[u_i] != ' '; u_i++) {
 		u_d[0] = u_p[u_i] | 0x20;
 		if ((u_d[0] < 'a' || u_d[0] > 'z') && (u_p[u_i] < '0' || u_p[u_i] > '9')
