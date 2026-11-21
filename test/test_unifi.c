@@ -556,12 +556,15 @@ static uint8_t req_iv[16];
 static const char *req_json(void)
 {
 	static uint8_t copy[2048];
-	char *body = strstr((char *)req, "\r\n\r\n");
+	char *body = memmem(req, req_len, "\r\n\r\n", 4);
 	if (!body)
 		return NULL;
 	uint8_t *p = (uint8_t *)body + 4, k[16];
+	uint16_t have = req_len - (p - req);	/* only this inform's bytes */
+	if (have < 40)
+		return NULL;
 	uint16_t plen = (uint16_t)(p[38] << 8 | p[39]);
-	if (plen < 16 || plen > sizeof(copy) - 41)
+	if (plen < 16 || plen > sizeof(copy) - 41 || 40 + plen != have)
 		return NULL;
 	memcpy(copy, p, 40 + plen);
 	memcpy(req_iv, copy + 16, 16);
@@ -815,6 +818,59 @@ static void test_bounds(void)
 	broken = 0;
 }
 
+/* The parser against JSON the lab did not show, and saves that fail */
+static void test_json(void)
+{
+	static const uint8_t newkey[16] = {
+		0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
+		0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff
+	};
+
+	unifi_init();
+	cmd("unifi inform http://10.0.0.1");
+	cmd("unifi on");
+	cmd("unifi forget");
+	cur_key = key;
+	inform();
+	answer("{\"_type\":\"setparam\",\"mgmt_cfg\":\"a=x\\\\nauthkey=00112233445566778899aabbccddeeff\"}");
+	check(!unifi.adopted, "json: an escaped backslash before n is not a new line");
+	inform();
+	answer("{\"_type\":\"setparam\",\"mgmt_cfg\":\"authkey=00112233445566778899aabbccddeeff!\\n\"}");
+	check(!unifi.adopted, "json: an authkey must end its line");
+	inform();
+	answer("{ \"_type\" : \"setparam\" ,\n \"mgmt_cfg\" :\t\"a=\\\"q\\\"\\nauthkey=00112233445566778899aabbccddeeff\\ncfgversion=1111\\n\" }");
+	check(unifi.adopted && !memcmp(unifi.key, newkey, 16) && !strcmp(unifi.cfgver, "1111"),
+	      "json: whitespace around members, and an escaped quote before the authkey line");
+
+	cur_key = newkey;
+	inform();
+	answer("{\"_type\":\"setparam\",\"port_cfg\":{\"cfgversion\":\"aaaa\"},\"cfgversion\":\"bbbb\","
+	       "\"mgmt_cfg\":\"cfgversion=cccc\\n\"}");
+	check(!strcmp(unifi.cfgver, "bbbb"), "json: the cfgversion of the root object counts");
+
+	/* A cfgversion that cannot be saved does not stop informs */
+	broken = 1;
+	inform();
+	answer("{\"_type\":\"setparam\",\"cfgversion\":\"dddd\"}");
+	int c = connects;
+	inform();
+	check(unifi.unsaved && !unifi.critical && connects == c + 1 && req_json(),
+	      "flash: a cfgversion not saved does not stop informs under the saved key");
+	appcall(UIP_NEWDATA, "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n", 45);
+
+	/* A forget that fails is tried again by the next forget */
+	unifi.flash_fails = 0;
+	cmd("unifi off");
+	cmd("unifi forget");
+	check(!unifi.adopted && unifi.unsaved, "forget: a failed save leaves the forget pending");
+	broken = 0;
+	unifi.flash_fails = 0;
+	cmd("unifi forget");
+	check(!unifi.unsaved && !memcmp(last_rec() + 12, key, 16), "forget: a second forget saves it");
+	cmd("unifi on");
+	cur_key = key;
+}
+
 int main(void)
 {
 	memset(sector, 0xff, sizeof(sector));
@@ -833,5 +889,6 @@ int main(void)
 	check(strstr(out, "UniFi on, inform http://10.0.0.1:8080/inform") != 0, "show: state and URL");
 	test_adopt();
 	test_bounds();
+	test_json();
 	return failures != 0;
 }

@@ -27,6 +27,7 @@ struct unifi_state {
 	uint8_t adopted;	/* key is a controller's authkey */
 	uint8_t booted;		/* boot counted for this boot's IVs */
 	uint8_t unsaved;	/* the state differs from flash */
+	uint8_t critical;	/* the key or boot counter differs: no inform under the authkey */
 	uint8_t flash_fails;	/* saves that did not read back */
 	uint32_t boot;		/* boot counter, part of the IV */
 	char cfgver[UNIFI_CFGVER_LEN];	/* the controller's cfgversion, echoed */

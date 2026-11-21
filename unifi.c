@@ -566,6 +566,7 @@ static uint8_t u_save(void)
 	}
 	unifi.flash_fails = 0;
 	unifi.unsaved = 0;
+	unifi.critical = 0;
 	return 1;
 }
 
@@ -573,7 +574,9 @@ static uint8_t u_save(void)
  * stays, so a later adoption with the same key repeats no IV. */
 static void u_forget(void)
 {
-	if (!unifi.adopted)
+	/* Nothing to do once forgotten and saved; a save that failed is
+	 * tried again */
+	if (!unifi.adopted && !unifi.unsaved)
 		return;
 	memcpyc(unifi.key, u_default_key, 16);
 	unifi.adopted = 0;
@@ -619,23 +622,107 @@ static uint8_t u_is_default(void)
 	return 1;
 }
 
-/* A key=value line of mgmt_cfg: the offset of its value, or 0xffff. The
- * key must start the string or follow an escaped newline, so that
- * "authkey=" does not match the end of another key. */
-static uint16_t u_line(__code const char *key)
+/* JSON whitespace */
+static uint8_t u_ws(__xdata uint8_t c)
 {
-	for (u_i = u_ms; u_i < u_me; u_i = u_j) {
-		u_j = u_find(key, u_i, u_me);
-		if (u_j == 0xffff)
+	if (c == ' ' || c == '\t' || c == '\r' || c == '\n')
+		return 1;
+	return 0;
+}
+
+/* The offset of the closing quote of the string whose body starts at u_i,
+ * skipping escapes, or u_n */
+static uint16_t u_strend(void)
+{
+	for (; u_i < u_n && u_p[u_i] != '"'; u_i++)
+		if (u_p[u_i] == '\\')
+			u_i++;
+	if (u_i > u_n)
+		return u_n;
+	return u_i;
+}
+
+/* A member of the reply's root object: the offset of its value, past the
+ * colon and any whitespace, or 0xffff. Strings are skipped with their
+ * escapes, and members of nested objects do not count. */
+static __xdata uint8_t u_depth;
+static __xdata uint16_t u_ks;
+
+static uint16_t u_member(__code const char *name)
+{
+	u_depth = 0;
+	for (u_i = 0; u_i < u_n; u_i++) {
+		u_d[0] = u_p[u_i];
+		if (u_d[0] == '{' || u_d[0] == '[') {
+			u_depth++;
+			continue;
+		}
+		if (u_d[0] == '}' || u_d[0] == ']') {
+			u_depth--;
+			continue;
+		}
+		if (u_d[0] != '"')
+			continue;
+		u_ks = ++u_i;
+		u_i = u_strend();
+		if (u_i >= u_n)
 			return 0xffff;
-		u_i = u_j - strlen(key);
-		if (u_i == u_ms || (u_i >= u_ms + 2 && u_p[u_i - 2] == '\\' && u_p[u_i - 1] == 'n'))
-			return u_j;
+		if (u_depth != 1)
+			continue;
+		for (u_j = u_i + 1; u_j < u_n && u_ws(u_p[u_j]); u_j++)
+			;
+		if (u_j >= u_n || u_p[u_j] != ':')
+			continue;	/* a value, not a name */
+		if ((uint16_t)(u_i - u_ks) != strlen(name) || !strstart(u_p + u_ks, name))
+			continue;
+		for (u_j++; u_j < u_n && u_ws(u_p[u_j]); u_j++)
+			;
+		return u_j;
 	}
 	return 0xffff;
 }
 
-/* The authkey at u_i: exactly 32 hex digits, into unifi.key */
+/* A string member of the root object: the offset of its first character,
+ * with u_me at its closing quote, or 0xffff */
+static uint16_t u_string(__code const char *name)
+{
+	u_i = u_member(name);
+	if (u_i == 0xffff || u_p[u_i] != '"')
+		return 0xffff;
+	u_ms = ++u_i;
+	u_me = u_strend();
+	return u_ms;
+}
+
+/* A key=value line of mgmt_cfg, between u_ms and u_me: the offset of its
+ * value, or 0xffff. The key must start the string or follow an escaped
+ * newline, "\n" with its backslash not escaped itself, so that
+ * "authkey=" matches neither the end of another key nor a value. */
+static __xdata uint16_t u_b, u_ls;
+
+static uint16_t u_line(__code const char *__xdata key)
+{
+	for (u_ls = u_ms; u_ls < u_me; u_ls = u_j) {
+		u_j = u_find(key, u_ls, u_me);
+		if (u_j == 0xffff)
+			return 0xffff;
+		u_i = u_j - strlen(key);
+		if (u_i == u_ms)
+			return u_j;
+		if (u_i >= u_ms + 2 && u_p[u_i - 1] == 'n') {
+			/* An odd number of backslashes before the n */
+			u_b = 0;
+			for (u_q = u_p + u_i - 2; u_q >= u_p + u_ms && *u_q == '\\'; u_q--)
+				u_b++;
+			if (u_b & 1)
+				return u_j;
+		}
+	}
+	return 0xffff;
+}
+
+/* The authkey at u_i: exactly 32 hex digits ending the line, into
+ * unifi.key */
 static uint8_t u_authkey(void)
 {
 	for (u_j = 0; u_j < 32; u_j++) {
@@ -646,7 +733,7 @@ static uint8_t u_authkey(void)
 			return 0;
 		u_k[u_j >> 1] = u_k[u_j >> 1] << 4 | u_d[0];
 	}
-	if (u_i + 32 < u_me && u_hexval(u_p[u_i + 32]) != 0xff)
+	if (u_i + 32 < u_me && u_p[u_i + 32] != '\\')
 		return 0;
 	memcpy(unifi.key, u_k, 16);
 	return 1;
@@ -666,8 +753,6 @@ static uint8_t u_cfgver(void)
 }
 
 /* The tag checked out: act on the reply */
-static __code const char u_type[] = "\"_type\":\"";
-static __code const char u_mgmt[] = "\"mgmt_cfg\":\"";
 static __xdata uint8_t u_dirty;
 
 static void u_decrypted(void)
@@ -675,16 +760,16 @@ static void u_decrypted(void)
 	unifi.type[0] = 0;
 	u_p = u_buf + unifi.hdr + TNBU_HDR;
 	u_n = unifi.clen - TNBU_HDR - TAG_LEN;
-	u_i = u_find(u_type, 0, u_n);
+	u_i = u_string("_type");
 	if (u_i != 0xffff) {
-		for (u_d[0] = 0; u_d[0] < UNIFI_TYPE_LEN - 1 && u_i < u_n && u_p[u_i] != '"'; u_d[0]++)
+		for (u_d[0] = 0; u_d[0] < UNIFI_TYPE_LEN - 1 && u_i < u_me; u_d[0]++)
 			unifi.type[u_d[0]] = u_p[u_i++];
 		unifi.type[u_d[0]] = 0;
 	}
 	unifi.err = 0;
 	if (!strcmp(unifi.type, "noop")) {
 		/* The controller paces the informs */
-		u_i = u_find("\"interval\":", 0, u_n);
+		u_i = u_member("interval");
 		if (u_i != 0xffff) {
 			for (u_j = 0; u_i < u_n && u_p[u_i] >= '0' && u_p[u_i] <= '9'; u_i++)
 				if (u_j <= 3600)	/* larger stays larger, without overflow */
@@ -698,10 +783,7 @@ static void u_decrypted(void)
 	u_dirty = 0;
 	if (!strcmp(unifi.type, "setparam")) {
 		/* mgmt_cfg is a string of key=value lines */
-		u_ms = u_find(u_mgmt, 0, u_n);
-		if (u_ms != 0xffff) {
-			for (u_me = u_ms; u_me < u_n && u_p[u_me] != '"'; u_me++)
-				;
+		if (u_string("mgmt_cfg") != 0xffff) {
 			/* A key is taken only while on the default one */
 			u_i = u_line("authkey=");
 			if (!unifi.adopted && u_i != 0xffff && u_authkey() && !u_is_default()) {
@@ -709,12 +791,13 @@ static void u_decrypted(void)
 				unifi.keyed = 0;
 				unifi.boot++;
 				unifi.booted = 1;
+				unifi.critical = 1;
 				u_dirty = 1;
 			}
 		}
 		/* The provisioning cfgversion, else the one in mgmt_cfg */
-		u_i = u_find("\"cfgversion\":\"", 0, u_n);
-		if (u_i == 0xffff && u_ms != 0xffff)
+		u_i = u_string("cfgversion");
+		if (u_i == 0xffff && u_string("mgmt_cfg") != 0xffff)
 			u_i = u_line("cfgversion=");
 		if (unifi.adopted && u_i != 0xffff && u_cfgver())
 			u_dirty = 1;
@@ -762,11 +845,13 @@ void unifi_tick(void) __banked
 			unifi.boot++;
 			unifi.booted = 1;
 			unifi.unsaved = 1;
+			unifi.critical = 1;
 		}
-		/* Under the authkey no inform goes out until the state is in
-		 * flash: the boot counter in the IV must be saved first. The
-		 * default key is public, so a failed save does not stop those. */
-		if (unifi.unsaved && !u_save() && unifi.adopted) {
+		/* Under the authkey no inform goes out until the key and boot
+		 * counter are in flash: the boot counter is part of the IV. A
+		 * cfgversion that is not saved yet does not stop informs, and
+		 * neither does anything under the public default key. */
+		if (unifi.unsaved && !u_save() && unifi.adopted && unifi.critical) {
 			u_fail(UE_FLASH);
 			return;
 		}
@@ -893,10 +978,15 @@ void unifi_init(void) __banked
 }
 
 
-/* A factory reset leaves the controller too */
+/* A factory reset leaves the controller too. The reset follows at once,
+ * so the save is tried as often as u_save() allows. */
 void unifi_reset(void) __banked
 {
 	u_forget();
+	while (unifi.unsaved && unifi.flash_fails < UNIFI_FLASH_TRIES)
+		u_save();
+	if (unifi.unsaved)
+		print_string("Error: the UniFi adoption is not forgotten, it returns after the reset\n");
 }
 
 

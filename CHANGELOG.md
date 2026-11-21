@@ -193,7 +193,9 @@
     the last reply.
   - Adoption. Adopt in the controller hands the switch its authkey, and the switch
     informs with it from then on and echoes the controller's `cfgversion`. Both are
-    kept in their own flash sector, so they survive reboots and firmware updates. The
+    kept in two flash sectors of their own, so they survive reboots and firmware
+    updates through the web interface. Writing a whole flash image with a
+    programmer erases them. The
     controller's `noop` sets the inform interval. Forget in the controller, or
     `unifi forget`, returns the switch to the default key. The switch does not
     apply the controller's settings yet.
