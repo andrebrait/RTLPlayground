@@ -335,8 +335,12 @@ static void u_ports(void)
 		u_dec(u_mbps);
 		u_counter(",\"rx_bytes\":", 0, 0, 0);
 		u_counter(",\"tx_bytes\":", 1, 1, 1);
+#if SOC_FAMILY != RTL836X
+		/* The RTL836x packet counters are 32 bits: their sum would go back
+		 * whenever one wraps, so only its 64-bit byte counters are sent */
 		u_counter(",\"rx_packets\":", 2, 2, 4);
 		u_counter(",\"tx_packets\":", 3, 5, 7);
+#endif
 		u_c('}');
 	}
 }
