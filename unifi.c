@@ -61,19 +61,19 @@
 #define UE_TNBU		4
 #define UE_TAG		5
 
-/* Room for the HTTP request header in front of the TNBU packet: the
- * fixed text is about 150 bytes, the host and path at most 47 each. */
+/* Room for the HTTP request header in front of the TNBU packet: 148
+ * bytes of fixed text and numbers, the host and the path at most 47 each.
+ * u_url() admits no character that u_x() would escape in either. */
 #define HROOM		256
+#define UNIFI_PORT	8080
 #define TNBU_HDR	40
 #define TAG_LEN		16
 #define STEP		32	/* bytes crypted per tick: two blocks, about 5.5 ms */
 
 extern __xdata uint32_t uptime_secs;
 extern __xdata uint8_t sfr_data[4];
-extern __xdata uint8_t cmd_buffer[CMD_BUF_SIZE];
 extern __xdata uint8_t cmd_words_len;
 extern __xdata uint8_t cmd_words_b[15];
-uint8_t div_small(__xdata uint8_t *n, uint8_t len, uint8_t d);
 
 __xdata struct unifi_state unifi;
 /* unifi_init() clears it with memset(), whose length is a byte */
@@ -116,13 +116,18 @@ static void u_x(__xdata const char *s)
 	}
 }
 
+static void u_be32(__xdata uint8_t *p, __xdata uint32_t v)
+{
+	p[0] = v >> 24;
+	p[1] = v >> 16;
+	p[2] = v >> 8;
+	p[3] = v;
+}
+
 /* The decimal digits of v, last first, in u_d[4..4 + u_n) */
 static void u_digits(__xdata uint32_t v)
 {
-	u_d[0] = v >> 24;
-	u_d[1] = v >> 16;
-	u_d[2] = v >> 8;
-	u_d[3] = v;
+	u_be32(u_d, v);
 	u_n = 0;
 	do
 		u_d[4 + u_n++] = '0' + div_small(u_d, 4, 10);
@@ -166,15 +171,6 @@ static void u_mac(__xdata char sep)
 }
 
 
-static void u_be32(__xdata uint8_t *p, __xdata uint32_t v)
-{
-	p[0] = v >> 24;
-	p[1] = v >> 16;
-	p[2] = v >> 8;
-	p[3] = v;
-}
-
-
 /* Back to idle, the next inform one interval from now */
 static void u_done(void)
 {
@@ -182,14 +178,14 @@ static void u_done(void)
 	unifi.next = uptime_secs + unifi.interval;
 }
 
+/* Ends a failed inform. The caller has let go of the connection. */
 static void u_fail(__xdata uint8_t e)
 {
 	unifi.err = e;
 	unifi.fails++;
-	if (unifi.conn)
-		unifi.abort = 1;
-	else
-		u_done();
+	unifi.status = 0;
+	unifi.type[0] = 0;
+	u_done();
 }
 
 
@@ -222,14 +218,11 @@ static void u_build(void)
 	    "\"port_table\":[]}");
 	unifi.end = unifi.pos;
 
+	/* Packet version 0, then the fields that are not zero */
 	u_p = u_buf + HROOM;
-	u_p[0] = 'T';
-	u_p[1] = 'N';
-	u_p[2] = 'B';
-	u_p[3] = 'U';
-	u_be32(u_p + 4, 0);	/* packet version */
+	memset(u_p, 0, TNBU_HDR);
+	memcpyc(u_p, "TNBU", 4);
 	memcpy(u_p + 8, uip_ethaddr.addr, 6);
-	u_p[14] = 0;
 	u_p[15] = 0x09;		/* encrypted, AES-GCM, not compressed */
 	/* The IV: random, and a message counter so that it never repeats in
 	 * one boot even if the RNG does */
@@ -238,7 +231,7 @@ static void u_build(void)
 		memcpy(u_p + u_i, sfr_data, 4);
 	}
 	u_be32(u_p + 28, ++unifi.msg);
-	u_be32(u_p + 32, 1);	/* payload version: JSON */
+	u_p[35] = 1;		/* payload version: JSON */
 	unifi.left = unifi.end - (HROOM + TNBU_HDR);
 	u_be32(u_p + 36, unifi.left + TAG_LEN);
 	unifi.cp = u_p + TNBU_HDR;
@@ -282,45 +275,56 @@ static void u_send(void)
  * 2 when it cannot be used. */
 static __code const char u_clen[] = "\ncontent-length:";
 
+static __xdata uint16_t u_scan;	/* the header end is not before this */
+
 static uint8_t u_parse(void)
 {
 	if (!unifi.hdr) {
-		for (u_i = 3; u_i < unifi.pos; u_i++)
-			if (u_buf[u_i] == '\n' && u_buf[u_i - 1] == '\r'
-			    && u_buf[u_i - 2] == '\n' && u_buf[u_i - 3] == '\r')
+		for (u_i = u_scan < 3 ? 3 : u_scan; u_i < unifi.pos; u_i++)
+			if (strstart(u_buf + u_i - 3, "\r\n\r\n"))
 				break;
-		if (u_i >= unifi.pos)
-			return unifi.pos == UNIFI_BUF_SIZE ? 2 : 0;
-		unifi.hdr = u_i + 1;
-		if (!strstart(u_buf, "HTTP/1.") || unifi.hdr < 13)
-			return 2;
-		unifi.status = 0;
-		for (u_i = 9; u_i < 12; u_i++)
-			unifi.status = unifi.status * 10 + u_buf[u_i] - '0';
-		/* Content-Length, any case. Without it the reply ends at close. */
-		unifi.clen = 0xffff;
-		for (u_i = 0; u_i + sizeof(u_clen) - 1 < unifi.hdr; u_i++) {
-			for (u_n = 0; u_clen[u_n]; u_n++)
-				if ((u_buf[u_i + u_n] | 0x20) != (u_clen[u_n] | 0x20))
-					break;
-			if (u_clen[u_n])
-				continue;
-			u_i += u_n;
-			while (u_buf[u_i] == ' ')
-				u_i++;
-			unifi.clen = 0;
-			while (u_buf[u_i] >= '0' && u_buf[u_i] <= '9') {
-				if (unifi.clen > (UNIFI_BUF_SIZE - unifi.hdr) / 10)
-					return 2;
-				unifi.clen = unifi.clen * 10 + u_buf[u_i++] - '0';
-			}
-			if (unifi.clen > UNIFI_BUF_SIZE - unifi.hdr)
+		if (u_i < unifi.pos) {
+			unifi.hdr = u_i + 1;
+			if (!strstart(u_buf, "HTTP/1.") || unifi.hdr < 13)
 				return 2;
-			break;
+			unifi.status = 0;
+			for (u_i = 9; u_i < 12; u_i++) {
+				if (u_buf[u_i] < '0' || u_buf[u_i] > '9')
+					return 2;
+				unifi.status = unifi.status * 10 + u_buf[u_i] - '0';
+			}
+			/* Content-Length, any case. Without it the reply ends at close. */
+			unifi.clen = 0xffff;
+			for (u_i = 0; u_i + sizeof(u_clen) - 1 < unifi.hdr; u_i++) {
+				for (u_n = 0; u_clen[u_n]; u_n++) {
+					u_d[0] = u_buf[u_i + u_n];
+					if (u_d[0] >= 'A' && u_d[0] <= 'Z')
+						u_d[0] += 'a' - 'A';
+					if (u_d[0] != u_clen[u_n])
+						break;
+				}
+				if (u_clen[u_n])
+					continue;
+				u_i += u_n;
+				while (u_buf[u_i] == ' ')
+					u_i++;
+				unifi.clen = 0;
+				while (u_buf[u_i] >= '0' && u_buf[u_i] <= '9') {
+					if (unifi.clen > (UNIFI_BUF_SIZE - unifi.hdr) / 10)
+						return 2;
+					unifi.clen = unifi.clen * 10 + u_buf[u_i++] - '0';
+				}
+				if (unifi.clen > UNIFI_BUF_SIZE - unifi.hdr)
+					return 2;
+				break;
+			}
 		}
 	}
-	if (unifi.clen == 0xffff)
-		return unifi.pos == UNIFI_BUF_SIZE ? 2 : 0;
+	if (!unifi.hdr || unifi.clen == 0xffff) {
+		if (unifi.pos == UNIFI_BUF_SIZE)
+			return 2;
+		return 0;
+	}
 	if (unifi.pos < unifi.hdr + unifi.clen)
 		return 0;
 	return 1;
@@ -343,6 +347,8 @@ static void u_received(void)
 }
 
 
+/* uIP can report several events at once: a FIN arrives together with the
+ * last data, and an acknowledgement together with the reply. */
 void unifi_appcall(void) __banked
 {
 	if (!unifi.conn || uip_conn != unifi.conn)
@@ -351,15 +357,9 @@ void unifi_appcall(void) __banked
 		unifi.abort = 0;
 		unifi.conn = 0;
 		uip_abort();
-		u_done();
 		return;
 	}
-	if (uip_closed() || uip_aborted() || uip_timedout()) {
-		/* A reply without Content-Length ends here */
-		if (unifi.phase == U_RECV && uip_closed() && unifi.hdr) {
-			u_received();
-			return;
-		}
+	if (uip_aborted() || uip_timedout()) {
 		unifi.conn = 0;
 		u_fail(UE_CONN);
 		return;
@@ -372,39 +372,49 @@ void unifi_appcall(void) __banked
 	if (unifi.phase == U_SEND) {
 		if (uip_acked()) {
 			unifi.off += unifi.sent;
-			if (unifi.off < unifi.end) {
+			if (unifi.off == unifi.end) {
+				unifi.phase = U_RECV;
+				unifi.pos = 0;
+				unifi.hdr = 0;
+			} else if (!uip_closed()) {
 				u_send();
 				return;
 			}
-			unifi.phase = U_RECV;
-			unifi.pos = 0;
-			unifi.hdr = 0;
 		} else if (uip_rexmit()) {
-			uip_send(u_buf + unifi.off, unifi.sent);
+			u_send();
 			return;
 		}
 	}
 	if (unifi.phase == U_RECV && uip_newdata()) {
-		if (uip_len > UNIFI_BUF_SIZE - unifi.pos) {
-			unifi.conn = 0;
-			uip_abort();
-			u_fail(UE_HTTP);
-			return;
+		u_d[0] = 2;
+		if (uip_len <= UNIFI_BUF_SIZE - unifi.pos) {
+			u_scan = unifi.pos;
+			memcpy(u_buf + unifi.pos, uip_appdata, uip_len);
+			unifi.pos += uip_len;
+			u_d[0] = u_parse();
 		}
-		memcpy(u_buf + unifi.pos, uip_appdata, uip_len);
-		unifi.pos += uip_len;
-		switch (u_parse()) {
-		case 0:
-			return;
-		case 1:
-			uip_close();
+		if (u_d[0] == 1) {
+			if (!uip_closed())
+				uip_close();
 			u_received();
 			return;
-		default:
+		}
+		if (u_d[0] == 2) {
 			unifi.conn = 0;
 			uip_abort();
 			u_fail(UE_HTTP);
+			return;
 		}
+	}
+	if (uip_closed()) {
+		unifi.conn = 0;
+		/* Only a reply without Content-Length may end at the close */
+		if (unifi.phase == U_RECV && unifi.hdr && unifi.clen == 0xffff)
+			u_received();
+		else if (unifi.phase == U_RECV)
+			u_fail(UE_HTTP);
+		else
+			u_fail(UE_CONN);
 	}
 }
 
@@ -527,13 +537,13 @@ void unifi_tick(void) __banked
 }
 
 
-/* Stops the current inform. A connection is reset on its next poll. */
+/* Stops the current inform and makes the next one due. A connection is
+ * reset at its next event. */
 static void u_stop(void)
 {
 	if (unifi.conn)
 		unifi.abort = 1;
-	else
-		unifi.phase = U_IDLE;
+	unifi.phase = U_IDLE;
 	unifi.next = 0;
 }
 
@@ -543,7 +553,7 @@ void unifi_init(void) __banked
 	memset((__xdata uint8_t *)&unifi, 0, sizeof(unifi));
 	memcpyc(unifi.host, u_default_host, sizeof(u_default_host));
 	memcpyc(unifi.path, u_default_path, sizeof(u_default_path));
-	unifi.port = 8080;
+	unifi.port = UNIFI_PORT;
 	unifi.interval = 10;
 	memcpyc(unifi.key, u_default_key, 16);
 }
@@ -560,12 +570,17 @@ static uint8_t u_url(void)
 	if (!strstart(u_p, u_http_prefix))
 		return 0;
 	u_p += sizeof(u_http_prefix) - 1;
-	for (u_i = 0; u_p[u_i] && u_p[u_i] != ':' && u_p[u_i] != '/' && u_p[u_i] != ' '; u_i++)
-		;
+	/* A host name or address: letters, digits, '.', '-' and '_' */
+	for (u_i = 0; u_p[u_i] && u_p[u_i] != ':' && u_p[u_i] != '/' && u_p[u_i] != ' '; u_i++) {
+		u_d[0] = u_p[u_i] | 0x20;
+		if ((u_d[0] < 'a' || u_d[0] > 'z') && (u_p[u_i] < '0' || u_p[u_i] > '9')
+		    && u_p[u_i] != '.' && u_p[u_i] != '-' && u_p[u_i] != '_')
+			return 0;
+	}
 	if (!u_i || u_i >= DNS_NAME_LEN)
 		return 0;
 	u_n = u_i;
-	u_port = 8080;
+	u_port = UNIFI_PORT;
 	if (u_p[u_n] == ':') {
 		u_port = 0;
 		while (u_p[++u_n] >= '0' && u_p[u_n] <= '9') {
@@ -605,6 +620,13 @@ static __code const char *__code const u_errors[] = {
 	"bad TNBU header", "tag mismatch"
 };
 
+static void u_print(__xdata uint32_t v)
+{
+	u_digits(v);
+	while (u_n)
+		write_char(u_d[4 + --u_n]);
+}
+
 static void u_show(void)
 {
 	print_string(unifi.enabled ? "UniFi on, inform http://" : "UniFi off, inform http://");
@@ -615,9 +637,7 @@ static void u_show(void)
 	print_string(", address ");
 	print_ip(unifi.addr);
 	print_string("\nModel " UNIFI_MODEL ", informs sent ");
-	u_digits(unifi.count);
-	while (u_n)
-		write_char(u_d[4 + --u_n]);
+	u_print(unifi.count);
 	print_string(", last reply ");
 	itoa_short(unifi.status);
 	if (unifi.type[0]) {
@@ -625,9 +645,7 @@ static void u_show(void)
 		print_string_x(unifi.type);
 	}
 	print_string(", failed ");
-	u_digits(unifi.fails);
-	while (u_n)
-		write_char(u_d[4 + --u_n]);
+	u_print(unifi.fails);
 	print_string(", last error: ");
 	print_string(u_errors[unifi.err]);
 	write_char('\n');
@@ -638,10 +656,10 @@ static void u_show(void)
 static uint8_t u_word(__code const char *w)
 {
 	u_p = &cmd_buffer[cmd_words_b[1]];
-	for (u_i = 0; w[u_i]; u_i++)
-		if (u_p[u_i] != w[u_i])
-			return 0;
-	if (u_p[u_i] && u_p[u_i] != ' ')
+	if (!strstart(u_p, w))
+		return 0;
+	u_p += strlen(w);
+	if (*u_p && *u_p != ' ')
 		return 0;
 	return 1;
 }

@@ -146,10 +146,7 @@ static void inform(void)
 	}
 }
 
-static const uint8_t key[16] = {
-	0xba, 0x86, 0xf2, 0xbb, 0xe1, 0x07, 0xc7, 0xc5,
-	0x7e, 0xb5, 0xf2, 0x69, 0x07, 0x75, 0xc7, 0x12
-};
+static const uint8_t *key = u_default_key;
 
 /* An encrypted TNBU reply around json, after an HTTP header */
 static uint16_t reply(uint8_t *p, const char *json, int with_clen, int tamper)
@@ -204,6 +201,7 @@ static void test_url(void)
 		"unifi inform 10.0.0.2", "unifi inform http://", "unifi inform http://h:0",
 		"unifi inform http://h:65536", "unifi inform http://h:80x", "unifi inform http://h/a\"b",
 		"unifi inform http://0123456789012345678901234567890123456789012345678/",
+		"unifi inform http://a\"b/", "unifi inform http://a\\\\b/",
 	};
 	int same = 1;
 	for (unsigned i = 0; i < sizeof bad / sizeof *bad; i++) {
@@ -266,6 +264,27 @@ static void test_request(void)
 
 	static const char nf[] = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
 	appcall(UIP_NEWDATA, nf, sizeof(nf) - 1);
+
+	/* The next IV carries the next message counter */
+	uint8_t iv[16];
+	memcpy(iv, p + 16, 16);
+	inform();
+	p = (uint8_t *)strstr((char *)req, "\r\n\r\n") + 4;
+	check(p[31] == (uint8_t)(iv[15] + 1) && !memcmp(p + 28, iv + 12, 3), "request: the IV counter advances");
+	appcall(UIP_NEWDATA, nf, sizeof(nf) - 1);
+
+	/* Another client takes the resolver over before its answer is read */
+	uptime_secs = unifi.next;
+	unifi_tick();
+	strcpy(dns_state.name, "pool.ntp.org");
+	unifi_tick();
+	check(unifi.phase == U_IDLE && connects == 2, "resolve: an answer for another name is not used");
+	ticks();
+	appcall(UIP_CONNECTED, 0, 0);
+	while (unifi.phase == U_SEND)
+		appcall(UIP_ACKDATA, 0, 0);
+	appcall(UIP_NEWDATA, nf, sizeof(nf) - 1);
+	check(connects == 3 && unifi.status == 404, "resolve: then it asks again");
 }
 
 static void test_rexmit(void)
@@ -315,6 +334,35 @@ static void test_replies(void)
 	check(unifi.phase == U_IDLE && unifi.status == 404 && !unifi.err && !unifi.type[0],
 	      "reply: 404 while the device waits for adoption");
 
+	/* The server closes right after writing: the FIN rides on the data */
+	inform();
+	appcall(UIP_NEWDATA | UIP_CLOSE, r, n);
+	check(uip_flags == (UIP_NEWDATA | UIP_CLOSE) && unifi.phase == U_IDLE && unifi.status == 404 && !unifi.err,
+	      "reply: a 404 that carries the FIN");
+
+	/* The reply arrives with the acknowledgement of the last request bytes */
+	uptime_secs = unifi.next;
+	ticks();
+	appcall(UIP_CONNECTED, 0, 0);
+	while (unifi.off + unifi.sent < unifi.end)
+		appcall(UIP_ACKDATA, 0, 0);
+	appcall(UIP_ACKDATA | UIP_NEWDATA, r, n);
+	check(unifi.phase == U_IDLE && unifi.status == 404 && !unifi.err,
+	      "reply: data together with the last acknowledgement");
+
+	inform();
+	n = reply(r, noop, 1, 0);
+	deliver(r, n - 100);
+	appcall(UIP_CLOSE, 0, 0);
+	check(unifi.err == UE_HTTP && unifi.phase == U_IDLE && !unifi.conn && !unifi.status,
+	      "reply: a close before Content-Length is reached fails");
+
+	inform();
+	n = reply(r, noop, 1, 0);
+	appcall(UIP_NEWDATA | UIP_CLOSE, r, n);
+	ticks();
+	check(!unifi.err && !strcmp(unifi.type, "noop"), "reply: a 200 that carries the FIN");
+
 	inform();
 	n = reply(r, noop, 1, 1);
 	deliver(r, n);
@@ -322,7 +370,7 @@ static void test_replies(void)
 	check(unifi.err == UE_TAG && !unifi.type[0] && unifi.phase == U_IDLE, "reply: a bad tag is refused");
 
 	inform();
-	n = sprintf((char *)r, "HTTP/1.1 200 OK\r\nContent-Length: 99999\r\n\r\n");
+	n = sprintf((char *)r, "HTTP/1.1 200 OK\r\nX-A: 1\r\ncontent\rlength: 5\r\nContent-Length: 99999\r\n\r\n");
 	deliver(r, n);
 	check(unifi.err == UE_HTTP && uip_flags == UIP_ABORT && !unifi.conn, "reply: a reply larger than the buffer is reset");
 
@@ -332,6 +380,51 @@ static void test_replies(void)
 	deliver(r, n);
 	ticks();
 	check(unifi.err == UE_TNBU, "reply: a TNBU length that disagrees with Content-Length is refused");
+
+	inform();
+	n = reply(r, noop, 1, 0);
+	memcpy(strstr((char *)r, "\r\n\r\n") + 4, "TNBV", 4);
+	deliver(r, n);
+	ticks();
+	check(unifi.err == UE_TNBU, "reply: a bad TNBU magic is refused");
+
+	inform();
+	n = reply(r, noop, 1, 0);
+	(strstr((char *)r, "\r\n\r\n") + 4)[15] = 0x0b;	/* zlib */
+	deliver(r, n);
+	ticks();
+	check(unifi.err == UE_TNBU, "reply: a compressed reply is refused");
+
+	inform();
+	n = reply(r, "{\"_type\":\"averyveryverylongtype\"}", 1, 0);
+	deliver(r, n);
+	ticks();
+	check(!unifi.err && !strcmp(unifi.type, "averyveryverylo"), "reply: a long _type is cut to the field");
+
+	inform();
+	n = sprintf((char *)r, "HTTP/1.1 2x0 OK\r\nContent-Length: 0\r\n\r\n");
+	deliver(r, n);
+	check(unifi.err == UE_HTTP, "reply: a status that is not three digits is refused");
+
+	inform();
+	deliver((const uint8_t *)"HTTP/1\r\n\r\n", 11);
+	check(unifi.err == UE_HTTP, "reply: a status line too short is refused");
+
+	/* More data than the buffer holds, without a header end */
+	inform();
+	memset(r, 'x', 1000);
+	for (int i = 0; i < 11 && unifi.phase == U_RECV; i++)
+		appcall(UIP_NEWDATA, r, 1000);
+	check(unifi.err == UE_HTTP && !unifi.conn, "reply: data beyond the buffer is refused");
+
+	/* Events for another connection, such as the previous inform's close */
+	inform();
+	struct uip_conn other;
+	uip_conn = &other;
+	uip_flags = UIP_CLOSE;
+	unifi_appcall();
+	check(unifi.phase == U_RECV && unifi.conn == &fake_conn, "appcall: another connection's events are ignored");
+	deliver(r, sprintf((char *)r, "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n"));
 
 	cmd("unifi selftest");
 	check(selftests == 1 && !unifi.keyed, "selftest: runs while idle and forces a new key setup");
@@ -346,6 +439,6 @@ int main(void)
 	test_replies();
 	cmd("unifi");
 	check(strstr(out, "UniFi on, inform http://10.0.0.1:8080/inform") != 0, "show: state and URL");
-	check(strstr(out, "informs sent 8, last reply 200, failed 3,") != 0, "show: the inform count in decimal");
+	check(strstr(out, "informs sent 21, last reply 404, failed 9,") != 0, "show: the inform count in decimal");
 	return failures != 0;
 }

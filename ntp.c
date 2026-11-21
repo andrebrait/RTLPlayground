@@ -319,6 +319,11 @@ void ntp_callback(uint16_t lport) __banked __reentrant
 	case NTP_RESOLVE:
 		if (dns_state.status == DNS_PENDING)
 			return;
+		/* Another client took over the resolver: ask again */
+		if (memcmp(dns_state.name, ntp_state.server, DNS_NAME_LEN)) {
+			ntp_state.phase = NTP_IDLE;
+			return;
+		}
 		if (dns_state.status != DNS_DONE) {
 			ntp_retry();
 			return;
