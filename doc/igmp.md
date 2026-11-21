@@ -95,32 +95,34 @@ taken: exclude mode (types 2 and 4) and allow new sources (5) join, include mode
 without sources leaves, with sources joins. Block old sources (6) is not evaluated, so a port
 that joined by sources stays in the group until it leaves the group or the switch restarts.
 A trapped IGMP frame from a tagged port keeps its 802.1Q tag.
-On the RTL836x (TL-SG108PE V5), which snoops in software through `rtl836x_igmp.c`, only the
-first group record of an IGMPv3 report is used: type 4 joins, type 3 leaves.
 Reports for groups in 224.0.0.0/24 are ignored: the switch floods that block
 even with IGMP on, and an entry for a group such as 224.0.0.251 (mDNS) would
 otherwise limit it to the ports that reported it, as RFC 4541 warns against.
-A report for a group outside 224.0.0.0/4 is ignored too: the table keys a group on the
-low four bits of its first byte, so such an address would make an entry for a multicast
-group.
+On the RTL837x a report for a group outside 224.0.0.0/4 is ignored too: the table keys a
+group on the low four bits of its first byte, so such an address would make an entry for a
+multicast group.
 
-The receive handler checks the captured frame size, IPv4 version/header/total
-length and fragmentation before reading an IGMP report. For IGMPv3 it checks
-every declared record, source list and auxiliary-data length before touching
-the ASIC, so an incomplete later record cannot partially update a group.
-Truncated input and Ethernet padding never substitute stale receive-buffer
-bytes for a missing payload. This validation does not add multi-record
-processing or source-specific multicast support.
+Before reading an IGMP message the receive handler checks the captured frame
+size, the IPv4 version and header length, that the packet is not a fragment,
+and that the IPv4 total length fits the frame. On the RTL837x every IGMPv3
+record is read while it fits the frame, so a report whose later records are
+cut short still updates the groups before them. A querier port that loses its
+link is dropped at the link change, so unknown multicast floods again without
+waiting for another IGMP message.
 
 `igmp_show()` prints out the IGMP configuration on the CLI.
 
 ## RTL836x (TL-SG108PE V5)
 
-The native backend uses the same `igmp on|off|show` commands and validated
-software parser. Its NIC inserts a synthetic VLAN header, so IPv4 begins at
-byte 26 rather than byte 22. IGMPv1/v2 reports and the existing first-record
-IGMPv3 behavior update native multicast entries; no source-specific or
-multi-record processing is added. Groups remain IP-based, not VLAN-specific.
+The native backend uses the same `igmp on|off|show` commands and its own
+validated software parser. Its NIC inserts a synthetic VLAN header, so IPv4
+begins at byte 26 rather than byte 22. IGMPv1/v2 reports update native
+multicast entries; of an IGMPv3 report only the first group record is used
+(type 4 joins, type 3 leaves). Before any table update the parser checks
+every declared IGMPv3 record, source list and auxiliary-data length, so an
+incomplete later record cannot partially update a group, and truncated input
+or Ethernet padding never stands in for a missing payload. Groups remain
+IP-based, not VLAN-specific.
 
 `igmp off` disables IPv4 multicast lookup and hardware snooping, restores
 flooding, and removes retained protocol traps. `igmp on` traps IPv4 IGMP to

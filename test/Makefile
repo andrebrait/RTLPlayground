@@ -218,6 +218,13 @@ $(BUILDDIR)/test_boot_defaults%: test_boot_defaults.c $(SRCROOT)/rtl8370_init.c 
 $(BUILDDIR)/test_lldp: test_lldp.c $(SRCROOT)/rtl837x_lldp.c $(SRCROOT)/rtl837x_lldp_tx_strings.c $(SRCROOT)/httpd/html_out.c $(SRCROOT)/timer.c fw_memset.h | $(BUILDDIR)
 	$(CC) $(CFLAGS) -include fw_memset.h test_lldp.c $(SRCROOT)/rtl837x_lldp.c $(SRCROOT)/rtl837x_lldp_tx_strings.c $(SRCROOT)/httpd/html_out.c $(SRCROOT)/timer.c -o $@ $(LDFLAGS)
 
+# The RTL836x receive path: the fork's validated parser in front of the
+# software snooping table, whose update is stubbed
+TESTS += $(BUILDDIR)/test_igmp_836x
+$(BUILDDIR)/test_igmp_836x: CFLAGS += -DMACHINE_NAME=TPLINK_TL_SG108PE_V5
+$(BUILDDIR)/test_igmp_836x: test_igmp_836x.c $(SRCROOT)/rtl837x_igmp.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) $(GC_CFLAGS) $^ -o $@ $(LDFLAGS) $(GC_LDFLAGS)
+
 $(BUILDDIR)/test_igmp: test_igmp.c $(SRCROOT)/rtl837x_igmp.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
 

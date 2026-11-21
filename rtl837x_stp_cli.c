@@ -95,7 +95,8 @@ void stp_parse(void) __banked __reentrant
 			if (stp_enabled)
 				stp_port_mcheck(port);
 		} else if (cmd_compare(3, "off")) {
-			stp_pflags[port] &= ~STP_PF_ENABLED;
+			/* a port without STP forwards, so a guard trip no longer holds */
+			stp_pflags[port] &= ~(STP_PF_ENABLED | STP_PF_TRIPPED);
 			if (stp_enabled)
 				stp_port_admin(port);	/* plain forwarding */
 		} else if (cmd_compare(3, "edge")) {

@@ -1290,6 +1290,9 @@ void idle(void)
 		check_links();
 		if (lacpEnabled)
 			lacp_link_change(link_changed);
+#if SOC_FAMILY == RTL837X
+		igmp_link_change();
+#endif
 	}
 	health_phase(HEALTH_PH_LINK);
 	if (rx_irq) {

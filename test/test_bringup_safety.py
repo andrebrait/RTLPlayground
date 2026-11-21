@@ -109,6 +109,7 @@ static void cabletest_tick(void) {}
 static void health_loop_start(void) {}
 static void health_sleep_start(void) {}
 static void health_sleep_end(void) {}
+static inline void igmp_link_change(void) {}
 static void check_links(void) {}
 static uint16_t link_changed;
 static void lacp_link_change(uint16_t bounced) { (void)bounced; }

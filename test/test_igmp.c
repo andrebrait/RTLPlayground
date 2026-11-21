@@ -126,6 +126,7 @@ static void build(uint8_t port, const uint8_t dip[4], uint8_t type, const uint8_
 	in.rtl_tag.pmask = HTONS(port);
 	in.ethertype = HTONS(0x0800);
 	in.ip[0] = 0x46;
+	in.ip[3] = sizeof(in.ip) + sizeof(in.igmp);	/* IPv4 total length */
 	in.ip[9] = IGMP_PROTO;
 	in.ip[12] = 10; in.ip[15] = 1;
 	memcpy(&in.ip[16], dip, 4);
@@ -374,14 +375,33 @@ int main(int argc, char **argv)
 	uip_buf[offsetof(struct wire_out, ip)] = 0x45;
 	memmove(&uip_buf[offsetof(struct wire_out, ip) + 20], &uip_buf[offsetof(struct wire_out, ip) + 24], 16);
 	uip_len -= 4;
+	uip_buf[offsetof(struct wire_out, ip) + 3] -= 4;	/* IPv4 total length */
 	igmp_packet_handler();
 	CHECK(DIP_OK(grp), "tagged v2, IHL 5: group in table");
 	CLR(); build(2, grp, IGMP_V2_REPORT, grp);
 	uip_buf[offsetof(struct wire_in, ip)] = 0x45;
 	memmove(&uip_buf[offsetof(struct wire_in, ip) + 20], &uip_buf[offsetof(struct wire_in, ip) + 24], 16);
 	uip_len -= 4;
+	uip_buf[offsetof(struct wire_in, ip) + 3] -= 4;	/* IPv4 total length */
 	igmp_packet_handler();
 	CHECK(DIP_OK(grp), "untagged v2, IHL 5: group in table");
+
+	/* IPv4 checks before any table write: version, header length,
+	 * fragments, total length within the frame */
+	CLR(); tbl_writes = 0; build(2, grp, IGMP_V2_REPORT, grp); igmp_packet_handler();
+	CHECK(DIP_OK(grp) && tbl_writes > 0, "control: the same valid frame is learned here");
+	CLR(); tbl_writes = 0; build(2, grp, IGMP_V2_REPORT, grp); uip_buf[offsetof(struct wire_in, ip)] = 0x66;
+	CHECK(igmp_packet_handler() == 1 && uip_len == 0 && tbl_writes == 0, "IP version 6: nothing learned, nothing sent");
+	CLR(); tbl_writes = 0; build(2, grp, IGMP_V2_REPORT, grp); uip_buf[offsetof(struct wire_in, ip)] = 0x44;
+	CHECK(igmp_packet_handler() == 1 && uip_len == 0 && tbl_writes == 0, "IHL below 5: nothing learned, nothing sent");
+	CLR(); tbl_writes = 0; build(2, grp, IGMP_V2_REPORT, grp); uip_buf[offsetof(struct wire_in, ip) + 6] = 0x20;
+	CHECK(igmp_packet_handler() == 1 && uip_len == 0 && tbl_writes == 0, "first fragment: nothing learned, nothing sent");
+	CLR(); tbl_writes = 0; build(2, grp, IGMP_V2_REPORT, grp); uip_buf[offsetof(struct wire_in, ip) + 7] = 1;
+	CHECK(igmp_packet_handler() == 1 && uip_len == 0 && tbl_writes == 0, "later fragment: nothing learned, nothing sent");
+	CLR(); tbl_writes = 0; build(2, grp, IGMP_V2_REPORT, grp); uip_len -= 1;
+	CHECK(igmp_packet_handler() == 1 && uip_len == 0 && tbl_writes == 0, "IP total length past the frame: nothing learned");
+	CLR(); tbl_writes = 0; build(2, grp, IGMP_V2_REPORT, grp); uip_buf[offsetof(struct wire_in, ip) + 3] = 24 + 7;
+	CHECK(igmp_packet_handler() == 1 && uip_len == 0 && tbl_writes == 0, "IP total length shorter than the IGMP header: nothing learned");
 
 	build_tagged(15, 2, all_hosts, 0x11, none);
 	CHECK(igmp_packet_handler() == 1 && uip_len == 0, "tagged, invalid port: nothing sent");
@@ -493,6 +513,16 @@ int main(int argc, char **argv)
 	igmp_packet_handler();
 	CHECK(lm_act == LOOKUP_MISS_FLOOD, "last querier port lost its link: unknown multicast flooded again");
 	CHECK(lut == 0, "last querier port lost its link: groups not looked up");
+	/* the same with no IGMP frame after the link went down */
+	link_up |= PORT_BIT(6);
+	build(6, all_hosts, IGMP_QUERY, none);
+	igmp_packet_handler();
+	CHECK(lm_act == LOOKUP_MISS_DROP_9, "querier back: unknown multicast dropped");
+	link_up &= ~PORT_BIT(6);
+	igmp_link_change();
+	CHECK(lm_act == LOOKUP_MISS_FLOOD && lut == 0, "querier link lost, no IGMP after it: flooded at the link change");
+	igmp_link_change();
+	CHECK(lm_act == LOOKUP_MISS_FLOOD, "link change without a querier: nothing to do");
 	lut = -1;
 	link_up = 0x3ff;
 	lm_act = 1;

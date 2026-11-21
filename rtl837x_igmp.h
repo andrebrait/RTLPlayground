@@ -20,5 +20,6 @@ void igmp_enable(void) __banked;
 void igmp_router_port_set(uint16_t pmask) __banked;
 uint8_t igmp_packet_handler(void) __banked;
 void igmp_show(void) __banked;
+void igmp_link_change(void) __banked;
 
 #endif
