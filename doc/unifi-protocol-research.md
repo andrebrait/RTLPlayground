@@ -825,13 +825,10 @@ change. As built:
   `METRICS_PORT` to the exporter. Any other port is the inform client's,
   because `uip_connect()` never takes a listening port. This works for a
   controller on any remote port.
-- At most one port-80 connection at a time. Today the single slot enforces
-  this. With more slots, a second browser connection would take a slot and
-  then find the httpd's global buffer in use. Refuse a SYN to port 80 while a
-  port-80 connection exists. This is a small check in the SYN path of
-  `uip.c`.
-- Extend the `health` TCP dump, which stops the build when `UIP_CONNS != 1`
-  (`cmd_parser.c:2664`).
+- `uip.c` admits one live connection per listening port, so a second
+  browser connection waits for the first and never takes the inform
+  client's slot.
+- The `health` TCP dump lists every slot.
 
 **Third connection (metrics): yes, on a separate port.** Today a Prometheus
 scrape and the web UI take turns on the one httpd slot. To separate them:

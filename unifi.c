@@ -710,9 +710,11 @@ void unifi_parse(void) __banked
 		return;
 	}
 	if (cmd_words_len == 3 && u_word("inform")) {
-		u_stop();
-		if (!u_url())
+		if (!u_url()) {
 			u_error("unifi inform http://<host>[:<port>][/<path>]\n");
+			return;
+		}
+		u_stop();
 		return;
 	}
 	if (cmd_words_len == 2 && u_word("selftest")) {

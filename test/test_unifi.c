@@ -134,10 +134,12 @@ static uint16_t req_len;
 
 static void keep_sent(void)
 {
-	if (req_len + sent_len <= sizeof(req)) {
-		memcpy(req + req_len, sent, sent_len);
-		req_len += sent_len;
+	if (req_len + sent_len > sizeof(req)) {
+		printf("FAIL the request is larger than the test's copy\n");
+		exit(1);
 	}
+	memcpy(req + req_len, sent, sent_len);
+	req_len += sent_len;
 }
 
 /* Acknowledges segments until the request is taken, or with keep_last
@@ -155,7 +157,7 @@ static void acks(int keep_last)
 			break;
 	}
 	if (unifi.phase == U_SEND && !(keep_last && unifi.off + unifi.sent >= unifi.end)) {
-		printf("FAIL an acknowledgement made no progress\n");
+		printf("FAIL the request was not taken: an ACK made no progress, or over 100 segments\n");
 		exit(1);
 	}
 }
@@ -234,8 +236,10 @@ static void test_url(void)
 		"unifi inform http://a\"b/", "unifi inform http://a\\\\b/",
 	};
 	int same = 1;
+	unifi.next = 77;
 	for (unsigned i = 0; i < sizeof bad / sizeof *bad; i++) {
 		cmd(bad[i]);
+		same &= unifi.next == 77 && !unifi.abort;
 		same &= !strcmp(unifi.host, "10.0.0.1") && unifi.port == 8080 && !strcmp(unifi.path, "/inform")
 			&& strstr(out, "Error") != 0 && err_status == ERR_INVALID_ARGUMENT;
 	}
@@ -268,13 +272,15 @@ static void test_request(void)
 	check(!strncmp((char *)req, start, sizeof(start) - 1) && body
 	      && clen == req_len - ((uint8_t *)body + 4 - req),
 	      "request: HTTP header with the body's Content-Length");
-	if (!body || clen < 56 || clen != req_len - ((uint8_t *)body + 4 - req))
+	if (!body || clen < 56 || clen > 2048 || clen != req_len - ((uint8_t *)body + 4 - req))
 		return;	/* nothing below can read a request that is not framed */
 	uint8_t *p = (uint8_t *)body + 4;
 	uint16_t plen = (uint16_t)(p[38] << 8 | p[39]);
 	check(!memcmp(p, "TNBU", 4) && !memcmp(p + 8, uip_ethaddr.addr, 6) && p[15] == 0x09 && p[35] == 1
 	      && plen == clen - 40,
 	      "request: TNBU header, GCM flags, payload length with the tag");
+	if (plen != clen - 40)
+		return;
 
 	uint8_t k[16], copy[2048];
 	memcpy(copy, p, clen);
@@ -482,15 +488,13 @@ int main(void)
 	test_request();
 	test_rexmit();
 	test_replies();
+	cmd("unifi");
+	check(strstr(out, "informs sent 23, last reply 404, failed 11,") != 0, "show: the informs and failures counted");
 	unifi.count = 999999;
 	unifi.fails = 0xffffffff;
 	cmd("unifi");
 	check(strstr(out, "informs sent 999999,") && strstr(out, "failed 4294967295,"),
 	      "show: the largest 32-bit count fits the digit scratch");
-	unifi.count = 23;
-	unifi.fails = 11;
-	cmd("unifi");
 	check(strstr(out, "UniFi on, inform http://10.0.0.1:8080/inform") != 0, "show: state and URL");
-	check(strstr(out, "informs sent 23, last reply 404, failed 11,") != 0, "show: the inform count in decimal");
 	return failures != 0;
 }
