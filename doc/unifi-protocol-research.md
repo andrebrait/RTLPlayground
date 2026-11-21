@@ -461,6 +461,11 @@ Switch tables (TNBU `BaseInformBody.cs:51-59,234-242,265-334,398-402`):
   `port_table` with `port_idx/up/enable/speed/rx_bytes/tx_bytes` was enough for
   Connected and for port rates (`docs/protocol-research.md:90-101,161-175`).
   unifi-tlsg and UniFiction say the same.
+  **Confirmed on hardware:** a ZX-SWTGW218AS reporting `port_idx`, `media`,
+  `speed_caps`, `up`, `enable`, `speed`, `rx_bytes`, `tx_bytes`,
+  `rx_packets` and `tx_packets` for its 9 ports (no `full_duplex`) was
+  stored by 10.6.109 as sent. The controller computed `rx_bytes-r` and
+  `tx_bytes-r` rates from successive informs.
 
 ## Switch-specific configuration (system_cfg)
 

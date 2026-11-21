@@ -199,6 +199,9 @@
     controller's `noop` sets the inform interval. Forget in the controller, or
     `unifi forget`, returns the switch to the default key. The switch does not
     apply the controller's settings yet.
+  - Port table. Every inform reports each port by its front-panel number: link,
+    whether it is enabled, speed, supported speeds, media and byte and packet
+    counters. The controller shows the ports and their traffic rates.
 
 ## Changed
 

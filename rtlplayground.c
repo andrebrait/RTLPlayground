@@ -36,7 +36,7 @@
 #include "httpd/page_impl.h"
 #include "boot.h"
 #include "sfp.h"
-#ifdef PROMETHEUS
+#if defined(PROMETHEUS) || defined(UNIFI)
 #include "snmp_hw.h"
 #endif
 #ifdef UNIFI
@@ -1810,7 +1810,7 @@ void main(void)
 #ifdef SNMP
     snmp_init();
 #endif
-#if defined(PROMETHEUS) && !defined(SNMP)
+#if (defined(PROMETHEUS) || defined(UNIFI)) && !defined(SNMP)
 	snmp_hw_init();	/* snmp_init() does this in SNMP builds */
 #endif
 	httpd_init();

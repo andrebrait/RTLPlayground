@@ -24,6 +24,7 @@
 #include "uip/uip.h"
 #include "dns.h"
 #include "rtl837x_flash.h"
+#include "snmp_hw.h"
 #include "crypto/aes_gcm.h"
 #include "unifi.h"
 
@@ -56,6 +57,7 @@
 #define U_RECV		4
 #define U_REPLY		5	/* reply received, check its header */
 #define U_DECRYPT	6
+#define U_PORTS		7	/* writing the port table, one port per tick */
 
 #define UE_DNS		1
 #define UE_CONN		2
@@ -88,6 +90,7 @@
 #define UNIFI_FLASH_TRIES	3	/* then a broken flash is left alone */
 
 extern __xdata uint32_t uptime_secs;
+extern __code const struct machine machine;
 extern __xdata struct flash_region_t flash_region;
 extern __xdata uint8_t sfr_data[4];
 extern __xdata uint8_t cmd_words_len;
@@ -225,8 +228,143 @@ static void u_fail(__xdata uint8_t e)
 }
 
 
-/* The inform JSON, then the TNBU header in front of it. Starts the
- * encryption. Until step 5 the port table is empty. */
+/* Port counters: a 64-bit big-endian value, its sum, and its digits. The
+ * last good values are kept per port, so that a read that fails repeats
+ * them rather than sending 0 or a partial sum, which the controller would
+ * take for a counter that went back or a link that flapped. A counter
+ * never read yet is left out. */
+#if SOC_FAMILY == RTL836X
+#define U_CTRS	2	/* bytes only: the packet counters are 32 bits */
+#else
+#define U_CTRS	4
+#endif
+struct u_pc {
+	uint8_t seen;	/* bit k: counter k read once */
+	uint8_t adm;	/* 2 when the PHY is powered down */
+	uint16_t mbps;
+	struct snmp_counter c[U_CTRS];
+};
+static __xdata struct u_pc u_pc[MACHINE_MAX_PORT - MACHINE_MIN_PORT + 1];
+static __xdata struct u_pc *__xdata u_pcp;	/* u_ph's */
+static __xdata struct snmp_counter u_ctr, u_acc;
+static __xdata uint16_t u_links;	/* last good link state, one bit per port */
+static __xdata uint8_t u_dg[20];
+static __xdata uint8_t u_ph, u_up, u_cnt, u_adm, u_ok;	/* u_d is the digit helpers' */
+static __xdata uint32_t u_link;
+static __xdata uint16_t u_mbps;
+
+/* u_acc in decimal; u_acc is used up */
+static void u_dec64(void)
+{
+	u_n = 0;
+	do {
+		u_dg[u_n++] = '0' + div_small(u_acc.bytes, 8, 10);
+		u_d[0] = 0;
+		for (u_d[1] = 0; u_d[1] < 8; u_d[1]++)
+			u_d[0] |= u_acc.bytes[u_d[1]];
+	} while (u_d[0]);
+	while (u_n)
+		u_c(u_dg[--u_n]);
+}
+
+/* Adds counter sel of u_ph to u_acc; clears u_ok when it cannot be read */
+static void u_add(__xdata uint8_t sel)
+{
+	if (!snmp_hw_stat(u_ph, sel, true, true, &u_ctr)) {
+		u_ok = 0;
+		return;
+	}
+	u_i = 0;	/* the carry is the high byte */
+	for (u_d[1] = 8; u_d[1]--; ) {
+		u_i = u_acc.bytes[u_d[1]] + u_ctr.bytes[u_d[1]] + (u_i >> 8);
+		u_acc.bytes[u_d[1]] = u_i;
+	}
+}
+
+/* "name":<sum of counters first..last>, or the last good sum (slot k), or
+ * nothing when slot k was never read */
+static void u_counter(__code const char *__xdata name, __xdata uint8_t k, __xdata uint8_t first, __xdata uint8_t last)
+{
+	if (k >= U_CTRS)
+		return;
+	memset(u_acc.bytes, 0, 8);
+	u_ok = 1;
+	for (; first <= last; first++)
+		u_add(first);
+	if (u_ok) {
+		memcpy(u_pcp->c[k].bytes, u_acc.bytes, 8);
+		u_pcp->seen |= 1 << k;
+	} else if (u_pcp->seen & 1 << k) {
+		memcpy(u_acc.bytes, u_pcp->c[k].bytes, 8);
+	} else {
+		return;
+	}
+	u_s(name);
+	u_dec64();
+}
+
+/* The port table, numbered by front-panel port: the controller keys every
+ * port setting on port_idx. log_to_phys_port, despite its name, maps an
+ * ASIC port to its front-panel number, and 0 marks an unused port. On the
+ * RTL837x, ASIC port 8 and, on an RTL8372, port 3 are the 10G lanes: an
+ * SFP+ cage, or copper when the board has 10G PHYs (n_10g). Duplex is not
+ * reported: the RTL837x status the firmware reads has no duplex bit. */
+static void u_port_entry(void)
+{
+	if (snmp_hw_link(u_ph, &u_link)) {
+		if ((uint16_t)u_link >> u_ph & 1)
+			u_links |= (uint16_t)1 << u_ph;
+		else
+			u_links &= ~((uint16_t)1 << u_ph);
+	}
+	u_pcp = &u_pc[u_ph - MACHINE_MIN_PORT];
+	u_up = 0;
+	if (u_links >> u_ph & 1)
+		u_up = 1;
+	if (!u_up)
+		u_pcp->mbps = 0;
+	else if (snmp_hw_speed(u_ph, &u_mbps) && u_mbps)
+		u_pcp->mbps = u_mbps;	/* 0 here is the reader's own view of a link going down */
+	if (snmp_hw_admin(u_ph, &u_adm))
+		u_pcp->adm = u_adm;
+	if (u_cnt++)
+		u_c(',');
+	u_s("{\"port_idx\":");
+	u_dec(machine.log_to_phys_port[u_ph]);
+	if (machine.is_sfp[u_ph])
+		u_s(",\"media\":\"SFP+\",\"speed_caps\":288");
+#if SOC_FAMILY == RTL836X
+	else
+		u_s(",\"media\":\"GE\",\"speed_caps\":1048623");
+#else
+	else if (machine.n_10g && (u_ph == 8 || (u_ph == 3 && !machine.isRTL8373)))
+		u_s(",\"media\":\"GE\",\"speed_caps\":1049064");	/* 100M to 10G */
+	else
+		u_s(",\"media\":\"GE\",\"speed_caps\":1048682");	/* 10M to 2.5G */
+#endif
+	if (u_up)
+		u_s(",\"up\":true");
+	else
+		u_s(",\"up\":false");
+	if (u_pcp->adm == 2)
+		u_s(",\"enable\":false");
+	else
+		u_s(",\"enable\":true");
+	u_s(",\"speed\":");
+	u_dec(u_pcp->mbps);
+	u_counter(",\"rx_bytes\":", 0, 0, 0);
+	u_counter(",\"tx_bytes\":", 1, 1, 1);
+#if SOC_FAMILY != RTL836X
+	/* The RTL836x packet counters are 32 bits: their sum would go back
+	 * whenever one wraps, so only its 64-bit byte counters are sent */
+	u_counter(",\"rx_packets\":", 2, 2, 4);
+	u_counter(",\"tx_packets\":", 3, 5, 7);
+#endif
+	u_c('}');
+}
+
+
+/* The inform JSON up to its port table */
 static void u_build(void)
 {
 	unifi.pos = HROOM + TNBU_HDR;
@@ -260,7 +398,30 @@ static void u_build(void)
 	else
 		u_s("\",\"default\":true,\"state\":1,");
 	u_s("\"fw_caps\":0,\"isolated\":false,\"locating\":false,"
-	    "\"selfrun_beacon\":false,\"port_table\":[]}");
+	    "\"selfrun_beacon\":false,\"port_table\":[");
+	u_ph = MACHINE_MIN_PORT;
+	u_cnt = 0;	/* entries written */
+}
+
+/* The next port table entry. Its hardware reads take a few milliseconds,
+ * so one port per tick keeps the main loop responsive. Returns 1 once the
+ * table is complete and the JSON closed. */
+static uint8_t u_ports(void)
+{
+	while (u_ph <= MACHINE_MAX_PORT && !machine.log_to_phys_port[u_ph])
+		u_ph++;
+	if (u_ph <= MACHINE_MAX_PORT) {
+		u_port_entry();
+		u_ph++;
+		return 0;
+	}
+	u_s("]}");
+	return 1;
+}
+
+/* The TNBU header in front of the JSON. Starts the encryption. */
+static void u_seal(void)
+{
 	unifi.end = unifi.pos;
 
 	/* Packet version 0, then the fields that are not zero */
@@ -884,6 +1045,12 @@ void unifi_tick(void) __banked
 		}
 		memcpy(unifi.addr, dns_state.addr, 4);
 		u_build();
+		unifi.phase = U_PORTS;
+		return;
+	case U_PORTS:
+		if (!u_ports())
+			return;
+		u_seal();
 		unifi.phase = U_ENCRYPT;
 		return;
 	case U_ENCRYPT:
