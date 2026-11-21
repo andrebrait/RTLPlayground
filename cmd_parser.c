@@ -91,7 +91,8 @@ __xdata uint8_t cmd_buffer[CMD_BUF_SIZE];
 
 __xdata	char save_cmd;
 /* Set by a handler whose command is a status query: it stays out of the
- * history that the web interface's Save to flash reads */
+ * history that the web interface's Save to flash reads, and so out of the
+ * console's up-arrow recall too */
 __xdata uint8_t cmd_nosave;
 
 __xdata uint8_t ip[4];
