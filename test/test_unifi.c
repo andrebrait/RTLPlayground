@@ -78,7 +78,6 @@ void write_char(char c) { if (out_len < sizeof out - 1) out[out_len++] = c; out[
 void print_string(__code const char *p) { while (*p) write_char(*p++); }
 void print_string_x(__xdata char *p) { while (*p) write_char(*p++); }
 void itoa_short(uint16_t v) { char s[8]; snprintf(s, sizeof s, "%u", v); print_string(s); }
-void print_long(uint32_t v) { char s[12]; snprintf(s, sizeof s, "%u", v); print_string(s); }
 void print_ip(__xdata uint8_t *ip) { char s[16]; snprintf(s, sizeof s, "%u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]); print_string(s); }
 
 static int failures;
@@ -347,5 +346,6 @@ int main(void)
 	test_replies();
 	cmd("unifi");
 	check(strstr(out, "UniFi on, inform http://10.0.0.1:8080/inform") != 0, "show: state and URL");
+	check(strstr(out, "informs sent 8,") != 0, "show: the inform count in decimal");
 	return failures != 0;
 }

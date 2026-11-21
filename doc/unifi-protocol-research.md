@@ -936,6 +936,13 @@ This design fits both switches:
      the whole response has parsed.
    - This avoids a second implementation of every setting. The existing
      config save makes the result persistent.
+   - Apply by category, as the OpenWrt `unifi-agent` does
+     (andrebrait/packages#6). `unifi apply` takes a list of categories
+     (`vlans`, `ports`, `lag`, `stp`, `igmp`, `jumbo`, `mirror`) and
+     stores them as a bitmask. `all` applies everything. The default, and
+     `none`, applies nothing and only logs. A change in a category that is
+     not selected is logged as `not applied:`. This way, for example, the
+     controller can manage the VLANs while the port settings stay local.
 4. **Trim the inform.** Send only what the controller needs. Earlier in this
    document, `port_table` with
    `port_idx`/`up`/`enable`/`speed`/`rx_bytes`/`tx_bytes` was enough, and

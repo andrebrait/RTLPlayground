@@ -17,6 +17,7 @@
  */
 
 #include <stdint.h>
+#include "machine.h"
 #include "rtl837x_common.h"
 #include "cmd_parser.h"
 #include "uip/uip.h"
@@ -29,17 +30,20 @@
 
 /* The reported model. The TL-SG108PE V5 (RTL836x, 8 x 1G, PoE on 1-4)
  * maps to the USW-Lite-8-PoE, the 8 x 2.5G + SFP+ boards to the
- * USW-Flex-2.5G-8. The version must be at or above the model's
- * minimumFirmwareRequired. */
+ * USW-Flex-2.5G-8. The version is the model's current release as UniFi
+ * Network 10.6.109 listed it, which is above its minimumFirmwareRequired. */
+#ifndef SOC_FAMILY
+#error "machine.h must define SOC_FAMILY"
+#endif
 #ifndef UNIFI_MODEL
 #if SOC_FAMILY == RTL836X
 #define UNIFI_MODEL	"USL8LP"
 #define UNIFI_DISPLAY	"USW-Lite-8-PoE"
-#define UNIFI_VERSION	"7.5.15"
+#define UNIFI_VERSION	"7.5.15.17146"
 #else
 #define UNIFI_MODEL	"USWED36"
 #define UNIFI_DISPLAY	"USW-Flex-2.5G-8"
-#define UNIFI_VERSION	"1.1.0"
+#define UNIFI_VERSION	"2.1.8.971"
 #endif
 #endif
 
@@ -112,7 +116,8 @@ static void u_x(__xdata const char *s)
 	}
 }
 
-static void u_dec(__xdata uint32_t v)
+/* The decimal digits of v, last first, in u_d[4..4 + u_n) */
+static void u_digits(__xdata uint32_t v)
 {
 	u_d[0] = v >> 24;
 	u_d[1] = v >> 16;
@@ -122,6 +127,11 @@ static void u_dec(__xdata uint32_t v)
 	do
 		u_d[4 + u_n++] = '0' + div_small(u_d, 4, 10);
 	while (u_d[0] | u_d[1] | u_d[2] | u_d[3]);
+}
+
+static void u_dec(__xdata uint32_t v)
+{
+	u_digits(v);
 	while (u_n)
 		u_c(u_d[4 + --u_n]);
 }
@@ -604,7 +614,9 @@ static void u_show(void)
 	print_string(", address ");
 	print_ip(unifi.addr);
 	print_string("\nModel " UNIFI_MODEL ", informs sent ");
-	print_long(unifi.count);
+	u_digits(unifi.count);
+	while (u_n)
+		write_char(u_d[4 + --u_n]);
 	print_string(", last reply ");
 	itoa_short(unifi.status);
 	if (unifi.type[0]) {
