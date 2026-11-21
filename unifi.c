@@ -722,7 +722,7 @@ static uint16_t u_line(__code const char *__xdata key)
 }
 
 /* The authkey at u_i: exactly 32 hex digits ending the line, into
- * unifi.key */
+ * unifi.key. */
 static uint8_t u_authkey(void)
 {
 	for (u_j = 0; u_j < 32; u_j++) {
@@ -733,7 +733,8 @@ static uint8_t u_authkey(void)
 			return 0;
 		u_k[u_j >> 1] = u_k[u_j >> 1] << 4 | u_d[0];
 	}
-	if (u_i + 32 < u_me && u_p[u_i + 32] != '\\')
+	/* Then the end of mgmt_cfg or an escaped newline, nothing else */
+	if (u_i + 32 < u_me && (u_i + 33 >= u_me || u_p[u_i + 32] != '\\' || u_p[u_i + 33] != 'n'))
 		return 0;
 	memcpy(unifi.key, u_k, 16);
 	return 1;

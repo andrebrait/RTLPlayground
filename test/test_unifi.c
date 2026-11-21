@@ -838,6 +838,12 @@ static void test_json(void)
 	answer("{\"_type\":\"setparam\",\"mgmt_cfg\":\"authkey=00112233445566778899aabbccddeeff!\\n\"}");
 	check(!unifi.adopted, "json: an authkey must end its line");
 	inform();
+	answer("{\"_type\":\"setparam\",\"mgmt_cfg\":\"authkey=00112233445566778899aabbccddeeff\\u0021\\n\"}");
+	check(!unifi.adopted, "json: an escape other than a newline after the authkey is refused");
+	inform();
+	answer("{\"_type\":\"setparam\",\"mgmt_cfg\":\"authkey=00112233445566778899aabbccddeeff\\t\"}");
+	check(!unifi.adopted, "json: a tab after the authkey is refused");
+	inform();
 	answer("{ \"_type\" : \"setparam\" ,\n \"mgmt_cfg\" :\t\"a=\\\"q\\\"\\nauthkey=00112233445566778899aabbccddeeff\\ncfgversion=1111\\n\" }");
 	check(unifi.adopted && !memcmp(unifi.key, newkey, 16) && !strcmp(unifi.cfgver, "1111"),
 	      "json: whitespace around members, and an escaped quote before the authkey line");
