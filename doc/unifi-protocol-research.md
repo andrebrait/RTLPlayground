@@ -892,9 +892,21 @@ callback, because a 1.4 KB segment is about 6.6 M cycles. It has to run from
 the main loop, at most 2 blocks (≈144 K cycles, 5–14 ms) per pass. LACP's
 timers run 50 times per second.
 
-**Next measurement:** add a CLI command that times 100 AES blocks against the
-5 ms system tick on each switch. This replaces the 31 M / 10 M assumption with
-the real figure.
+**Measured on hardware** (`unifi selftest` in a `UNIFI=1` build, ZX-SWTGW218AS,
+5 ms tick, two builds): 64 AES blocks take 115–130 ms and 64 AES-GCM blocks
+210–230 ms, so one 16-byte GCM block costs about 3.3–3.6 ms, about 4.5 KB/s. The firmware's C
+differs from the simulator's (fewer internal-RAM locals), so these figures
+do not convert back to a clean cycle rate. Expected wall time at that speed:
+
+| Message | Size | Time |
+| --- | --- | --- |
+| Trimmed inform | ≈2.5 KB | ≈0.6 s |
+| Full inform | ≈6 KB | ≈1.4 s |
+| Largest `system_cfg` seen | 7.6 KB | ≈1.7 s |
+| `noop` | 163 B | ≈40 ms |
+
+Two blocks per main-loop pass is about 7 ms. The TL-SG108PE V5 has not been
+measured yet.
 
 ### Compact protocol design
 

@@ -180,6 +180,11 @@
     and 32-bit multicast/broadcast counters for the optional read-only agent.
   - Configure the manager IP/CIDR, community and agent state directly in the Web UI,
     with masked credentials, Apply/Refresh controls and the existing Save to flash flow.
+- UniFi (work in progress, build with `UNIFI=1`)
+  - AES-128-GCM with the 16-byte IV that UniFi inform packets use, forward cipher only,
+    in BANK5. It processes a message in steps, so the main loop can encrypt a few blocks
+    per pass. `unifi selftest` decrypts a captured controller reply, checks its tag and
+    times the cipher on the switch.
 
 ## Changed
 
