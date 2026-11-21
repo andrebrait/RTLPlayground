@@ -190,7 +190,13 @@
     over its own TCP connection, encrypted with AES-128-GCM under the default key.
     The switch reports itself as a `USWED36` (RTL837x) or `USL8LP` (RTL836x) and
     shows up in the controller as waiting for adoption. `unifi` shows the state and
-    the last reply. Adoption is not implemented yet.
+    the last reply.
+  - Adoption. Adopt in the controller hands the switch its authkey, and the switch
+    informs with it from then on and echoes the controller's `cfgversion`. Both are
+    kept in their own flash sector, so they survive reboots and firmware updates. The
+    controller's `noop` sets the inform interval. Forget in the controller, or
+    `unifi forget`, returns the switch to the default key. The switch does not
+    apply the controller's settings yet.
 
 ## Changed
 
