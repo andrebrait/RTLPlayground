@@ -9,6 +9,7 @@
 #define UNIFI_BUF_SIZE	10240
 #define UNIFI_PATH_LEN	48
 #define UNIFI_TYPE_LEN	16
+#define UNIFI_CFGVER_LEN	17	/* 16 hex digits */
 
 struct uip_conn;
 
@@ -22,7 +23,11 @@ struct unifi_state {
 	char path[UNIFI_PATH_LEN];
 	uint16_t port;
 	uint8_t addr[4];	/* address of the controller last used */
-	uint8_t key[16];
+	uint8_t key[16];	/* the default key until adopted */
+	uint8_t adopted;	/* key is a controller's authkey */
+	uint8_t booted;		/* boot counted for this boot's IVs */
+	uint32_t boot;		/* boot counter, part of the IV */
+	char cfgver[UNIFI_CFGVER_LEN];	/* the controller's cfgversion, echoed */
 	uint16_t interval;	/* seconds between two informs */
 	uint32_t next;		/* uptime seconds of the next inform */
 	uint32_t count;		/* informs sent */

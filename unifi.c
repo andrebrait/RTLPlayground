@@ -22,6 +22,7 @@
 #include "cmd_parser.h"
 #include "uip/uip.h"
 #include "dns.h"
+#include "rtl837x_flash.h"
 #include "crypto/aes_gcm.h"
 #include "unifi.h"
 
@@ -70,7 +71,13 @@
 #define TAG_LEN		16
 #define STEP		32	/* bytes crypted per tick: two blocks, about 5.5 ms */
 
+/* The adoption survives reboots and firmware updates in its own flash
+ * sector: an update rewrites flash below CONFIG_START only, and the
+ * configuration uses the sector at CONFIG_START. */
+#define UNIFI_STATE_START	0x71000
+
 extern __xdata uint32_t uptime_secs;
+extern __xdata struct flash_region_t flash_region;
 extern __xdata uint8_t sfr_data[4];
 extern __xdata uint8_t cmd_words_len;
 extern __xdata uint8_t cmd_words_b[15];
@@ -89,6 +96,17 @@ static __code const uint8_t u_default_key[16] = {
 	0xba, 0x86, 0xf2, 0xbb, 0xe1, 0x07, 0xc7, 0xc5,
 	0x7e, 0xb5, 0xf2, 0x69, 0x07, 0x75, 0xc7, 0x12
 };
+/* The saved state: written on adoption, on a new cfgversion, and once per
+ * boot while adopted, so that the boot counter keeps the IVs unique */
+struct u_rec {
+	char magic[4];
+	uint32_t boot;
+	uint8_t key[16];
+	char cfgver[UNIFI_CFGVER_LEN];
+};
+static __xdata struct u_rec u_rec;
+static __code const char u_magic[] = "UNF1";
+
 static __code const char u_default_host[] = "unifi";
 static __code const char u_default_path[] = "/inform";
 static __code const char u_hex[] = "0123456789abcdef";
@@ -211,9 +229,18 @@ static void u_build(void)
 	u_x(unifi.path);
 	u_s("\",\"uptime\":");
 	u_dec(uptime_secs);
-	u_s(",\"cfgversion\":\"?\",\"default\":true,\"state\":1,\"fw_caps\":0,"
-	    "\"isolated\":false,\"locating\":false,\"selfrun_beacon\":false,"
-	    "\"port_table\":[]}");
+	u_s(",\"cfgversion\":\"");
+	if (unifi.cfgver[0])
+		u_x(unifi.cfgver);
+	else
+		u_c('?');
+	/* State 1 while pending and 4 once adopted, as accepted in the lab */
+	if (unifi.adopted)
+		u_s("\",\"default\":false,\"state\":4,");
+	else
+		u_s("\",\"default\":true,\"state\":1,");
+	u_s("\"fw_caps\":0,\"isolated\":false,\"locating\":false,"
+	    "\"selfrun_beacon\":false,\"port_table\":[]}");
 	unifi.end = unifi.pos;
 
 	/* Packet version 0, then the fields that are not zero */
@@ -222,12 +249,13 @@ static void u_build(void)
 	memcpyc(u_p, "TNBU", 4);
 	memcpy(u_p + 8, uip_ethaddr.addr, 6);
 	u_p[15] = 0x09;		/* encrypted, AES-GCM, not compressed */
-	/* The IV: random, and a message counter so that it never repeats in
-	 * one boot even if the RNG does */
-	for (u_i = 16; u_i < 28; u_i += 4) {
+	/* The IV: random, then the boot and message counters, so that it never
+	 * repeats under one key even if the RNG does */
+	for (u_i = 16; u_i < 24; u_i += 4) {
 		get_random_32();
 		memcpy(u_p + u_i, sfr_data, 4);
 	}
+	u_be32(u_p + 24, unifi.boot);
 	u_be32(u_p + 28, ++unifi.msg);
 	u_p[35] = 1;		/* payload version: JSON */
 	unifi.left = unifi.end - (HROOM + TNBU_HDR);
@@ -450,25 +478,144 @@ static void u_reply(void)
 }
 
 
-/* The tag checked out: keep the reply's _type */
+static void u_save(void)
+{
+	memcpyc(u_rec.magic, u_magic, 4);
+	u_rec.boot = unifi.boot;
+	memcpy(u_rec.key, unifi.key, 16);
+	memcpy(u_rec.cfgver, unifi.cfgver, UNIFI_CFGVER_LEN);
+	flash_region.addr = UNIFI_STATE_START;
+	flash_sector_erase();
+	flash_region.addr = UNIFI_STATE_START;
+	flash_region.len = sizeof(u_rec);
+	flash_write_bytes((__xdata uint8_t *)&u_rec);
+}
+
+/* Back to the default key: not adopted, no cfgversion */
+static void u_forget(void)
+{
+	memcpyc(unifi.key, u_default_key, 16);
+	unifi.adopted = 0;
+	unifi.keyed = 0;
+	unifi.cfgver[0] = 0;
+	u_save();
+}
+
+
+/* The reply, decrypted, is at u_p and u_n bytes long. u_find() returns the
+ * offset just past s in [from, to), or 0xffff. */
+static __xdata uint16_t u_j, u_ms, u_me;
+static __xdata uint8_t u_k[UNIFI_CFGVER_LEN];	/* a key or cfgversion being read */
+
+static uint16_t u_find(__code const char *s, __xdata uint16_t from, __xdata uint16_t to)
+{
+	for (u_j = from; u_j < to; u_j++)
+		if (strstart(u_p + u_j, s))
+			break;
+	if (u_j >= to)
+		return 0xffff;
+	u_j += strlen(s);
+	if (u_j > to)
+		return 0xffff;
+	return u_j;
+}
+
+static uint8_t u_hexval(__xdata uint8_t c)
+{
+	if (c >= '0' && c <= '9')
+		return c - '0';
+	c |= 0x20;
+	if (c >= 'a' && c <= 'f')
+		return c - 'a' + 10;
+	return 0xff;
+}
+
+/* The authkey at u_i: 32 hex digits, into unifi.key */
+static uint8_t u_authkey(void)
+{
+	for (u_j = 0; u_j < 32; u_j++)
+		if (u_i + u_j >= u_me || u_hexval(u_p[u_i + u_j]) == 0xff)
+			return 0;
+	for (u_j = 0; u_j < 16; u_j++)
+		u_k[u_j] = u_hexval(u_p[u_i + 2 * u_j]) << 4 | u_hexval(u_p[u_i + 2 * u_j + 1]);
+	memcpy(unifi.key, u_k, 16);
+	return 1;
+}
+
+/* The cfgversion at u_i, up to the first character that is not a hex
+ * digit. Returns 1 when it differs from the one kept. */
+static uint8_t u_cfgver(void)
+{
+	for (u_j = 0; u_j < UNIFI_CFGVER_LEN - 1 && u_i + u_j < u_n && u_hexval(u_p[u_i + u_j]) != 0xff; u_j++)
+		u_k[u_j] = u_p[u_i + u_j];
+	u_k[u_j] = 0;
+	if (!u_j || !memcmp(u_k, unifi.cfgver, u_j + 1))
+		return 0;
+	memcpy(unifi.cfgver, u_k, u_j + 1);
+	return 1;
+}
+
+/* The tag checked out: act on the reply */
 static __code const char u_type[] = "\"_type\":\"";
+static __code const char u_mgmt[] = "\"mgmt_cfg\":\"";
+static __xdata uint8_t u_dirty;
 
 static void u_decrypted(void)
 {
 	unifi.type[0] = 0;
 	u_p = u_buf + unifi.hdr + TNBU_HDR;
 	u_n = unifi.clen - TNBU_HDR - TAG_LEN;
-	for (u_i = 0; u_i + sizeof(u_type) - 1 < u_n; u_i++) {
-		if (!strstart(u_p + u_i, u_type))
-			continue;
-		u_i += sizeof(u_type) - 1;
+	u_i = u_find(u_type, 0, u_n);
+	if (u_i != 0xffff) {
 		for (u_d[0] = 0; u_d[0] < UNIFI_TYPE_LEN - 1 && u_i < u_n && u_p[u_i] != '"'; u_d[0]++)
 			unifi.type[u_d[0]] = u_p[u_i++];
 		unifi.type[u_d[0]] = 0;
-		break;
 	}
 	unifi.err = 0;
+	u_dirty = 0;
+	if (!strcmp(unifi.type, "noop")) {
+		/* The controller paces the informs */
+		u_i = u_find("\"interval\":", 0, u_n);
+		if (u_i != 0xffff) {
+			for (u_j = 0; u_i < u_n && u_p[u_i] >= '0' && u_p[u_i] <= '9' && u_j < 3600; u_i++)
+				u_j = u_j * 10 + u_p[u_i] - '0';
+			if (u_j >= 5 && u_j <= 3600)
+				unifi.interval = u_j;
+		}
+	} else if (!strcmp(unifi.type, "setparam")) {
+		/* mgmt_cfg is a string of key=value lines */
+		u_ms = u_find(u_mgmt, 0, u_n);
+		u_me = u_n;
+		if (u_ms != 0xffff) {
+			for (u_me = u_ms; u_me < u_n && u_p[u_me] != '"'; u_me++)
+				;
+			/* A key is taken only while on the default one */
+			u_i = u_find("authkey=", u_ms, u_me);
+			if (!unifi.adopted && u_i != 0xffff && u_authkey()) {
+				unifi.adopted = 1;
+				unifi.keyed = 0;
+				unifi.boot++;
+				unifi.booted = 1;
+				u_dirty = 1;
+			}
+		}
+		/* The provisioning cfgversion, else the one in mgmt_cfg */
+		u_i = u_find("\"cfgversion\":\"", 0, u_n);
+		if (u_i == 0xffff && u_ms != 0xffff)
+			u_i = u_find("cfgversion=", u_ms, u_me);
+		if (unifi.adopted && u_i != 0xffff && u_cfgver())
+			u_dirty = 1;
+	} else if (!strcmp(unifi.type, "setdefault")) {
+		/* Removed in the controller: wait for adoption again */
+		if (unifi.adopted)
+			u_forget();
+	}
+	if (u_dirty)
+		u_save();
 	u_done();
+	/* After a command, the controller expects the next inform at once */
+	if (strcmp(unifi.type, "noop"))
+		unifi.next = uptime_secs;
 }
 
 
@@ -495,6 +642,12 @@ void unifi_tick(void) __banked
 	case U_IDLE:
 		if (uptime_secs < unifi.next || dns_state.status == DNS_PENDING)
 			return;
+		if (unifi.adopted && !unifi.booted) {
+			/* One flash write per boot keeps the IVs unique */
+			unifi.boot++;
+			unifi.booted = 1;
+			u_save();
+		}
 		if (!unifi.keyed) {
 			/* About 30 ms, once per key */
 			gcm_setkey(unifi.key);
@@ -574,6 +727,18 @@ void unifi_init(void) __banked
 	unifi.port = UNIFI_PORT;
 	unifi.interval = 10;
 	memcpyc(unifi.key, u_default_key, 16);
+	flash_region.addr = UNIFI_STATE_START;
+	flash_region.len = sizeof(u_rec);
+	flash_read_bulk((__xdata uint8_t *)&u_rec);
+	if (!strstart(u_rec.magic, u_magic))
+		return;
+	unifi.boot = u_rec.boot;
+	memcpy(unifi.key, u_rec.key, 16);
+	memcpy(unifi.cfgver, u_rec.cfgver, UNIFI_CFGVER_LEN);
+	unifi.cfgver[UNIFI_CFGVER_LEN - 1] = 0;
+	for (u_i = 0; u_i < 16; u_i++)
+		if (unifi.key[u_i] != u_default_key[u_i])
+			unifi.adopted = 1;
 }
 
 
@@ -655,7 +820,11 @@ static void u_show(void)
 	print_string_x(unifi.path);
 	print_string(", address ");
 	print_ip(unifi.addr);
-	print_string("\nModel " UNIFI_MODEL ", informs sent ");
+	print_string(unifi.adopted ? "\nAdopted, cfgversion " : "\nNot adopted, cfgversion ");
+	print_string_x(unifi.cfgver);
+	print_string(", interval ");
+	itoa_short(unifi.interval);
+	print_string(" s\nModel " UNIFI_MODEL ", informs sent ");
 	u_print(unifi.count);
 	print_string(", last reply ");
 	itoa_short(unifi.status);
@@ -717,6 +886,13 @@ void unifi_parse(void) __banked
 		u_stop();
 		return;
 	}
+	if (cmd_words_len == 2 && u_word("forget")) {
+		/* Leave the controller: back to the default key */
+		u_stop();
+		if (unifi.adopted)
+			u_forget();
+		return;
+	}
 	if (cmd_words_len == 2 && u_word("selftest")) {
 		/* The self test rekeys gcm and reuses its state */
 		if (unifi.phase != U_IDLE || unifi.abort) {
@@ -727,5 +903,5 @@ void unifi_parse(void) __banked
 		unifi.keyed = 0;
 		return;
 	}
-	u_error("unifi [on|off|inform <url>|selftest]\n");
+	u_error("unifi [on|off|inform <url>|forget|selftest]\n");
 }
