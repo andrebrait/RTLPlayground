@@ -84,7 +84,7 @@ uint8_t poe_admin_mask(void) { return 0x01; }
  * a MAC chassis ID that is not six bytes */
 __xdata struct lldp_neighbor lldp_nb[LLDP_NB_MAX] = {
 	{ .port = 4, .chassis_subtype = 4, .chassis_len = 6, .chassis = { 0x1c, 0x2a, 0xa3, 0x23, 0xd8, 0x68 },
-	  .port_id = "Port 7", .sys_desc = "MokerLink \"ZX\"", .port_desc = "uplink", .ttl = 120 },
+	  .port_id = "Port \"7\"", .sys_desc = "MokerLink", .port_desc = "uplink", .ttl = 120 },
 	{ .port = 5, .chassis_subtype = 4, .chassis_len = 6, .chassis = { 0x84, 0x78, 0x48, 0x88, 0x39, 0xc9 },
 	  .port_id_mac = 1, .port_id = { 0x84, 0x78, 0x48, 0x88, 0x39, 0xca }, .sys_desc = "U7-Lite", .ttl = 90 },
 	{ .port = 6, .chassis_subtype = 5, .chassis_len = 5, .chassis = { 1, 10, 0, 0, 6 }, .port_id = "x", .ttl = 60 },
@@ -439,10 +439,10 @@ static void test_request(void)
 		"\"rx_bytes\":4000,\"tx_bytes\":4001,\"rx_packets\":12009,\"tx_packets\":12018},";
 	const char *last = "{\"port_idx\":6,\"media\":\"SFP+\",\"speed_caps\":288,\"up\":true,\"enable\":true,\"poe_caps\":0,"
 		"\"speed\":10000,\"rx_bytes\":8000,\"tx_bytes\":8001,\"rx_packets\":24009,\"tx_packets\":24018}],"
-		"\"lldp_table\":[{\"chassis_id\":\"1c:2a:a3:23:d8:68\",\"port_id\":\"Port 7\",\"port_descr\":\"uplink\","
-		"\"chassis_descr\":\"MokerLink \\\"ZX\\\"\",\"local_port_idx\":1,\"local_port_name\":\"Port 1\",\"is_wired\":true},"
-		"{\"chassis_id\":\"84:78:48:88:39:c9\",\"port_id\":\"84:78:48:88:39:ca\",\"port_descr\":\"\","
-		"\"chassis_descr\":\"U7-Lite\",\"local_port_idx\":2,\"local_port_name\":\"Port 2\",\"is_wired\":true}]}";
+		"\"lldp_table\":[{\"chassis_id\":\"1c:2a:a3:23:d8:68\",\"port_id\":\"Port \\\"7\\\"\","
+		"\"local_port_idx\":1,\"local_port_name\":\"Port 1\",\"is_wired\":true},"
+		"{\"chassis_id\":\"84:78:48:88:39:c9\",\"port_id\":\"84:78:48:88:39:ca\","
+		"\"local_port_idx\":2,\"local_port_name\":\"Port 2\",\"is_wired\":true}]}";
 	const char *got = (char *)copy + 40;
 	check(!strncmp(got, want, strlen(want)) && strlen(got) > strlen(last)
 	      && !strcmp(got + strlen(got) - strlen(last), last),

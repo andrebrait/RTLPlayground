@@ -13,6 +13,9 @@
 #include "uip.h"
 #include "uip/uip.h"
 #include "machine.h"
+#ifdef UNIFI
+#include "unifi.h"
+#endif
 #include "version.h"
 #include "timer.h"
 #include "rtl837x_trap.h"
@@ -206,6 +209,11 @@ static void lldp_send_ports(uint16_t ttl, uint16_t ports) __reentrant
     //Port ID
     *p++ = LLDP_TYPE(LLDP_PORT_ID_TLV_TYPE);
     *p++ = LLDP_PORT_ID_TLV_LENGTH;
+#ifdef UNIFI
+    if (unifi.enabled)
+        *p++ = LLDP_PORT_ID_SUBTYPE_LOCAL;
+    else
+#endif
     *p++ = LLDP_PORT_ID_TLV_SUBTYPE;
     memcpyc(p, LLDP_PORT_ID_PREFIX, LLDP_PORT_ID_PREFIX_LENGTH);
     p += LLDP_PORT_ID_PREFIX_LENGTH;

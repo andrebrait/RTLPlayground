@@ -8,6 +8,10 @@
 #include "rtl837x_port.h"
 #include "rtl837x_regs.h"
 #include "rtl837x_sfr.h"
+#ifdef UNIFI
+#include "unifi.h"
+struct unifi_state unifi = {.version = "7.6.11.17272"};
+#endif
 
 uint8_t uip_buf[UIP_CONF_BUFFER_ALLOC_SIZE];
 uint16_t uip_len;
@@ -78,5 +82,18 @@ int main(void){
     puts("PASS unconfigured IPv4: no Management Address TLV");
     lldp_tlv_mask&=~LLDP_TX_SYSCAP;lldp_send();unsigned n;assert(!tlv(0,7,&n));
     puts("PASS optional System Capabilities switch omits TLV");
+#ifdef UNIFI
+    /* With UniFi on, as a UniFi switch: Port ID locally assigned, and the
+     * system description "<model>, <reported version>" */
+    unifi.enabled=1;emitted=0;lldp_send();assert(emitted==2);
+    const uint8_t *v=tlv(1,2,&n);assert(v&&n==7&&v[0]==7&&!memcmp(v+1,"Port 9",6));
+    static const char desc[]=UNIFI_DISPLAY ", 7.6.11.17272";
+    v=tlv(1,6,&n);assert(v&&n==sizeof desc-1&&!memcmp(v,desc,n));
+    v=tlv(1,0,&n);assert(v&&n==0);
+    puts("PASS UniFi on: Port ID subtype 7, system description " UNIFI_DISPLAY ", <version>");
+    unifi.enabled=0;emitted=0;lldp_send();v=tlv(1,2,&n);assert(v&&v[0]==5);
+    v=tlv(1,6,&n);assert(v&&n>15&&!memcmp(v,"Host LLDP test ",15));
+    puts("PASS UniFi off: subtype 5 and the firmware's own description again");
+#endif
     return 0;
 }

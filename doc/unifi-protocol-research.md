@@ -704,6 +704,36 @@ picture. For the two chosen models (`USWED36`, `USL8LP`) the layouts already
 match, so this is only needed for the other RTLPlayground layouts (for
 example 5 x 2.5G + 1 x SFP+).
 
+### LLDP as a UniFi switch sends and reports it
+
+Read from the USW-Lite-8-PoE firmware 7.5.15.17146
+(`4154-USL8LP-7.5.15-…bin`, the URL in the controller's `firmware.json`,
+md5 `a2043a48ac04154cc544d481d1a343b1`): the LLDP agent is the kernel
+module `l2g_lldp.ko` (Realtek SDK), the inform is built by `mcad` with
+`libubnt`.
+
+- **Frames sent** (the frame builder in `l2g_lldp.ko`, disassembled):
+  - Chassis ID: subtype 4 (MAC address), the system MAC.
+  - Port ID: subtype 7 (locally assigned), `Port %u` with the front-panel
+    port number.
+  - Source MAC: the port's own MAC (`rsd_sys_portMacAddr_get`).
+  - Then TTL, the port description (`rsd_port_descp_get`), system name and
+    description (`rsd_sys_info_get`), capabilities, the management address,
+    LLDP-MED, PoE, link aggregation and VLAN TLVs, and a Ubiquiti
+    organisation TLV with the controller host and port while the switch is
+    in its default state (`ubnthal_get_isDefault`,
+    `ubnthal_get_controller_host`).
+  - The system description is set by `ubntbox` as
+    `configure system description "%s, %s.%s"`: model, version and build,
+    as the U7-Lite access points here send `U7-Lite, 8.8.14.20179`.
+- **`lldp_table` in the inform** (`libubnt`): `chassis_id`, `port_id`,
+  `local_port_name`, `local_port_idx`, `is_wired` and `mgmt_ips`. No
+  descriptions.
+- **What the firmware does** while UniFi is on: Port ID subtype 7 and the
+  system description `<model display>, <reported version>`. Its
+  `lldp_table` has the same members but `mgmt_ips`, whose value type was
+  not established. It sends no Ubiquiti TLV.
+
 ### Port index translation
 
 The controller keys every per-port setting on `port_table[].port_idx`, and

@@ -35,24 +35,6 @@
 #pragma codeseg BANK5
 #pragma constseg BANK5
 
-/* The reported model. The TL-SG108PE V5 (RTL836x, 8 x 1G, PoE on 1-4)
- * maps to the USW-Lite-8-PoE, the 8 x 2.5G + SFP+ boards to the
- * USW-Flex-2.5G-8. The version is the model's current release as UniFi
- * Network 10.6.109 listed it, which is above its minimumFirmwareRequired. */
-#ifndef SOC_FAMILY
-#error "machine.h must define SOC_FAMILY"
-#endif
-#ifndef UNIFI_MODEL
-#if SOC_FAMILY == RTL836X
-#define UNIFI_MODEL	"USL8LP"
-#define UNIFI_DISPLAY	"USW-Lite-8-PoE"
-#define UNIFI_VERSION	"7.5.15.17146"
-#else
-#define UNIFI_MODEL	"USWED36"
-#define UNIFI_DISPLAY	"USW-Flex-2.5G-8"
-#define UNIFI_VERSION	"2.1.8.971"
-#endif
-#endif
 
 #define U_IDLE		0
 #define U_RESOLVE	1
@@ -435,10 +417,11 @@ static void u_build(void)
 #endif
 }
 
-/* The LLDP neighbours, so the controller can draw the topology. Only
+/* The LLDP neighbours, so the controller can draw the topology, with the
+ * members a USW-Lite-8-PoE (7.5.15, libubnt) sends but mgmt_ips. Only
  * neighbours with a MAC chassis ID: the controller matches them to devices
- * by MAC. Budget: an entry is at most about 210 bytes (lldp_printable()
- * leaves nothing to escape), so LLDP_NB_MAX of them take about 3.4 KB;
+ * by MAC. Budget: an entry is at most about 150 bytes (lldp_printable()
+ * leaves nothing to escape), so LLDP_NB_MAX of them take about 2.4 KB;
  * with a port table of about 2.3 KB and the head, an inform stays under
  * 7 KB of the UNIFI_BUF_SIZE buffer. */
 static __xdata struct lldp_neighbor *__xdata u_nb;
@@ -464,10 +447,6 @@ static void u_lldp(void)
 		} else {
 			u_x(u_nb->port_id);
 		}
-		u_s("\",\"port_descr\":\"");
-		u_x(u_nb->port_desc);
-		u_s("\",\"chassis_descr\":\"");
-		u_x(u_nb->sys_desc);
 		u_s("\",\"local_port_idx\":");
 		u_dec(machine.log_to_phys_port[u_nb->port]);
 		u_s(",\"local_port_name\":\"Port ");
