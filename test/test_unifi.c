@@ -346,6 +346,6 @@ int main(void)
 	test_replies();
 	cmd("unifi");
 	check(strstr(out, "UniFi on, inform http://10.0.0.1:8080/inform") != 0, "show: state and URL");
-	check(strstr(out, "informs sent 8,") != 0, "show: the inform count in decimal");
+	check(strstr(out, "informs sent 8, last reply 200, failed 3,") != 0, "show: the inform count in decimal");
 	return failures != 0;
 }

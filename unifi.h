@@ -26,6 +26,7 @@ struct unifi_state {
 	uint16_t interval;	/* seconds between two informs */
 	uint32_t next;		/* uptime seconds of the next inform */
 	uint32_t count;		/* informs sent */
+	uint32_t fails;		/* informs that failed */
 	uint32_t msg;		/* message counter, part of the IV */
 	uint16_t status;	/* HTTP status of the last reply */
 	char type[UNIFI_TYPE_LEN];	/* _type of the last decrypted reply */

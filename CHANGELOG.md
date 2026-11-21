@@ -185,6 +185,12 @@
     in BANK5. It processes a message in steps, so the main loop can encrypt a few blocks
     per pass. `unifi selftest` decrypts a captured controller reply, checks its tag and
     times the cipher on the switch.
+  - Inform client. `unifi inform http://<host>[:<port>][/<path>]` sets the controller
+    (default `http://unifi:8080/inform`) and `unifi on` starts informing every 10 s
+    over its own TCP connection, encrypted with AES-128-GCM under the default key.
+    The switch reports itself as a `USWED36` (RTL837x) or `USL8LP` (RTL836x) and
+    shows up in the controller as waiting for adoption. `unifi` shows the state and
+    the last reply. Adoption is not implemented yet.
 
 ## Changed
 

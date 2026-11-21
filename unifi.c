@@ -185,6 +185,7 @@ static void u_done(void)
 static void u_fail(__xdata uint8_t e)
 {
 	unifi.err = e;
+	unifi.fails++;
 	if (unifi.conn)
 		unifi.abort = 1;
 	else
@@ -623,6 +624,10 @@ static void u_show(void)
 		write_char(' ');
 		print_string_x(unifi.type);
 	}
+	print_string(", failed ");
+	u_digits(unifi.fails);
+	while (u_n)
+		write_char(u_d[4 + --u_n]);
 	print_string(", last error: ");
 	print_string(u_errors[unifi.err]);
 	write_char('\n');
