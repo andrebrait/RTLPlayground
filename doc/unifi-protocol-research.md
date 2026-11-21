@@ -314,9 +314,14 @@ amd989 `unifi_protocol.py:30-124`, unifi-stubd `docs/en/protocol-notes.md:74-90`
    reproduced. The OpenWrt agent's emulated AP was refused with `SSH adopt
    failed` before it sent `sshd_port`, and a production 10.6 controller later
    adopted its LG510S over SSH. Layer-2 discovery on UDP 10001 is the
-   documented path to SSH adoption, and the firmware sends none. Whether a
-   real controller adopts it by inform is **unverified** until it is tried
-   on hardware: an 8051 cannot offer SSH.
+   documented path to SSH adoption, and the firmware sends none.
+   **Confirmed on hardware:** a ZX-SWTGW218AS running this firmware,
+   reporting `USWED36`, was adopted by inform by UniFi Network 10.6.109,
+   the lab controller image. It went from pending to Connected (state 1),
+   with `known_cfgversion` equal to the echoed `cfgversion`, within three
+   informs. It stayed Connected across a reboot. After Forget in the
+   controller, the next reply was `setdefault`. A production controller
+   has not been tried.
 7. Ways for the device to learn the inform URL: manual configuration (the
    web UI or CLI here), DHCP option 43 sub-option 1 carrying the IPv4 address
    (fxkr README), and the DNS name `unifi` (the default URL). Ubiquiti's help

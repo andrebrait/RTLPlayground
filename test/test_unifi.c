@@ -73,6 +73,72 @@ bool strstart(const uint8_t *a, const uint8_t *b)
 
 void gcm_selftest(void) { selftests++; }
 
+/* The UniFi state sector */
+struct flash_region_t flash_region;
+static uint8_t sector[8192];	/* both UniFi sectors */
+static int erases, saves, cut, broken, no_commit, partial;	/* cut: the next write stops after that many bytes */
+static uint8_t *at(void)
+{
+	uint32_t o = flash_region.addr - UNIFI_STATE_START;
+	if (flash_region.addr < UNIFI_STATE_START || o + flash_region.len > sizeof(sector)) {
+		printf("FAIL flash access outside the UniFi sector: %x+%u\n", flash_region.addr, flash_region.len);
+		exit(1);
+	}
+	return sector + o;
+}
+void flash_sector_erase(void)
+{
+	if (flash_region.addr != UNIFI_STATE_START && flash_region.addr != UNIFI_STATE_START + 4096) {
+		printf("FAIL erase outside the UniFi sectors\n");
+		exit(1);
+	}
+	if (partial) {
+		/* Cut short: bits only went up, here the top byte of each seq */
+		for (int i = 0; i < 64; i++)
+			at()[i * 64 + 7] = 0xff;
+		partial = 0;
+	} else {
+		memset(at(), 0xff, 4096);
+	}
+	erases++;
+}
+void flash_write_bytes(uint8_t *p)
+{
+	uint8_t *d = at();
+	if (flash_region.len == 1) {	/* the commit byte */
+		if (!no_commit && !broken)
+			*d &= *p;
+		return;
+	}
+	saves++;
+	if (broken)
+		return;
+	for (int i = 0; i < flash_region.len && (!cut || i < cut); i++)
+		d[i] &= p[i];	/* NOR flash only clears bits */
+	cut = 0;
+}
+void flash_read_bulk(uint8_t *d)
+{
+	memcpy(d, at(), flash_region.len);
+}
+
+/* The complete record with the highest sequence number. Layout: magic 0,
+ * seq 4, boot 8, key 12, cfgversion 28, sum 45, commit 47. */
+static const uint8_t *last_rec(void)
+{
+	const uint8_t *r = sector;
+	uint32_t best = 0, seq;
+	for (int i = 0; i < 128; i++) {
+		const uint8_t *s = sector + i * 64;
+		memcpy(&seq, s + 4, 4);
+		if (!memcmp(s, "UNF3", 4) && !s[47] && seq > best) {
+			best = seq;
+			r = s;
+		}
+	}
+	return r;
+}
+
 static char out[512];
 static size_t out_len;
 void write_char(char c) { if (out_len < sizeof out - 1) out[out_len++] = c; out[out_len] = 0; }
@@ -181,6 +247,8 @@ static const uint8_t key[16] = {
 };
 
 /* An encrypted TNBU reply around json, after an HTTP header */
+static const uint8_t *cur_key = key;
+
 static uint16_t reply(uint8_t *p, const char *json, int with_clen, int tamper)
 {
 	uint8_t pkt[1024], k[16];
@@ -196,7 +264,7 @@ static uint16_t reply(uint8_t *p, const char *json, int with_clen, int tamper)
 	pkt[38] = (n + 16) >> 8;
 	pkt[39] = n + 16;
 	memcpy(pkt + 40, json, n);
-	memcpy(k, key, 16);
+	memcpy(k, cur_key, 16);
 	gcm_setkey(k);
 	gcm_start(pkt + 16, 0);
 	gcm_aad(pkt, 40);
@@ -481,8 +549,337 @@ static void test_replies(void)
 	check(selftests == 1 && !unifi.keyed, "selftest: runs while idle and forces a new key setup");
 }
 
+/* The JSON of the request last sent, decrypted with cur_key; NULL if its
+ * tag does not verify */
+static uint8_t req_iv[16];
+
+static const char *req_json(void)
+{
+	static uint8_t copy[2048];
+	char *body = memmem(req, req_len, "\r\n\r\n", 4);
+	if (!body)
+		return NULL;
+	uint8_t *p = (uint8_t *)body + 4, k[16];
+	uint16_t have = req_len - (p - req);	/* only this inform's bytes */
+	if (have < 40)
+		return NULL;
+	uint16_t plen = (uint16_t)(p[38] << 8 | p[39]);
+	if (plen < 16 || plen > sizeof(copy) - 41 || 40 + plen != have)
+		return NULL;
+	memcpy(copy, p, 40 + plen);
+	memcpy(req_iv, copy + 16, 16);
+	memcpy(k, cur_key, 16);
+	gcm_setkey(k);
+	gcm_start(copy + 16, 1);
+	gcm_aad(copy, 40);
+	gcm_crypt(copy + 40, plen - 16);
+	gcm_finish();
+	if (memcmp(gcm.blk, copy + 40 + plen - 16, 16))
+		return NULL;
+	copy[40 + plen - 16] = 0;
+	return (const char *)copy + 40;
+}
+
+static void answer(const char *json)
+{
+	static uint8_t r[2048];
+	uint16_t n = reply(r, json, 1, 0);
+	deliver(r, n);
+	ticks();
+}
+
+static void test_adopt(void)
+{
+	static const uint8_t newkey[16] = {
+		0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
+		0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff
+	};
+	const char *j;
+
+	cur_key = key;
+	inform();
+	answer("{\"_type\":\"setparam\",\"mgmt_cfg\":\"capability=notif\\nauthkey=00112233445566778899"
+	       "AABBCCDDEEFF\\ncfgversion=cfe5c9df7757b6f5\\nuse_aes_gcm=true\\n\",\"server_time_in_utc\":\"1\"}");
+	check(unifi.adopted && !memcmp(unifi.key, newkey, 16) && !strcmp(unifi.cfgver, "cfe5c9df7757b6f5")
+	      && unifi.next == uptime_secs && !unifi.keyed,
+	      "adopt: the authkey and cfgversion are taken, and the next inform is due");
+	check(saves == 1 && !erases && !memcmp(sector, "UNF3", 4) && !memcmp(sector + 12, newkey, 16)
+	      && !strcmp((char *)sector + 28, "cfe5c9df7757b6f5"),
+	      "adopt: the key and cfgversion are saved to flash");
+
+	cur_key = newkey;
+	inform();
+	j = req_json();
+	check(j && strstr(j, "\"cfgversion\":\"cfe5c9df7757b6f5\",\"default\":false,\"state\":4,")
+	      && req_iv[11] == unifi.boot && unifi.boot == 1,
+	      "adopt: the next inform uses the new key, echoes the cfgversion and counts the boot");
+
+	answer("{\"_type\":\"setparam\",\"cfgversion\":\"0123456789abcdef\",\"system_cfg\":\"x=1\","
+	       "\"mgmt_cfg\":\"authkey=ffffffffffffffffffffffffffffffff\\ncfgversion=0123456789abcdef\\n\"}");
+	check(!strcmp(unifi.cfgver, "0123456789abcdef") && !memcmp(unifi.key, newkey, 16) && saves == 2
+	      && last_rec() == sector + 64,
+	      "provision: the new cfgversion is kept; a second authkey is ignored");
+
+	inform();
+	answer("{\"_type\":\"noop\",\"interval\":18,\"server_time_in_utc\":\"1\"}");
+	check(unifi.interval == 18 && unifi.next == uptime_secs + 18 && saves == 2,
+	      "noop: the controller's interval paces the informs");
+	inform();
+	answer("{\"_type\":\"noop\",\"interval\":2}");
+	check(unifi.interval == 18, "noop: an interval below 5 s is ignored");
+	inform();
+	answer("{\"_type\":\"noop\",\"interval\":36000}");
+	check(unifi.interval == 18, "noop: an interval above 3600 s is ignored, whatever its length");
+	inform();
+	answer("{\"_type\":\"upgrade\",\"version\":\"9.9.9\"}");
+	check(unifi.next == uptime_secs + 18 && !strcmp(unifi.type, "upgrade"),
+	      "reply: a command not handled waits the interval");
+
+	/* A reboot: the adoption comes back, and the boot is counted again */
+	unifi_init();
+	cmd("unifi inform http://10.0.0.1");
+	cmd("unifi on");
+	check(unifi.adopted && !memcmp(unifi.key, newkey, 16) && !strcmp(unifi.cfgver, "0123456789abcdef")
+	      && unifi.boot == 1,
+	      "reboot: the adoption is loaded from flash");
+	inform();
+	j = req_json();
+	check(j && unifi.boot == 2 && req_iv[11] == 2 && saves == 3 && strstr(j, "\"default\":false"),
+	      "reboot: the first inform counts the boot in flash and in the IV");
+
+	answer("{\"_type\":\"setdefault\"}");
+	check(!unifi.adopted && !memcmp(unifi.key, key, 16) && !unifi.cfgver[0] && saves == 4
+	      && !memcmp(last_rec() + 12, key, 16) && last_rec()[8] == 2 && unifi.next == uptime_secs,
+	      "setdefault: back to the default key, saved");
+
+	cur_key = key;
+	inform();
+	j = req_json();
+	check(j && strstr(j, "\"cfgversion\":\"?\",\"default\":true,\"state\":1,"),
+	      "setdefault: the next inform is a pending device's again");
+	answer("{\"_type\":\"setparam\",\"mgmt_cfg\":\"authkey=0011223344556677889900aabbccddee\\n\"}");
+	check(unifi.adopted && unifi.key[0] == 0x00 && unifi.key[15] == 0xee, "adopt: again after setdefault");
+	cmd("unifi forget");
+	check(!unifi.adopted && !memcmp(unifi.key, key, 16) && !memcmp(last_rec() + 12, key, 16),
+	      "forget: the command goes back to the default key");
+
+	inform();
+	answer("{\"_type\":\"setparam\",\"mgmt_cfg\":\"authkey=0011223344556677889900aabbccdde\\n\"}");
+	check(!unifi.adopted && !memcmp(unifi.key, key, 16), "adopt: a key that is not 32 hex digits is ignored");
+	inform();
+	check(unifi.phase == U_RECV, "adopt: the next inform after a refused key");
+	answer("{\"_type\":\"setparam\",\"system_cfg\":\"authkey=00112233445566778899aabbccddeeff\","
+	       "\"mgmt_cfg\":\"led_enabled=true\\n\"}");
+	check(!unifi.adopted, "adopt: an authkey outside mgmt_cfg is ignored");
+	inform();
+	answer("{\"_type\":\"setparam\",\"mgmt_cfg\":\"authkey=00112233445566778899aabbccddeeff0\\n\"}");
+	check(!unifi.adopted, "adopt: a key of 33 hex digits is ignored");
+	inform();
+	answer("{\"_type\":\"setparam\",\"mgmt_cfg\":\"x_authkey=ffffffffffffffffffffffffffffffff\\n"
+	       "authkey=00112233445566778899aabbccddeeff\\n\"}");
+	check(unifi.adopted && !memcmp(unifi.key, newkey, 16), "adopt: only a line that starts with authkey= counts");
+
+	/* A power cut while a record is written: the previous one counts */
+	int before = saves;
+	cut = 20;
+	cmd("unifi forget");
+	unifi_init();
+	check(saves == before + 1 && unifi.adopted && !memcmp(unifi.key, newkey, 16),
+	      "flash: a record cut short is skipped and the previous one used");
+
+	/* A full sector is erased, and the newest record survives */
+	for (int i = 0; i < 70; i++) {
+		unifi.boot++;
+		u_save();
+	}
+	uint32_t b = unifi.boot;
+	unifi_init();
+	check(erases == 1 && unifi.boot == b && unifi.adopted && u_sec == 1,
+	      "flash: when a sector is full, the other one is erased and used");
+
+	/* A record whose commit byte never got written does not count */
+	no_commit = 1;
+	unifi.boot++;
+	u_save();
+	no_commit = 0;
+	unifi_init();
+	check(unifi.boot == b && unifi.adopted, "flash: a record without its commit byte is skipped");
+
+	/* The write after an erase fails: the full sector stays */
+	while (u_slot < 64) {
+		unifi.boot++;
+		u_save();
+	}
+	b = unifi.boot;
+	broken = 1;
+	unifi.boot++;
+	check(!u_save() && unifi.unsaved, "flash: a save that does not read back is reported");
+	broken = 0;
+	unifi_init();
+	check(erases == 2 && unifi.boot == b && unifi.adopted && u_sec == 1,
+	      "flash: a failed write after an erase keeps the last good record in the other sector");
+
+	/* A power cut during that erase: stale records with a raised seq stay.
+	 * Fill sector 0, so that the next save erases sector 1, which still
+	 * holds older committed records. */
+	while (!(u_sec == 0 && u_slot == 64)) {
+		unifi.boot++;
+		u_save();
+	}
+	check(last_rec()[47] == 0 && sector[4096 + 47] == 0, "flash: both sectors hold committed records");
+	b = unifi.boot;
+	partial = 1;
+	broken = 1;
+	unifi.boot++;
+	u_save();
+	broken = 0;
+	unifi_init();
+	check(unifi.boot == b && u_sec == 0,
+	      "flash: an erase cut short brings no stale record back");
+
+	unifi_reset();
+	unifi_init();
+	check(!unifi.adopted && unifi.boot == b, "factory reset: back to the default key, the boot counter kept");
+}
+
+/* Bounds of the reply parser, and a flash that does not take writes */
+static void test_bounds(void)
+{
+	static const uint8_t newkey[16] = {
+		0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
+		0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff
+	};
+
+	cur_key = key;
+	cmd("unifi inform http://10.0.0.1");
+	cmd("unifi on");
+	inform();
+	answer("{\"_type\":\"setparam\",\"cfgversion\":\"0123456789abcdef\","
+	       "\"mgmt_cfg\":\"led_enabled=true\\n\",\"x\":\"authkey=00112233445566778899aabbccddeeff\"}");
+	check(!unifi.adopted && !unifi.cfgver[0],
+	      "bounds: an authkey after mgmt_cfg ends is ignored, and no cfgversion is kept while pending");
+	inform();
+	answer("{\"_type\":\"setparam\",\"mgmt_cfg\":\"authkey=00112233445566778899aabb\"ccddeeff}");
+	check(!unifi.adopted, "bounds: an authkey cut by the end of mgmt_cfg is ignored");
+	inform();
+	answer("{\"_type\":\"setparam\",\"mgmt_cfg\":\"authkey=ba86f2bbe107c7c57eb5f2690775c712\\n\"}");
+	check(!unifi.adopted, "bounds: the default key is not an adoption");
+	inform();
+	answer("{\"_type\":\"setparam\",\"cfgversion\":\"0123456789abcdef0123\","
+	       "\"mgmt_cfg\":\"authkey=00112233445566778899aabbccddeeff\\n\"}");
+	check(unifi.adopted && !strcmp(unifi.cfgver, "0123456789abcdef"),
+	      "bounds: a cfgversion longer than 16 digits is cut to the field");
+	cur_key = newkey;
+	inform();
+	answer("{\"_type\":\"noop\",\"interval\":3601}");
+	check(unifi.interval == 10, "bounds: an interval of 3601 s is ignored");
+	inform();
+	answer("{\"_type\":\"noop\",\"interval\":65541}");
+	check(unifi.interval == 10, "bounds: an interval that would wrap 16 bits is ignored");
+
+	/* A flash that does not take writes: no inform under the authkey */
+	broken = 1;
+	unifi_init();
+	cmd("unifi inform http://10.0.0.1");
+	cmd("unifi on");
+	uint32_t b = unifi.boot;
+	int c = connects;
+	uptime_secs += 100;
+	ticks();
+	check(unifi.err == UE_FLASH && connects == c && unifi.phase == U_IDLE && unifi.unsaved,
+	      "flash: the boot counter must reach flash before an inform under the authkey");
+	broken = 0;
+	inform();
+	check(connects == c + 1 && unifi.boot == b + 1 && !unifi.unsaved && req_json() && req_iv[11] == (uint8_t)(b + 1),
+	      "flash: once it is saved, the inform goes out with that boot counter");
+
+	/* The failed save above left an erased slot before the good one */
+	unifi_init();
+	check(unifi.boot == b + 1 && u_slot == 4, "flash: a record after an erased slot is found, and writing goes on after it");
+
+	/* A flash that never takes writes is tried three times, then left alone */
+	broken = 1;
+	unifi_init();
+	cmd("unifi inform http://10.0.0.1");
+	cmd("unifi on");
+	int before = saves;
+	for (int i = 0; i < 6; i++) {
+		uptime_secs += 100;
+		ticks();
+	}
+	check(saves == before + 3 && unifi.err == UE_FLASH && connects == c + 1,
+	      "flash: a broken flash is not worn by endless retries");
+	cmd("unifi forget");
+	c = connects;
+	uptime_secs += 100;
+	ticks();
+	check(!unifi.adopted && unifi.unsaved && connects == c + 1,
+	      "flash: a failed save does not stop informs under the public default key");
+	broken = 0;
+}
+
+/* The parser against JSON the lab did not show, and saves that fail */
+static void test_json(void)
+{
+	static const uint8_t newkey[16] = {
+		0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
+		0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff
+	};
+
+	unifi_init();
+	cmd("unifi inform http://10.0.0.1");
+	cmd("unifi on");
+	cmd("unifi forget");
+	cur_key = key;
+	inform();
+	answer("{\"_type\":\"setparam\",\"mgmt_cfg\":\"a=x\\\\nauthkey=00112233445566778899aabbccddeeff\"}");
+	check(!unifi.adopted, "json: an escaped backslash before n is not a new line");
+	inform();
+	answer("{\"_type\":\"setparam\",\"mgmt_cfg\":\"authkey=00112233445566778899aabbccddeeff!\\n\"}");
+	check(!unifi.adopted, "json: an authkey must end its line");
+	inform();
+	answer("{\"_type\":\"setparam\",\"mgmt_cfg\":\"authkey=00112233445566778899aabbccddeeff\\u0021\\n\"}");
+	check(!unifi.adopted, "json: an escape other than a newline after the authkey is refused");
+	inform();
+	answer("{\"_type\":\"setparam\",\"mgmt_cfg\":\"authkey=00112233445566778899aabbccddeeff\\t\"}");
+	check(!unifi.adopted, "json: a tab after the authkey is refused");
+	inform();
+	answer("{ \"_type\" : \"setparam\" ,\n \"mgmt_cfg\" :\t\"a=\\\"q\\\"\\nauthkey=00112233445566778899aabbccddeeff\\ncfgversion=1111\\n\" }");
+	check(unifi.adopted && !memcmp(unifi.key, newkey, 16) && !strcmp(unifi.cfgver, "1111"),
+	      "json: whitespace around members, and an escaped quote before the authkey line");
+
+	cur_key = newkey;
+	inform();
+	answer("{\"_type\":\"setparam\",\"port_cfg\":{\"cfgversion\":\"aaaa\"},\"cfgversion\":\"bbbb\","
+	       "\"mgmt_cfg\":\"cfgversion=cccc\\n\"}");
+	check(!strcmp(unifi.cfgver, "bbbb"), "json: the cfgversion of the root object counts");
+
+	/* A cfgversion that cannot be saved does not stop informs */
+	broken = 1;
+	inform();
+	answer("{\"_type\":\"setparam\",\"cfgversion\":\"dddd\"}");
+	int c = connects;
+	inform();
+	check(unifi.unsaved && !unifi.critical && connects == c + 1 && req_json(),
+	      "flash: a cfgversion not saved does not stop informs under the saved key");
+	appcall(UIP_NEWDATA, "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n", 45);
+
+	/* A forget that fails is tried again by the next forget */
+	unifi.flash_fails = 0;
+	cmd("unifi off");
+	cmd("unifi forget");
+	check(!unifi.adopted && unifi.unsaved, "forget: a failed save leaves the forget pending");
+	broken = 0;
+	unifi.flash_fails = 0;
+	cmd("unifi forget");
+	check(!unifi.unsaved && !memcmp(last_rec() + 12, key, 16), "forget: a second forget saves it");
+	cmd("unifi on");
+	cur_key = key;
+}
+
 int main(void)
 {
+	memset(sector, 0xff, sizeof(sector));
 	unifi_init();
 	test_url();
 	test_request();
@@ -496,5 +893,8 @@ int main(void)
 	check(strstr(out, "informs sent 999999,") && strstr(out, "failed 4294967295,"),
 	      "show: the largest 32-bit count fits the digit scratch");
 	check(strstr(out, "UniFi on, inform http://10.0.0.1:8080/inform") != 0, "show: state and URL");
+	test_adopt();
+	test_bounds();
+	test_json();
 	return failures != 0;
 }
