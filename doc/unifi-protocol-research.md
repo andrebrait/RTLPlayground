@@ -847,6 +847,20 @@ bytes of code. Making the httpd itself multi-connection would be the larger
 change: every global cursor would move into per-connection state, and each
 connection would need its own `outbuf`.
 
+**Open: retransmission timing for active opens.** `uip_periodic()` runs every
+200 Hz tick, so `UIP_RTO 3` is 15 ms. With its backoff a SYN gives up after
+about 470 ms, and data after about 1.2 s. That is fine on a LAN, but a
+controller more than about 0.5 s away cannot be reached. Also, `lastport`
+and `iss` restart at the same values on every boot. A reboot within about a
+minute can therefore reuse a 4-tuple the controller still holds in
+TIME_WAIT. uIP aborts in SYN_SENT on anything but SYN|ACK
+(`uip/uip.c:1626-1632`), so that inform fails once. Possible fixes:
+
+- Run the TCP timers at a fixed rate, not every tick.
+- Seed `lastport` and `iss` from `get_random_32()`.
+
+Neither problem appeared on the test LAN.
+
 The uIP receive window is one MSS (`uip/uipopt.h:314`), so every transfer is
 stop-and-wait. On a LAN, a 7.6 KB `system_cfg` response is six round trips,
 which is fine.
