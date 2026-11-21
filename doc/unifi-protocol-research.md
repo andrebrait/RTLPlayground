@@ -893,19 +893,21 @@ the main loop, at most 2 blocks (≈144 K cycles, 5–14 ms) per pass. LACP's
 timers run 50 times per second.
 
 **Measured on hardware** (`unifi selftest` in a `UNIFI=1` build, ZX-SWTGW218AS,
-5 ms tick, two builds): 64 AES blocks take 115–130 ms and 64 AES-GCM blocks
-210–230 ms, so one 16-byte GCM block costs about 3.3–3.6 ms, about 4.5 KB/s. The firmware's C
-differs from the simulator's (fewer internal-RAM locals), so these figures
-do not convert back to a clean cycle rate. Expected wall time at that speed:
+5 ms tick): 64 AES blocks take 115–130 ms. 64 AES-GCM blocks took 210–230 ms
+with the 4-bit GHASH table and take 175 ms with the 8-bit one (4 KB XDATA),
+so one 16-byte GCM block costs about 2.7 ms, about 5.9 KB/s, and AES is now
+three quarters of it. The firmware's C differs from the simulator's (fewer
+internal-RAM locals), so these figures do not convert back to a clean cycle
+rate. Expected wall time at that speed:
 
 | Message | Size | Time |
 | --- | --- | --- |
-| Trimmed inform | ≈2.5 KB | ≈0.6 s |
-| Full inform | ≈6 KB | ≈1.4 s |
-| Largest `system_cfg` seen | 7.6 KB | ≈1.7 s |
-| `noop` | 163 B | ≈40 ms |
+| Trimmed inform | ≈2.5 KB | ≈0.45 s |
+| Full inform | ≈6 KB | ≈1 s |
+| Largest `system_cfg` seen | 7.6 KB | ≈1.3 s |
+| `noop` | 163 B | ≈30 ms |
 
-Two blocks per main-loop pass is about 7 ms. The TL-SG108PE V5 has not been
+Two blocks per main-loop pass is about 5.5 ms. The TL-SG108PE V5 has not been
 measured yet.
 
 ### Compact protocol design
@@ -957,12 +959,12 @@ Budget, per switch:
 | Item | XDATA | Code (estimate) |
 | --- | --- | --- |
 | Message buffer | 10,240 B | — |
-| AES round keys, GHASH table, GCM state | ≈640 B | ≈3 KB in C (measured upper bound above) |
+| AES round keys, 8-bit GHASH table, GCM state | ≈4.4 KB | ≈4 KB in C (measured: BANK5 holds 7.5 KB with NTP) |
 | UniFi state (authkey, cfgversion, inform URL, counters, port snapshot) | ≈1,000 B | — |
 | HTTP client, TNBU framing, inform JSON, `system_cfg` to CLI translation | — | ≈8–13 KB |
 | Two more `uip_conn` slots, dispatcher | 60 B | ≈0.5 KB |
 | Metrics port TX buffer | ≈1,500 B | ≈0.5 KB |
-| **Total** | **≈13.4 KB of 28 KB free** | **≈12–17 KB: BANK5 on the RTL8373 build** |
+| **Total** | **≈17.2 KB of 28 KB free** | **≈12–17 KB: BANK5 on the RTL8373 build** |
 
 ### Admin password protection
 
