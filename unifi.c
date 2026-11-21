@@ -116,7 +116,7 @@ struct u_rec {
 	uint32_t boot;
 	uint8_t key[16];
 	char cfgver[UNIFI_CFGVER_LEN];
-	uint8_t sum[2];	/* Fletcher-16 of the bytes before it */
+	uint8_t sum[2];	/* CRC-16/CCITT of the bytes before it */
 	uint8_t commit;	/* 0 once the record is complete */
 };
 #define U_REC_LEN	(offsetof(struct u_rec, commit) + 1)	/* without host padding */
@@ -125,7 +125,7 @@ static __xdata struct u_rec u_rec, u_back;
 static __xdata uint8_t u_sec, u_slot;	/* the current sector and its next free slot */
 static __xdata uint8_t u_free[2];	/* the first free slot of each sector, at boot */
 static __xdata uint32_t u_seq, u_best;
-static __code const char u_magic[] = "UNF2";
+static __code const char u_magic[] = "UNF3";
 
 static __code const char u_default_host[] = "unifi";
 static __code const char u_default_path[] = "/inform";
@@ -500,19 +500,26 @@ static void u_reply(void)
 }
 
 
-/* Fletcher-16 of u_rec's bytes before .sum, into u_d[0] and u_d[1]. A
- * partial erase only sets bits, and a stale record whose bits it changed
- * passes this about 1 time in 65536. */
+/* CRC-16/CCITT of u_rec's bytes before .sum, into u_d[0] (high) and
+ * u_d[1]. A partial erase only sets bits; a CRC sees any burst of up to
+ * 16 bits, and passes other changes about 1 time in 65536. Bit by bit:
+ * no table, no library division. */
+static __xdata uint16_t u_crc;
+
 static void u_sum(void)
 {
-	u_d[0] = 0;
-	u_d[1] = 0;
+	u_crc = 0xffff;
 	for (u_d[5] = 0; u_d[5] < offsetof(struct u_rec, sum); u_d[5]++) {
-		u_i = u_d[0] + ((__xdata uint8_t *)&u_rec)[u_d[5]];
-		u_d[0] = u_i % 255;
-		u_i = u_d[1] + u_d[0];
-		u_d[1] = u_i % 255;
+		u_crc ^= (uint16_t)((__xdata uint8_t *)&u_rec)[u_d[5]] << 8;
+		for (u_d[6] = 0; u_d[6] < 8; u_d[6]++) {
+			if (u_crc & 0x8000)
+				u_crc = u_crc << 1 ^ 0x1021;
+			else
+				u_crc <<= 1;
+		}
 	}
+	u_d[0] = u_crc >> 8;
+	u_d[1] = u_crc;
 }
 
 static uint32_t u_addr(void)
@@ -990,6 +997,8 @@ static void u_show(void)
 	u_print(unifi.fails);
 	print_string(", last error: ");
 	print_string(u_errors[unifi.err]);
+	if (unifi.unsaved)
+		print_string(", state not saved to flash");
 	write_char('\n');
 }
 

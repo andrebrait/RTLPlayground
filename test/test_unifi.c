@@ -131,7 +131,7 @@ static const uint8_t *last_rec(void)
 	for (int i = 0; i < 128; i++) {
 		const uint8_t *s = sector + i * 64;
 		memcpy(&seq, s + 4, 4);
-		if (!memcmp(s, "UNF2", 4) && !s[47] && seq > best) {
+		if (!memcmp(s, "UNF3", 4) && !s[47] && seq > best) {
 			best = seq;
 			r = s;
 		}
@@ -600,7 +600,7 @@ static void test_adopt(void)
 	check(unifi.adopted && !memcmp(unifi.key, newkey, 16) && !strcmp(unifi.cfgver, "cfe5c9df7757b6f5")
 	      && unifi.next == uptime_secs && !unifi.keyed,
 	      "adopt: the authkey and cfgversion are taken, and the next inform is due");
-	check(saves == 1 && !erases && !memcmp(sector, "UNF2", 4) && !memcmp(sector + 12, newkey, 16)
+	check(saves == 1 && !erases && !memcmp(sector, "UNF3", 4) && !memcmp(sector + 12, newkey, 16)
 	      && !strcmp((char *)sector + 28, "cfe5c9df7757b6f5"),
 	      "adopt: the key and cfgversion are saved to flash");
 
@@ -716,11 +716,14 @@ static void test_adopt(void)
 	check(erases == 2 && unifi.boot == b && unifi.adopted && u_sec == 1,
 	      "flash: a failed write after an erase keeps the last good record in the other sector");
 
-	/* A power cut during that erase: stale records with a raised seq stay */
-	while (u_slot < 64) {
+	/* A power cut during that erase: stale records with a raised seq stay.
+	 * Fill sector 0, so that the next save erases sector 1, which still
+	 * holds older committed records. */
+	while (!(u_sec == 0 && u_slot == 64)) {
 		unifi.boot++;
 		u_save();
 	}
+	check(last_rec()[47] == 0 && sector[4096 + 47] == 0, "flash: both sectors hold committed records");
 	b = unifi.boot;
 	partial = 1;
 	broken = 1;
@@ -728,7 +731,7 @@ static void test_adopt(void)
 	u_save();
 	broken = 0;
 	unifi_init();
-	check(erases == 3 && unifi.boot == b && u_sec == 1,
+	check(unifi.boot == b && u_sec == 0,
 	      "flash: an erase cut short brings no stale record back");
 
 	unifi_reset();
