@@ -65,7 +65,6 @@ void get_random_32(void)
 }
 
 void memcpyc(uint8_t *dst, const uint8_t *src, uint16_t len) { memcpy(dst, src, len); }
-uint16_t strlen_x(const char *s) { return strlen(s); }
 
 bool strstart(const uint8_t *a, const uint8_t *b)
 {
@@ -998,9 +997,20 @@ static void test_failed_reads(void)
 /* An upgrade the controller offers is reported as done, and kept */
 static void test_upgrade(void)
 {
+	static const uint8_t newkey[16] = {
+		0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
+		0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff
+	};
 	const char *j;
 
-	cur_key = unifi.adopted ? cur_key : key;
+	cmd("unifi forget");
+	cur_key = key;
+	inform();
+	answer("{\"_type\":\"upgrade\",\"version\":\"9.9.9\"}");
+	check(!strcmp(unifi.version, UNIFI_VERSION), "upgrade: ignored while not adopted (anyone can use the default key)");
+	inform();
+	answer("{\"_type\":\"setparam\",\"mgmt_cfg\":\"authkey=00112233445566778899aabbccddeeff\\n\"}");
+	cur_key = newkey;
 	inform();
 	answer("{\"_type\":\"upgrade\",\"url\":\"https://fw-download.ubnt.com/x.bin\",\"md5sum\":\"00\","
 	       "\"version\":\"2.1.10.1022\",\"datetime\":\"x\"}");
@@ -1012,18 +1022,25 @@ static void test_upgrade(void)
 	answer("{\"_type\":\"upgrade\",\"version\":\"2.1.10.1022\"}");
 	check(unifi.next != uptime_secs, "upgrade: the same version again changes nothing");
 	inform();
+	answer("{\"_type\":\"upgrade\",\"version\":\"2.1.10.10\"}");
+	check(!strcmp(unifi.version, "2.1.10.10"), "upgrade: a shorter version that is a prefix is taken");
+	inform();
 	answer("{\"_type\":\"upgrade\",\"version\":\"1.0\\\"x\"}");
-	check(!strcmp(unifi.version, "2.1.10.1022"), "upgrade: a version with other characters is refused");
+	check(!strcmp(unifi.version, "2.1.10.10"), "upgrade: a version with other characters is refused");
 	inform();
 	answer("{\"_type\":\"upgrade\",\"version\":\"123456789012345678901234\"}");
-	check(!strcmp(unifi.version, "2.1.10.1022"), "upgrade: a version that does not fit is refused");
+	check(!strcmp(unifi.version, "2.1.10.10"), "upgrade: a version that does not fit is refused");
 	unifi_init();
-	check(!strcmp(unifi.version, "2.1.10.1022"), "upgrade: the version survives a reboot");
+	check(!strcmp(unifi.version, "2.1.10.10"), "upgrade: the version survives a reboot");
 	cmd("unifi inform http://10.0.0.1");
 	cmd("unifi on");
 	cmd("unifi");
-	check(strstr(out, "Shown as " UNIFI_DISPLAY " (" UNIFI_MODEL "), version 2.1.10.1022") != 0,
+	check(strstr(out, "Shown as " UNIFI_DISPLAY " (" UNIFI_MODEL "), version 2.1.10.10") != 0,
 	      "show: the model and the reported version");
+	cmd("unifi forget");
+	check(!strcmp(unifi.version, UNIFI_VERSION) && !strcmp((char *)last_rec() + 45, UNIFI_VERSION),
+	      "forget: the reported version goes back to this firmware's");
+	cur_key = key;
 }
 
 int main(void)

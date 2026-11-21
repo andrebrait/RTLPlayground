@@ -2522,7 +2522,7 @@ var CONF_CMDS = [
     /^session\s+\d{1,5}$/,
     /^dns\s+server\s+(\d{1,3}\.){3}\d{1,3}(\s+(\d{1,3}\.){3}\d{1,3})?$/,
     /^unifi\s+(on|off)$/,
-    /^unifi\s+inform\s+http:\/\/[A-Za-z0-9._-]{1,47}(:\d{1,5})?(\/[^\s"\\]{0,46})?$/i,
+    /^unifi\s+inform\s+http:\/\/[A-Za-z0-9._-]{1,47}(:([1-9]\d{0,3}|[1-5]\d{4}|6[0-4]\d{3}|65[0-4]\d\d|655[0-2]\d|6553[0-5]))?(\/[^\s"\\]{0,46})?$/,
     /^ntp\s+(on|off)$/,
     /^ntp\s+server\s+[A-Za-z0-9.-]{1,47}$/,
     /^ntp\s+interval\s+\d{1,4}$/,
@@ -2794,6 +2794,7 @@ function showTab(id) {
 TABS.forEach(function(tb) {
     $("navlist").appendChild(h("li", {
         id: "nv-" + tb.id,
+        style: tb.id === "unifi" ? "display:none" : "",
         onclick: function() {
             showTab(tb.id)
         }
@@ -3197,7 +3198,7 @@ function pollInfo() {
         renderInfo();
         renderSnmp(j.snmp);
         renderPrometheus(j.prometheus);
-        $("nv-unifi").hidden = !j.unifi
+        $("nv-unifi").style.display = j.unifi ? "" : "none"
     });
 }
 
@@ -6723,12 +6724,12 @@ function unifiLoad() {
     }).then(function(r) {
         var a = r.body.match(/UniFi (on|off), inform (\S+), address ([\d.]+)/),
             b = r.body.match(/(Adopted|Not adopted), cfgversion (\S+), interval (\d+) s/),
-            c = r.body.match(/Shown as (.+) \((\S+)\), version (\S+)/),
-            d = r.body.match(/Informs sent (\d+), last reply (\d+)(?: (\S+))?, failed (\d+), last error: ([^,\n]+)(, state not saved)?/);
+            c = r.body.match(/Shown as (.+), version (\S+)/),
+            d = r.body.match(/Informs sent (\d+), last reply (\d+)(?: (.*?))?, failed (\d+), last error: ([^,\n]+)(, state not saved)?/);
         if (!a || !b || !c || !d) return;
         var rows = [
-            ["un_model", c[1] + " (" + c[2] + ")"],
-            ["un_version", c[3]],
+            ["un_model", c[1]],
+            ["un_version", c[2]],
             ["un_state", t(b[1] === "Adopted" ? "un_adopted" : "un_pending")],
             ["un_addr", a[3] === "0.0.0.0" ? "-" : a[3]],
             ["un_cfgver", b[2] === "?" ? "-" : b[2]],
@@ -6761,12 +6762,14 @@ function unifiLoad() {
 });
 $("un-apply").addEventListener("click", function() {
     var url = $("un-url").value.trim();
-    if (!/^http:\/\/[A-Za-z0-9._-]{1,47}(:\d{1,5})?(\/[^\s"\\]{0,46})?$/i.test(url)) {
+    if (!/^http:\/\/[A-Za-z0-9._-]{1,47}(:([1-9]\d{0,3}|[1-5]\d{4}|6[0-4]\d{3}|65[0-4]\d\d|655[0-2]\d|6553[0-5]))?(\/[^\s"\\]{0,46})?$/.test(url)) {
         toast(t("un_url_err"), "err");
         return;
     }
-    delete $("un-card").dataset.dirty;
-    postCmds(["unifi inform " + url, "unifi " + ($("un-on").checked ? "on" : "off")]).then(unifiLoad).catch(function() {});
+    postCmds(["unifi inform " + url, "unifi " + ($("un-on").checked ? "on" : "off")]).then(function() {
+        delete $("un-card").dataset.dirty;
+        return unifiLoad()
+    }).catch(function() {});
 });
 $("un-refresh").addEventListener("click", unifiLoad);
 $("un-forget").addEventListener("click", function() {
@@ -6774,16 +6777,10 @@ $("un-forget").addEventListener("click", function() {
         postCmds(["unifi forget"]).then(unifiLoad).catch(function() {});
     });
 });
-var unifiTimer = null;
+/* No polling: every /cmd lands in the command log that Save to flash
+ * reads, so a poll would crowd out unsaved settings */
 tabHooks.unifi = {
-    enter: function() {
-        unifiLoad();
-        clearInterval(unifiTimer);
-        unifiTimer = setInterval(unifiLoad, 10000)
-    },
-    leave: function() {
-        clearInterval(unifiTimer)
-    }
+    enter: unifiLoad
 };
 
 window.addEventListener("hashchange", function() {

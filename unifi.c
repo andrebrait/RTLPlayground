@@ -750,6 +750,8 @@ static void u_forget(void)
 	unifi.adopted = 0;
 	unifi.keyed = 0;
 	unifi.cfgver[0] = 0;
+	/* A version a controller offered was for that controller */
+	memcpyc(unifi.version, u_default_version, sizeof(u_default_version));
 	if (!u_save())
 		print_string("Error: the UniFi state could not be saved\n");
 }
@@ -933,7 +935,7 @@ static uint8_t u_version(void)
 		    && u_p[u_j] != '.' && u_p[u_j] != '-' && u_p[u_j] != '+')
 			return 0;
 	}
-	if (u_me - u_i == strlen_x(unifi.version) && !memcmp(unifi.version, u_p + u_i, u_me - u_i))
+	if (!memcmp(unifi.version, u_p + u_i, u_me - u_i) && !unifi.version[u_me - u_i])
 		return 0;
 	memcpy(unifi.version, u_p + u_i, u_me - u_i);
 	unifi.version[u_me - u_i] = 0;
@@ -994,12 +996,14 @@ static void u_decrypted(void)
 			u_save();
 	} else if (!strcmp(unifi.type, "upgrade")) {
 		/* Report the offered version from now on, as if upgraded, so the
-		 * controller stops offering it. Kept in flash with the adoption. */
+		 * controller stops offering it. Kept in flash with the adoption.
+		 * Only from the controller that adopted the switch: anyone can
+		 * encrypt with the default key. */
 		u_i = u_string("version");
-		if (u_i != 0xffff && u_version())
+		if (unifi.adopted && u_i != 0xffff && u_version()) {
 			u_dirty = 1;
-		if (u_dirty)
 			u_save();
+		}
 	} else if (!strcmp(unifi.type, "setdefault")) {
 		/* Removed in the controller: wait for adoption again */
 		u_dirty = unifi.adopted;
