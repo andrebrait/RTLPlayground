@@ -289,8 +289,8 @@ root, which protects an existing topology from a newly attached bridge that
 claims a better priority.
 
 A port shut down by BPDU guard stays down, also across a link flap. Changing
-its guard brings it back through the listen period; `stp port <N> on` and
-`stp off` also clear it.
+its guard brings it back through the listen period, or at once for an `edge on`
+port; `stp port <N> on` and `stp off` also clear it.
 
 **filter** — the port neither sends nor accepts BPDUs. Useful when the device
 on the far side reacts badly to them (some unmanaged switches with loop

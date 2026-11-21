@@ -81,8 +81,10 @@ void igmp_show(void) __banked;
 default, as otherwise no IP-MC would be possible in the network. `igmp off` calls it as
 well; groups learned while IGMP was on stay in the table, but are no longer looked up.
 
-`igmp_enable()`starts IGMP which cause IGMP packets to be handled by the CPU and forwarding
-of IP-MC packets to be limited to only subscribed ports.
+`igmp_enable()` starts IGMP, which causes IGMP packets to be handled by the CPU. On the
+RTL837x, forwarding of IP-MC packets is limited to subscribed ports only once a querier
+has been seen; until then unknown groups are still flooded. On the RTL836x it is limited
+as soon as IGMP is enabled.
 
 `igmp_router_port_set()` writes a router port mask into the ASIC; nothing calls it yet. The
 querier ports learned from queries are kept by the handler and used for forwarding by the CPU.

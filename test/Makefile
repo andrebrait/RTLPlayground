@@ -222,11 +222,11 @@ $(BUILDDIR)/test_lldp: test_lldp.c $(SRCROOT)/rtl837x_lldp.c $(SRCROOT)/rtl837x_
 # software snooping table, whose update is stubbed
 TESTS += $(BUILDDIR)/test_igmp_836x
 $(BUILDDIR)/test_igmp_836x: CFLAGS += -DMACHINE_NAME=TPLINK_TL_SG108PE_V5
-$(BUILDDIR)/test_igmp_836x: test_igmp_836x.c $(SRCROOT)/rtl837x_igmp.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) $(GC_CFLAGS) $^ -o $@ $(LDFLAGS) $(GC_LDFLAGS)
+$(BUILDDIR)/test_igmp_836x: test_igmp_836x.c $(SRCROOT)/rtl837x_igmp.c $(SRCROOT)/rtl837x_igmp.h $(SRCROOT)/rtl836x_igmp.h | $(BUILDDIR)
+	$(CC) $(CFLAGS) $(GC_CFLAGS) $(filter %.c,$^) -o $@ $(LDFLAGS) $(GC_LDFLAGS)
 
-$(BUILDDIR)/test_igmp: test_igmp.c $(SRCROOT)/rtl837x_igmp.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
+$(BUILDDIR)/test_igmp: test_igmp.c $(SRCROOT)/rtl837x_igmp.c $(SRCROOT)/rtl837x_igmp.h | $(BUILDDIR)
+	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@ $(LDFLAGS)
 
 # httpd/httpd.c, httpd/html_out.c and uip/uip.c are compiled UNMODIFIED from the firmware tree;
 # this test carries the environment below them itself.
