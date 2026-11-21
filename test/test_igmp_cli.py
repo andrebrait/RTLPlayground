@@ -53,8 +53,9 @@ int main(void) {
     }
     hw_reset();
     command("igmp on");
+    /* unknown multicast floods until a querier is seen, so no IPMC lookup yet */
     if (err_status != ERR_OK || !igmpEnabled ||
-        !reg_bit_test(RTL837X_L2_CTRL, L2_CTRL_LUT_IPMC_HASH) ||
+        reg_bit_test(RTL837X_L2_CTRL, L2_CTRL_LUT_IPMC_HASH) ||
         hw_reg_get(RTL837X_IGMP_PORT_CFG + (MACHINE_MIN_PORT << 2)) !=
         (IGMP_MAX_GROUP | IGMP_PROTOCOL_ENABLE | IGMP_TRAP)) failures++;
     unsigned long writes = hw_writes;

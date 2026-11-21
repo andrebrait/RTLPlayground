@@ -89,7 +89,7 @@ void stp_parse(void) __banked __reentrant
 			stp_pflags[port] |= STP_PF_ENABLED;
 			stp_pflags[port] &= ~STP_PF_TRIPPED;
 			if (stp_enabled) {	/* (re)join: listen first */
-				stp_port_admin(port, 1);
+				stp_port_admin(port);
 			}
 		} else if (cmd_compare(3, "mcheck")) {
 			if (stp_enabled)
@@ -97,7 +97,7 @@ void stp_parse(void) __banked __reentrant
 		} else if (cmd_compare(3, "off")) {
 			stp_pflags[port] &= ~STP_PF_ENABLED;
 			if (stp_enabled)
-				stp_port_admin(port, 0);	/* plain forwarding */
+				stp_port_admin(port);	/* plain forwarding */
 		} else if (cmd_compare(3, "edge")) {
 			if (cmd_compare(4, "on"))
 				stp_cli_val = STP_PF_ADMEDGE | STP_PF_OPEREDGE;
@@ -152,6 +152,10 @@ void stp_parse(void) __banked __reentrant
 			else
 				goto err;
 			stp_pflags[port] = (stp_pflags[port] & ~(STP_PF_BPDUGUARD | STP_PF_ROOTGUARD)) | stp_cli_val;
+			if (stp_pflags[port] & STP_PF_TRIPPED) {
+				stp_pflags[port] &= ~STP_PF_TRIPPED;
+				stp_port_admin(port);
+			}
 		} else if (cmd_compare(3, "filter")) {
 			if (cmd_compare(4, "on"))
 				stp_pflags[port] |= STP_PF_FILTER;

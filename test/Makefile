@@ -43,6 +43,7 @@ TESTS = $(BUILDDIR)/test_cmd_editor \
         $(BUILDDIR)/test_page_json \
         $(BUILDDIR)/test_httpd_tx \
         $(BUILDDIR)/test_tick_gate \
+        $(BUILDDIR)/test_health_idle \
         $(BUILDDIR)/test_timer \
         $(BUILDDIR)/test_cpu_vlan_full \
         $(BUILDDIR)/test_cpu_vlan_restricted \
@@ -55,7 +56,8 @@ TESTS = $(BUILDDIR)/test_cmd_editor \
         $(BUILDDIR)/test_rtl836x_regs \
         $(BUILDDIR)/test_rtl836x_nic \
         $(BUILDDIR)/test_page_json_836x \
-        $(BUILDDIR)/test_rtl836x_phy
+        $(BUILDDIR)/test_rtl836x_phy \
+        $(BUILDDIR)/test_igmp
 
 TESTS += $(BUILDDIR)/test_trap_836x $(BUILDDIR)/test_trap_837x
 $(BUILDDIR)/test_trap_836x: CFLAGS += -DMACHINE_NAME=TPLINK_TL_SG108PE_V5
@@ -148,6 +150,9 @@ $(BUILDDIR)/test_port_tables: test_port_tables.c $(TABLE_ENV) hw_mock.h | $(BUIL
 $(BUILDDIR)/test_tick_gate: test_tick_gate.c support.c $(SRCROOT)/cmd_editor.c $(SRCROOT)/timer.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
 
+$(BUILDDIR)/test_health_idle: test_health_idle.c support.c $(SRCROOT)/cmd_editor.c $(SRCROOT)/health_idle.h | $(BUILDDIR)
+	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@ $(LDFLAGS)
+
 # timer.c is compiled UNMODIFIED from the firmware tree.
 $(BUILDDIR)/test_timer: test_timer.c support.c $(SRCROOT)/cmd_editor.c $(SRCROOT)/timer.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
@@ -213,9 +218,8 @@ $(BUILDDIR)/test_boot_defaults%: test_boot_defaults.c $(SRCROOT)/rtl8370_init.c 
 $(BUILDDIR)/test_lldp: test_lldp.c $(SRCROOT)/rtl837x_lldp.c $(SRCROOT)/rtl837x_lldp_tx_strings.c $(SRCROOT)/httpd/html_out.c $(SRCROOT)/timer.c fw_memset.h | $(BUILDDIR)
 	$(CC) $(CFLAGS) -include fw_memset.h test_lldp.c $(SRCROOT)/rtl837x_lldp.c $(SRCROOT)/rtl837x_lldp_tx_strings.c $(SRCROOT)/httpd/html_out.c $(SRCROOT)/timer.c -o $@ $(LDFLAGS)
 
-TESTS += $(BUILDDIR)/test_igmp_rx
-$(BUILDDIR)/test_igmp_rx: test_igmp_rx.c hw_mock.c $(SRCROOT)/rtl837x_igmp.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) $(GC_CFLAGS) $^ -o $@ $(LDFLAGS) $(GC_LDFLAGS)
+$(BUILDDIR)/test_igmp: test_igmp.c $(SRCROOT)/rtl837x_igmp.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
 
 # httpd/httpd.c, httpd/html_out.c and uip/uip.c are compiled UNMODIFIED from the firmware tree;
 # this test carries the environment below them itself.
