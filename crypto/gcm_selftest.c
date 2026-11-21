@@ -54,7 +54,10 @@ void gcm_selftest(void) __banked
 
 	for (i = 0; i < 16; i++)
 		st_buf[i] = gcm_kat_key[i];
+	st_t0 = st_ticks();
 	gcm_setkey(st_buf);
+	st_ms("Key setup: ");
+	write_char('\n');
 	st_load(16, 16);
 	gcm_start(st_buf, 1);
 	st_load(0, 40);

@@ -8,7 +8,8 @@
  * the forward cipher is needed: GCM decrypts with the same keystream.
  *
  * One message at a time:
- *   gcm_setkey(key);              once per key
+ *   gcm_setkey(key);              once per key; it builds a 4 KB table and
+ *                                 takes longer than one main-loop pass
  *   gcm_start(iv, decrypt);
  *   gcm_aad(aad, len);            all of the AAD, under 8 KB, in one call,
  *                                 or none; the buffer is written back unchanged
