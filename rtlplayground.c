@@ -147,6 +147,7 @@ __xdata uint8_t rx_headers[16]; // RX descriptor
 __xdata uint8_t uip_buf[UIP_CONF_BUFFER_ALLOC_SIZE];
 
 __xdata uint16_t rx_packet_vlan;
+__xdata uint8_t rx_ingress;	/* ASIC port of the last IPv4 frame, from its CPU tag */
 __xdata uint16_t management_vlan;
 __xdata bool frame_tagged;
 __xdata uint8_t tx_seq;
@@ -1026,6 +1027,7 @@ void handle_rx(void)
 			    tcpip_output();
 			}
 		} else if (ETH_IN->ether_type == HTONS(0x0800)) { // IPv4
+			rx_ingress = ((uint8_t)NTOHS(ETH_IN->rtl_tag.pmask)) & 0x0f;
 #if SOC_FAMILY == RTL837X
 			if (dhcp_snoop_on)
 				dhcp_snoop_in();

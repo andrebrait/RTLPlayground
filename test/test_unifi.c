@@ -76,6 +76,9 @@ bool strstart(const uint8_t *a, const uint8_t *b)
 
 void gcm_selftest(void) { selftests++; }
 
+/* The controller's replies arrive on ASIC port 8, the SFP+ (front port 6) */
+__xdata uint8_t rx_ingress = 8;
+
 uint8_t poe_admin_mask(void) { return 0x01; }
 
 static int lldp_resends;
@@ -712,6 +715,9 @@ static void test_adopt(void)
 	cur_key = newkey;
 	inform();
 	j = req_json();
+	check(j && strstr(j, "{\"port_idx\":6,\"media\":\"SFP+\",\"speed_caps\":288,\"is_uplink\":true,\"up\":true")
+	      && !strstr(strstr(j, "is_uplink") + 1, "is_uplink"),
+	      "uplink: the port the controller's replies arrive on, and only it, is the uplink");
 	check(j && strstr(j, "\"cfgversion\":\"cfe5c9df7757b6f5\",\"default\":false,\"state\":4,")
 	      && req_iv[11] == unifi.boot && unifi.boot == 1,
 	      "adopt: the next inform uses the new key, echoes the cfgversion and counts the boot");

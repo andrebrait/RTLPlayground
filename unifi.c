@@ -244,6 +244,8 @@ static __xdata uint8_t u_dg[20];
 static __xdata uint8_t u_ph, u_up, u_cnt, u_adm, u_ok;	/* u_d is the digit helpers' */
 static __xdata uint32_t u_link;
 static __xdata uint16_t u_mbps;
+extern __xdata uint8_t rx_ingress;
+static __xdata uint8_t u_uplink;	/* 1 + the ASIC port the controller's replies arrive on, 0 = none yet */
 #ifdef MACHINE_POE_PORTS
 static __xdata uint8_t u_poe;	/* PoE permitted, bit 0 = front port 1 */
 #endif
@@ -337,6 +339,10 @@ static void u_port_entry(void)
 	else
 		u_s(",\"media\":\"GE\",\"speed_caps\":1048682");	/* 10M to 2.5G */
 #endif
+	/* The port towards the controller: the controller draws the topology
+	 * from it and the LLDP neighbours, as the OpenWrt agent reports it */
+	if (u_uplink == u_ph + 1)
+		u_s(",\"is_uplink\":true");
 	if (u_up)
 		u_s(",\"up\":true");
 	else
@@ -663,6 +669,8 @@ void unifi_appcall(void) __banked
 		}
 	}
 	if (unifi.phase == U_RECV && uip_newdata()) {
+		/* The controller is reached through this port: the uplink */
+		u_uplink = rx_ingress + 1;
 		u_d[0] = 2;
 		if (uip_len <= UNIFI_BUF_SIZE - unifi.pos) {
 			u_scan = unifi.pos;
