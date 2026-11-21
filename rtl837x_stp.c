@@ -506,7 +506,7 @@ static void stp_state_set(uint8_t port, uint8_t state) __reentrant
 static uint8_t stp_state_get(uint8_t port) __reentrant
 {
 	if (port >= STP_ENTITIES || stp_first(stp_members(port)) == 0xff)
-		return 0;
+		return STP_DISABLED;
 	/* stp_first() left the entity's first port in stp_ss_i */
 	if (stp_ss_i == CPU_LOGICAL_PORT) {
 		reg_read(RTL836X_REG_VLAN_MSTI0_CTRL1);
@@ -1534,7 +1534,7 @@ void stp_setup(void) __banked
 	/* The NIC stays forwarding. The front ports are not cleared first: stp_ent_reset() sets
 	 * each one once, a port that is off or admin edge straight to forwarding, so only a port
 	 * that takes part in the tree is ever blocked. */
-	stp_state_set(CPU_LOGICAL_PORT, 0b11);
+	stp_state_set(CPU_LOGICAL_PORT, STP_FORWARDING);
 #endif
 	stp_lag_map();
 	stp_links_read();
@@ -1577,7 +1577,7 @@ void stp_off(void) __banked
 	/* CTRL0 is chip ports 0-7, all the front ports: forwarding again, and the NIC with them.
 	 * The RMA action is matched on the destination address, so no L2 entry is needed. */
 	REG_SET(RTL836X_REG_VLAN_MSTI0_CTRL0, 0xffff);
-	stp_state_set(CPU_LOGICAL_PORT, 0b11);
+	stp_state_set(CPU_LOGICAL_PORT, STP_FORWARDING);
 	trap_rma_set(TRAP_RMA_STP, stp_bpdu_filter ? TRAP_ACT_DROP : TRAP_ACT_FORWARD);
 #endif
 }
