@@ -738,6 +738,47 @@ module `l2g_lldp.ko` (Realtek SDK), the inform is built by `mcad` with
   but `mgmt_ips`, whose value type was not established. It sends no
   Ubiquiti TLV.
 
+### Applying the controller's settings (implemented)
+
+`unifi apply <area>...` selects what the switch takes from `system_cfg`:
+`vlans`, `ports`, `lag`, `stp`, `igmp`, `jumbo`, `mirror`, `all` or `none`
+(the default). It is a `config.txt` line like any other.
+
+- **Translation.** Each applied area becomes the commands `config.txt` uses:
+  - VLAN slots become `vlan <vid> <port>[t]...`, with each port's mode taken
+    from its `switch.vlan.K.port.N.mode` line, else the slot's mode;
+  - `pvid <port> <vid>` for every port: `switch.port.N.pvid`, else the slot
+    the port is untagged in, else 1;
+  - `port N off`, `port N <speed> [half|full]`, `eee on|off N` and
+    `port N fc on|off`;
+  - `lag G lacp <ports>`: the controller's LAG ids become groups 1..4 in
+    order;
+  - `stp on|off`, `stp version`, `stp prio` (priority / 4096);
+  - `igmp on` when any VLAN slot has `igmp_snooping=true`;
+  - `mtu N 9216` for jumbo frames;
+  - `mirror <dest> <source>`.
+- **`config.txt` is the reference.** The switch reads it, keeps the lines of
+  the other areas, and writes the applied areas' lines as the controller
+  wants them. Lines the controller dropped are undone, for example
+  `vlan 30 d`, `lag 2 d`, `port N on`, `port N auto`, `mtu N 1522` and
+  `mirror off`. Only lines that are new run, one command per tick, and the
+  sector is written once at the end. Settings that are already in
+  `config.txt`, for example after a reboot, run nothing.
+- **Left alone:**
+  - the management VLAN, which keeps the switch reachable;
+  - port names;
+  - per-port STP;
+  - EEE and flow control on SFP ports;
+  - runtime changes that were never saved to `config.txt`.
+- **Capabilities.** While an area is applied, the inform claims it:
+  `feature_caps` STP 64, IGMP snooping 256, LACP 8192 and jumbo 524288;
+  `max_aggregate_sessions` 4 and `max_mirror_sessions` 1; and `port_caps`
+  EEE 1 on copper ports. With nothing applied, nothing is claimed, as before.
+- **Selection changes.** A change of selection at run time forgets the
+  `cfgversion`, so the controller sends its settings again.
+- **Not applied.** An area the controller set but that is not selected is
+  logged as `not applied: <area>`.
+
 ### Port index translation
 
 The controller keys every per-port setting on `port_table[].port_idx`, and
