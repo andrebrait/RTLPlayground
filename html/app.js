@@ -2522,7 +2522,8 @@ var CONF_CMDS = [
     /^session\s+\d{1,5}$/,
     /^dns\s+server\s+(\d{1,3}\.){3}\d{1,3}(\s+(\d{1,3}\.){3}\d{1,3})?$/,
     /^unifi\s+(on|off)$/,
-    /^unifi\s+inform\s+http:\/\/[A-Za-z0-9._-]{1,47}(:([1-9]\d{0,3}|[1-5]\d{4}|6[0-4]\d{3}|65[0-4]\d\d|655[0-2]\d|6553[0-5]))?(\/[!#-\[\]-~]{0,46})?$/,
+    /* as loose as the firmware's parser: a line it took must survive Save */
+    /^unifi\s+inform\s+http:\/\/[A-Za-z0-9._-]{1,47}(:\d{1,5})?(\/[^\s"\\]*)?$/,
     /^ntp\s+(on|off)$/,
     /^ntp\s+server\s+[A-Za-z0-9.-]{1,47}$/,
     /^ntp\s+interval\s+\d{1,4}$/,
@@ -6716,8 +6717,10 @@ function fwSettle(st, knownGood) {
 }
 tabHooks.fw = {};
 
-/* UniFi: the "unifi" command's report, parsed */
-function unifiLoad() {
+/* UniFi: the "unifi" command's report, parsed. The firmware keeps that
+ * query out of the command log, so polling it does not crowd out unsaved
+ * settings. force: also replace the form, edited or not. */
+function unifiLoad(force) {
     return api("/cmd", {
         method: "POST",
         body: "unifi"
@@ -6750,7 +6753,8 @@ function unifiLoad() {
                 text: x[1]
             })]));
         });
-        if ($("un-card").dataset.dirty) return;
+        if ($("un-card").dataset.dirty && force !== true) return;
+        delete $("un-card").dataset.dirty;
         $("un-on").checked = a[1] === "on";
         $("un-url").value = a[2];
     }).catch(function() {});
@@ -6766,24 +6770,33 @@ $("un-apply").addEventListener("click", function() {
         toast(t("un_url_err"), "err");
         return;
     }
-    postCmds(["unifi inform " + url, "unifi " + ($("un-on").checked ? "on" : "off")]).then(function() {
-        delete $("un-card").dataset.dirty;
+    var on = $("un-on").checked;
+    postCmds(["unifi inform " + url, "unifi " + (on ? "on" : "off")]).then(function() {
+        /* edits made while the commands ran stay */
+        if ($("un-url").value.trim() === url && $("un-on").checked === on) delete $("un-card").dataset.dirty;
         return unifiLoad()
     }).catch(function() {});
 });
 $("un-refresh").addEventListener("click", function() {
-    delete $("un-card").dataset.dirty;
-    unifiLoad()
+    unifiLoad(true)
 });
 $("un-forget").addEventListener("click", function() {
     confirmModal(t("un_forget_q"), t("un_forget_d"), function() {
         postCmds(["unifi forget"]).then(unifiLoad).catch(function() {});
     });
 });
-/* No polling: every /cmd lands in the command log that Save to flash
- * reads, so a poll would crowd out unsaved settings */
+var unifiTimer = null;
 tabHooks.unifi = {
-    enter: unifiLoad
+    enter: function() {
+        unifiLoad();
+        clearInterval(unifiTimer);
+        unifiTimer = setInterval(function() {
+            if (!document.hidden && Date.now() - lastInput < IDLE_STOP_MS) unifiLoad()
+        }, 10000)
+    },
+    leave: function() {
+        clearInterval(unifiTimer)
+    }
 };
 
 window.addEventListener("hashchange", function() {

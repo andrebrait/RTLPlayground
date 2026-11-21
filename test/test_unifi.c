@@ -19,6 +19,7 @@ __xdata uint8_t cmd_buffer[CMD_BUF_SIZE];
 __xdata uint8_t cmd_words_len;
 __xdata uint8_t cmd_words_b[15];
 __xdata uint8_t err_status;
+__xdata uint8_t cmd_nosave;
 __xdata char hostname[24] = "sw\"1";
 __xdata struct uip_eth_addr uip_ethaddr = { { 0x02, 0x1a, 0x2b, 0x3c, 0x4d, 0x5e } };
 __xdata uip_ipaddr_t uip_hostaddr, uip_netmask;
@@ -1043,9 +1044,18 @@ static void test_upgrade(void)
 	cmd("unifi");
 	check(strstr(out, "Shown as " UNIFI_DISPLAY " (" UNIFI_MODEL "), version 2.1.10.10") != 0,
 	      "show: the model and the reported version");
+	cmd_nosave = 0;
+	cmd("unifi");
+	check(cmd_nosave == 1, "show: the status query stays out of the command history");
+	cmd_nosave = 0;
+	cmd("unifi forget");
+	check(!strcmp(unifi.version, UNIFI_VERSION) && !strcmp((char *)last_rec() + 45, UNIFI_VERSION) && !cmd_nosave,
+	      "forget: the reported version goes back to this firmware's");
+	/* A version an earlier build stored while pending is cleared by forget */
+	strcpy(unifi.version, "9.9.9");
 	cmd("unifi forget");
 	check(!strcmp(unifi.version, UNIFI_VERSION) && !strcmp((char *)last_rec() + 45, UNIFI_VERSION),
-	      "forget: the reported version goes back to this firmware's");
+	      "forget: a stale version is cleared while not adopted");
 	cur_key = key;
 }
 

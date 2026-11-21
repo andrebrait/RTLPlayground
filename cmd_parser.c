@@ -90,6 +90,9 @@ __xdata uint8_t hexvalue[4] = { 0 };
 __xdata uint8_t cmd_buffer[CMD_BUF_SIZE];
 
 __xdata	char save_cmd;
+/* Set by a handler whose command is a status query: it stays out of the
+ * history that the web interface's Save to flash reads */
+__xdata uint8_t cmd_nosave;
 
 __xdata uint8_t ip[4];
 __xdata uint8_t mac_parse_result[6];
@@ -2391,7 +2394,7 @@ void cmd_parser(void) __banked
 		}
 
 
-		if (save_cmd && cmd_words_len && err_status == ERR_OK) {
+		if (save_cmd && !cmd_nosave && cmd_words_len && err_status == ERR_OK) {
 			// Find end of the cmd-buffer, looking for the NUL-byte.
 			uint8_t i = cmd_words_b[cmd_words_len - 1];
 			do {
@@ -2408,6 +2411,7 @@ void cmd_parser(void) __banked
 				cmd_history[--p & CMD_HISTORY_MASK] = cmd_buffer[i];
 			} while (i);
 		}
+		cmd_nosave = 0;
 	}
 }
 

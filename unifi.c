@@ -744,7 +744,7 @@ static void u_forget(void)
 {
 	/* Nothing to do once forgotten and saved; a save that failed is
 	 * tried again */
-	if (!unifi.adopted && !unifi.unsaved)
+	if (!unifi.adopted && !unifi.unsaved && !strcmp(unifi.version, u_default_version))
 		return;
 	memcpyc(unifi.key, u_default_key, 16);
 	unifi.adopted = 0;
@@ -1332,6 +1332,7 @@ void unifi_parse(void) __banked
 {
 	if (cmd_words_len < 2) {
 		u_show();
+		cmd_nosave = 1;	/* a status query, polled by the web page */
 		return;
 	}
 	if (cmd_words_len == 2 && u_word("on")) {
