@@ -18,8 +18,9 @@ typedef struct httpd_state {
 /* Finally we define the application function to be called by uIP. */
 void httpd_appcall(void);
 #ifndef UIP_APPCALL
-#ifdef PROMETHEUS
-/* Sends the exporter's port to metrics_appcall(), everything else to the httpd */
+#if defined(PROMETHEUS) || defined(UNIFI)
+/* Sends port 80 to the httpd, the exporter's port to metrics_appcall(), and
+ * the inform client's connection to unifi_appcall() */
 void tcp_appcall(void);
 #define UIP_APPCALL tcp_appcall
 #else

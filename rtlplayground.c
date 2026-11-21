@@ -39,6 +39,9 @@
 #ifdef PROMETHEUS
 #include "snmp_hw.h"
 #endif
+#ifdef UNIFI
+#include "unifi.h"
+#endif
 #include "rtl836x_regs.h"
 #include "rtl837x_acl.h"
 #include "rtl837x_dhcp_snoop.h"
@@ -1257,6 +1260,9 @@ static void handle_tick(void)
 	lldp_tick();
 	health_phase(HEALTH_PH_LLDP);
 	cabletest_tick();
+#ifdef UNIFI
+	unifi_tick();
+#endif
 #if SOC_FAMILY == RTL836X
 	/* Poll the NIC once per tick as well, so RX works even if INT1 never fires */
 	rx_irq = 1;
@@ -1779,6 +1785,9 @@ void main(void)
 	syslog_init();
 	dns_init();
 	ntp_init();
+#ifdef UNIFI
+	unifi_init();
+#endif
 
 	stp_enabled = 0;
 #if SOC_FAMILY == RTL837X

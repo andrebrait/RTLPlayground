@@ -102,6 +102,11 @@ TESTS += $(BUILDDIR)/test_aes_gcm
 $(BUILDDIR)/test_aes_gcm: test_aes_gcm.c gcm_vectors.h $(SRCROOT)/crypto/aes_gcm.c $(SRCROOT)/crypto/aes_gcm.h $(SRCROOT)/crypto/gcm_kat.h | $(BUILDDIR)
 	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS)
 
+# unifi.c and aes_gcm.c are included by the test
+TESTS += $(BUILDDIR)/test_unifi
+$(BUILDDIR)/test_unifi: test_unifi.c $(SRCROOT)/unifi.c $(SRCROOT)/unifi.h $(SRCROOT)/crypto/aes_gcm.c $(SRCROOT)/crypto/aes_gcm.h | $(BUILDDIR)
+	$(CC) $(CFLAGS) -DUNIFI $< -o $@ $(LDFLAGS)
+
 TESTS += $(BUILDDIR)/test_cable_836x
 $(BUILDDIR)/test_cable_836x: test_cable_836x.c $(SRCROOT)/rtl837x_cabletest.c $(SRCROOT)/timer.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) -DMACHINE_NAME=TPLINK_TL_SG108PE_V5 $< $(SRCROOT)/timer.c -o $@ $(LDFLAGS)

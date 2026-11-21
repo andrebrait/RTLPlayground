@@ -90,16 +90,23 @@ typedef uint16_t u16_t;
 typedef unsigned short uip_stats_t;
 
 /**
- * Maximum number of TCP connections: the httpd, and with PROMETHEUS the
- * exporter's own port. uip.c admits one connection per listening port,
- * because each application keeps a single connection's state.
+ * Maximum number of TCP connections: the httpd, with PROMETHEUS the
+ * exporter's own port, and with UNIFI the inform client's active open.
+ * uip.c admits one connection per listening port, because each
+ * application keeps a single connection's state, so the inform client
+ * always finds a slot.
  *
  * \hideinitializer
  */
 #ifdef PROMETHEUS
-#define UIP_CONF_MAX_CONNECTIONS 2
+#define UIP_CONF_PASSIVE_CONNECTIONS 2
 #else
-#define UIP_CONF_MAX_CONNECTIONS 1
+#define UIP_CONF_PASSIVE_CONNECTIONS 1
+#endif
+#ifdef UNIFI
+#define UIP_CONF_MAX_CONNECTIONS (UIP_CONF_PASSIVE_CONNECTIONS + 1)
+#else
+#define UIP_CONF_MAX_CONNECTIONS UIP_CONF_PASSIVE_CONNECTIONS
 #endif
 
 /**

@@ -432,6 +432,12 @@ uip_connect(__xdata uip_ipaddr_t * __xdata ripaddr, __xdata u16_t rport) __banke
       goto again;
     }
   }
+  /* The application is chosen by local port, so never take a listening one */
+  for(uint8_t c = 0; c < UIP_LISTENPORTS; ++c) {
+    if(uip_listenports[c] == htons(lastport)) {
+      goto again;
+    }
+  }
 
   conn = 0;
   for(uint8_t c = 0; c < UIP_CONNS; ++c) {

@@ -31,7 +31,7 @@
 #include "dns.h"
 #include "ntp.h"
 #ifdef UNIFI
-#include "crypto/aes_gcm.h"
+#include "unifi.h"
 #endif
 #ifdef SNMP
 #include "snmp.h"
@@ -2271,10 +2271,7 @@ void cmd_parser(void) __banked
 #endif
 #ifdef UNIFI
 		} else if (cmd_compare(0, "unifi")) {
-			if (cmd_words_len == 2 && cmd_compare(1, "selftest"))
-				gcm_selftest();
-			else
-				cmd_error("unifi selftest\n");
+			unifi_parse();
 #endif
 		} else if (cmd_compare(0, "lacp")) {
 			if (cmd_words_len == 2 && cmd_compare(1, "show"))
