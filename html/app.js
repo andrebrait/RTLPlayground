@@ -6776,14 +6776,18 @@ $("un-apply").addEventListener("click", function() {
         /* edits made while the commands ran stay */
         if ($("un-url").value.trim() === url && $("un-on").checked === on) delete $("un-card").dataset.dirty;
         return unifiLoad()
-    }).catch(function() {});
+    }).catch(function(e) {
+        toast(e.message || String(e), "err")
+    });
 });
 $("un-refresh").addEventListener("click", function() {
     unifiLoad(true)
 });
 $("un-forget").addEventListener("click", function() {
     confirmModal(t("un_forget_q"), t("un_forget_d"), function() {
-        postCmds(["unifi forget"]).then(unifiLoad).catch(function() {});
+        postCmds(["unifi forget"]).then(unifiLoad).catch(function(e) {
+            toast(e.message || String(e), "err")
+        });
     });
 });
 var unifiPoller = new Poller(unifiLoad, 10000);
