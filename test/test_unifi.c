@@ -414,9 +414,9 @@ static void test_replies(void)
 	check(!unifi.err && !strcmp(unifi.type, "averyveryverylo"), "reply: a long _type is cut to the field");
 
 	inform();
-	n = sprintf((char *)r, "HTTP/1.1 2x0 OK\r\nContent-Length: 0\r\n\r\n");
+	n = sprintf((char *)r, "HTTP/1.1 20x OK\r\nContent-Length: 0\r\n\r\n");
 	deliver(r, n);
-	check(unifi.err == UE_HTTP, "reply: a status that is not three digits is refused");
+	check(unifi.err == UE_HTTP && !unifi.status, "reply: a status that is not three digits is refused");
 
 	inform();
 	deliver((const uint8_t *)"HTTP/1\r\n\r\n", 11);

@@ -285,12 +285,13 @@ static uint8_t u_parse(void)
 			unifi.hdr = u_i + 1;
 			if (!strstart(u_buf, "HTTP/1.") || unifi.hdr < 13)
 				return 2;
-			unifi.status = 0;
+			u_n = 0;
 			for (u_i = 9; u_i < 12; u_i++) {
 				if (u_buf[u_i] < '0' || u_buf[u_i] > '9')
 					return 2;
-				unifi.status = unifi.status * 10 + u_buf[u_i] - '0';
+				u_n = u_n * 10 + u_buf[u_i] - '0';
 			}
+			unifi.status = u_n;
 			/* Content-Length, any case. Without it the reply ends at close. */
 			unifi.clen = 0xffff;
 			for (u_i = 0; u_i + sizeof(u_clen) - 1 < unifi.hdr; u_i++) {
@@ -502,6 +503,7 @@ void unifi_tick(void) __banked
 		/* The reply fields describe the inform being made */
 		unifi.status = 0;
 		unifi.type[0] = 0;
+		unifi.err = 0;
 		memcpy(dns_state.name, unifi.host, DNS_NAME_LEN);
 		dns_state.verbose = 0;
 		dns_lookup();
