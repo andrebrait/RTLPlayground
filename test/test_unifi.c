@@ -18,6 +18,7 @@ __xdata uint8_t sfr_data[4];
 __xdata uint8_t cmd_buffer[CMD_BUF_SIZE];
 __xdata uint8_t cmd_words_len;
 __xdata uint8_t cmd_words_b[15];
+__xdata uint8_t err_status;
 __xdata char hostname[24] = "sw\"1";
 __xdata struct uip_eth_addr uip_ethaddr = { { 0x02, 0x1a, 0x2b, 0x3c, 0x4d, 0x5e } };
 __xdata uip_ipaddr_t uip_hostaddr, uip_netmask;
@@ -92,6 +93,7 @@ static void check(int ok, const char *what)
 /* A command line, split into words as cmd_tokenize() does */
 static void cmd(const char *s)
 {
+	err_status = ERR_OK;
 	memset(cmd_buffer, 0, sizeof(cmd_buffer));
 	strcpy((char *)cmd_buffer, s);
 	cmd_words_len = 0;
@@ -126,10 +128,39 @@ static void ticks(void)
 	}
 }
 
-/* Runs an inform up to the reply: returns the request as sent */
+/* The request as sent */
 static uint8_t req[2048];
 static uint16_t req_len;
 
+static void keep_sent(void)
+{
+	if (req_len + sent_len <= sizeof(req)) {
+		memcpy(req + req_len, sent, sent_len);
+		req_len += sent_len;
+	}
+}
+
+/* Acknowledges segments until the request is taken, or with keep_last
+ * until only the last one is outstanding. Exits on an ACK that makes no
+ * progress, so that a regression cannot hang the suite. */
+static void acks(int keep_last)
+{
+	for (int i = 0; i < 100 && unifi.phase == U_SEND; i++) {
+		if (keep_last && unifi.off + unifi.sent >= unifi.end)
+			return;
+		uint16_t off = unifi.off;
+		appcall(UIP_ACKDATA, 0, 0);
+		keep_sent();
+		if (unifi.phase == U_SEND && unifi.off == off)
+			break;
+	}
+	if (unifi.phase == U_SEND && !(keep_last && unifi.off + unifi.sent >= unifi.end)) {
+		printf("FAIL an acknowledgement made no progress\n");
+		exit(1);
+	}
+}
+
+/* Runs an inform up to the reply */
 static void inform(void)
 {
 	if (uptime_secs < unifi.next)
@@ -137,16 +168,15 @@ static void inform(void)
 	ticks();
 	req_len = 0;
 	appcall(UIP_CONNECTED, 0, 0);
-	memcpy(req + req_len, sent, sent_len);
-	req_len += sent_len;
-	while (unifi.phase == U_SEND) {
-		appcall(UIP_ACKDATA, 0, 0);
-		memcpy(req + req_len, sent, sent_len);
-		req_len += sent_len;
-	}
+	keep_sent();
+	acks(0);
 }
 
-static const uint8_t *key = u_default_key;
+/* MD5("ubnt"), kept apart from u_default_key so that a change there fails */
+static const uint8_t key[16] = {
+	0xba, 0x86, 0xf2, 0xbb, 0xe1, 0x07, 0xc7, 0xc5,
+	0x7e, 0xb5, 0xf2, 0x69, 0x07, 0x75, 0xc7, 0x12
+};
 
 /* An encrypted TNBU reply around json, after an HTTP header */
 static uint16_t reply(uint8_t *p, const char *json, int with_clen, int tamper)
@@ -206,7 +236,8 @@ static void test_url(void)
 	int same = 1;
 	for (unsigned i = 0; i < sizeof bad / sizeof *bad; i++) {
 		cmd(bad[i]);
-		same &= !strcmp(unifi.host, "10.0.0.1") && unifi.port == 8080 && strstr(out, "Error") != 0;
+		same &= !strcmp(unifi.host, "10.0.0.1") && unifi.port == 8080 && !strcmp(unifi.path, "/inform")
+			&& strstr(out, "Error") != 0 && err_status == ERR_INVALID_ARGUMENT;
 	}
 	check(same, "url: a bad URL is refused and changes nothing");
 	cmd("unifi inform http://h:65535/");
@@ -237,6 +268,8 @@ static void test_request(void)
 	check(!strncmp((char *)req, start, sizeof(start) - 1) && body
 	      && clen == req_len - ((uint8_t *)body + 4 - req),
 	      "request: HTTP header with the body's Content-Length");
+	if (!body || clen < 56 || clen != req_len - ((uint8_t *)body + 4 - req))
+		return;	/* nothing below can read a request that is not framed */
 	uint8_t *p = (uint8_t *)body + 4;
 	uint16_t plen = (uint16_t)(p[38] << 8 | p[39]);
 	check(!memcmp(p, "TNBU", 4) && !memcmp(p + 8, uip_ethaddr.addr, 6) && p[15] == 0x09 && p[35] == 1
@@ -281,8 +314,7 @@ static void test_request(void)
 	check(unifi.phase == U_IDLE && connects == 2, "resolve: an answer for another name is not used");
 	ticks();
 	appcall(UIP_CONNECTED, 0, 0);
-	while (unifi.phase == U_SEND)
-		appcall(UIP_ACKDATA, 0, 0);
+	acks(0);
 	appcall(UIP_NEWDATA, nf, sizeof(nf) - 1);
 	check(connects == 3 && unifi.status == 404, "resolve: then it asks again");
 }
@@ -306,11 +338,13 @@ static void test_rexmit(void)
 	uptime_secs = unifi.next;
 	ticks();
 	appcall(UIP_CONNECTED, 0, 0);
-	unifi.enabled = 0;
-	u_stop();
+	cmd("unifi off");
 	appcall(UIP_POLL, 0, 0);
-	check(uip_flags == UIP_ABORT && unifi.phase == U_IDLE && !unifi.conn, "unifi off: the connection is reset");
-	unifi.enabled = 1;
+	int before = connects;
+	ticks();
+	check(uip_flags == UIP_ABORT && unifi.phase == U_IDLE && !unifi.conn && connects == before,
+	      "unifi off: the connection is reset and no inform starts");
+	cmd("unifi on");
 }
 
 static void test_replies(void)
@@ -352,8 +386,7 @@ static void test_replies(void)
 	uptime_secs = unifi.next;
 	ticks();
 	appcall(UIP_CONNECTED, 0, 0);
-	while (unifi.off + unifi.sent < unifi.end)
-		appcall(UIP_ACKDATA, 0, 0);
+	acks(1);
 	appcall(UIP_ACKDATA | UIP_NEWDATA, r, n);
 	check(unifi.phase == U_IDLE && unifi.status == 404 && !unifi.err,
 	      "reply: data together with the last acknowledgement");
@@ -449,6 +482,13 @@ int main(void)
 	test_request();
 	test_rexmit();
 	test_replies();
+	unifi.count = 999999;
+	unifi.fails = 0xffffffff;
+	cmd("unifi");
+	check(strstr(out, "informs sent 999999,") && strstr(out, "failed 4294967295,"),
+	      "show: the largest 32-bit count fits the digit scratch");
+	unifi.count = 23;
+	unifi.fails = 11;
 	cmd("unifi");
 	check(strstr(out, "UniFi on, inform http://10.0.0.1:8080/inform") != 0, "show: state and URL");
 	check(strstr(out, "informs sent 23, last reply 404, failed 11,") != 0, "show: the inform count in decimal");

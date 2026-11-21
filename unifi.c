@@ -82,7 +82,7 @@ static __xdata uint8_t u_buf[UNIFI_BUF_SIZE];
 
 /* Scratch for the helpers below: internal RAM has no room for locals */
 static __xdata uint16_t u_i, u_n;
-static __xdata uint8_t u_d[10];
+static __xdata uint8_t u_d[14];	/* a 32-bit value, then its 10 digits */
 static __xdata uint8_t *__xdata u_p, *__xdata u_q;
 
 static __code const uint8_t u_default_key[16] = {
@@ -684,6 +684,15 @@ static uint8_t u_word(__code const char *w)
 }
 
 
+/* cmd_error() is in another bank */
+static void u_error(__code const char *msg)
+{
+	err_status = ERR_INVALID_ARGUMENT;
+	print_string("Error: ");
+	print_string(msg);
+}
+
+
 void unifi_parse(void) __banked
 {
 	if (cmd_words_len < 2) {
@@ -703,18 +712,18 @@ void unifi_parse(void) __banked
 	if (cmd_words_len == 3 && u_word("inform")) {
 		u_stop();
 		if (!u_url())
-			print_string("Error: unifi inform http://<host>[:<port>][/<path>]\n");
+			u_error("unifi inform http://<host>[:<port>][/<path>]\n");
 		return;
 	}
 	if (cmd_words_len == 2 && u_word("selftest")) {
 		/* The self test rekeys gcm and reuses its state */
 		if (unifi.phase != U_IDLE || unifi.abort) {
-			print_string("Error: an inform is in progress\n");
+			u_error("an inform is in progress\n");
 			return;
 		}
 		gcm_selftest();
 		unifi.keyed = 0;
 		return;
 	}
-	print_string("Error: unifi [on|off|inform <url>|selftest]\n");
+	u_error("unifi [on|off|inform <url>|selftest]\n");
 }

@@ -104,7 +104,7 @@ $(BUILDDIR)/test_aes_gcm: test_aes_gcm.c gcm_vectors.h $(SRCROOT)/crypto/aes_gcm
 
 # unifi.c and aes_gcm.c are included by the test
 TESTS += $(BUILDDIR)/test_unifi
-$(BUILDDIR)/test_unifi: test_unifi.c $(SRCROOT)/unifi.c $(SRCROOT)/unifi.h $(SRCROOT)/crypto/aes_gcm.c $(SRCROOT)/crypto/aes_gcm.h | $(BUILDDIR)
+$(BUILDDIR)/test_unifi: test_unifi.c $(SRCROOT)/unifi.c $(SRCROOT)/unifi.h $(SRCROOT)/dns.h $(SRCROOT)/crypto/aes_gcm.c $(SRCROOT)/crypto/aes_gcm.h | $(BUILDDIR)
 	$(CC) $(CFLAGS) -DUNIFI $< -o $@ $(LDFLAGS)
 
 TESTS += $(BUILDDIR)/test_cable_836x
