@@ -208,7 +208,9 @@
     apply the controller's settings yet.
   - Port table. Every inform reports each port by its front-panel number: link,
     whether it is enabled, speed, supported speeds, media and byte and packet
-    counters. The controller shows the ports and their traffic rates.
+    counters. The controller shows the ports and their traffic rates. The inform also
+    lists the LLDP neighbours, so the controller can draw the topology, and on boards
+    with PoE ports whether PoE is permitted on each; power is not measured.
   - UniFi page in the web interface: turn informing on or off, set the inform URL
     (kept by Save to flash), and see the model and firmware version the switch
     reports, its adoption state and its last exchange with the controller.

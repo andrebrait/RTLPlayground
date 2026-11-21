@@ -371,6 +371,8 @@ static void u_port_entry(void)
 			u_s(",\"port_poe\":true,\"poe_caps\":7,\"poe_enable\":true,\"poe_mode\":\"auto\"");
 		else
 			u_s(",\"port_poe\":true,\"poe_caps\":7,\"poe_enable\":false,\"poe_mode\":\"off\"");
+	} else {
+		u_s(",\"poe_caps\":0");	/* as a USW-Lite-8-PoE reports ports 5-8 */
 	}
 #endif
 	u_s(",\"speed\":");
@@ -435,7 +437,10 @@ static void u_build(void)
 
 /* The LLDP neighbours, so the controller can draw the topology. Only
  * neighbours with a MAC chassis ID: the controller matches them to devices
- * by MAC. */
+ * by MAC. Budget: an entry is at most about 210 bytes (lldp_printable()
+ * leaves nothing to escape), so LLDP_NB_MAX of them take about 3.4 KB;
+ * with a port table of about 2.3 KB and the head, an inform stays under
+ * 7 KB of the UNIFI_BUF_SIZE buffer. */
 static __xdata struct lldp_neighbor *__xdata u_nb;
 
 static void u_lldp(void)
