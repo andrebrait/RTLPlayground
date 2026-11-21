@@ -815,21 +815,20 @@ connection at a time, and why `UIP_CONF_MAX_CONNECTIONS` is 1
 (`uip/uip-conf.h:93-97`: "TODO: Increase this, but also make the socket
 state/buffer per-connection").
 
-**Second connection (UniFi inform): yes.** The inform client is an active open
-(`uip_connect`, `UIP_ACTIVE_OPEN` is already 1) to the controller's port 8080.
-It has its own buffer and state, so the httpd does not change. Needed:
+**Second connection (UniFi inform): yes, implemented.** The inform client is an
+active open (`uip_connect`, `UIP_ACTIVE_OPEN` is already 1) to the controller's
+port, 8080 by default. It has its own buffer and state, so the httpd does not
+change. As built:
 
-- `UIP_CONF_MAX_CONNECTIONS 2`.
-- A `UIP_APPCALL` dispatcher that sends a connection whose remote port is 8080
-  to `unifi_appcall()` and everything else to `httpd_appcall()`.
-  `uip_tcp_appstate_t` becomes a union of both states.
-- At most one port-80 connection at a time. Today the single slot enforces
-  this. With more slots, a second browser connection would take a slot and
-  then find the httpd's global buffer in use. Refuse a SYN to port 80 while a
-  port-80 connection exists. This is a small check in the SYN path of
-  `uip.c`.
-- Extend the `health` TCP dump, which stops the build when `UIP_CONNS != 1`
-  (`cmd_parser.c:2664`).
+- `UNIFI` adds one TCP slot to the ones the listening ports need.
+- `tcp_appcall()` dispatches by local port. Port 80 goes to the httpd and
+  `METRICS_PORT` to the exporter. Any other port is the inform client's,
+  because `uip_connect()` never takes a listening port. This works for a
+  controller on any remote port.
+- `uip.c` admits one live connection per listening port, so a second
+  browser connection waits for the first and never takes the inform
+  client's slot.
+- The `health` TCP dump lists every slot.
 
 **Third connection (metrics): yes, on a separate port.** Today a Prometheus
 scrape and the web UI take turns on the one httpd slot. To separate them:
@@ -846,6 +845,23 @@ The cost is about 1.5 KB XDATA, 30 B for the connection and a few hundred
 bytes of code. Making the httpd itself multi-connection would be the larger
 change: every global cursor would move into per-connection state, and each
 connection would need its own `outbuf`.
+
+**Open: retransmission timing for active opens.** `uip_periodic()` runs every
+200 Hz tick, so `UIP_RTO 3` is nominally 15 ms. With its backoff a SYN gives
+up after about 490 ms, and data after about 1.2 s. Both assume every tick is
+serviced. Ticks that come while the main loop is busy merge into one
+`tick_pending` flag, which stretches these times, so they are nominal values,
+not hard limits. That is fine on a LAN, but a controller much more than about
+0.5 s away will often not be reached. Also, `lastport`
+and `iss` restart at the same values on every boot. A reboot within about a
+minute can therefore reuse a 4-tuple the controller still holds in
+TIME_WAIT. uIP aborts in SYN_SENT on anything but SYN|ACK
+(`uip/uip.c:1626-1632`), so that inform fails once. Possible fixes:
+
+- Run the TCP timers at a fixed rate, not every tick.
+- Seed `lastport` and `iss` from `get_random_32()`.
+
+Neither problem appeared on the test LAN.
 
 The uIP receive window is one MSS (`uip/uipopt.h:314`), so every transfer is
 stop-and-wait. On a LAN, a 7.6 KB `system_cfg` response is six round trips,
@@ -936,6 +952,13 @@ This design fits both switches:
      the whole response has parsed.
    - This avoids a second implementation of every setting. The existing
      config save makes the result persistent.
+   - Apply by category, as the OpenWrt `unifi-agent` does
+     (andrebrait/packages#6). `unifi apply` takes a list of categories
+     (`vlans`, `ports`, `lag`, `stp`, `igmp`, `jumbo`, `mirror`) and
+     stores them as a bitmask. `all` applies everything. The default, and
+     `none`, applies nothing and only logs. A change in a category that is
+     not selected is logged as `not applied:`. This way, for example, the
+     controller can manage the VLANs while the port settings stay local.
 4. **Trim the inform.** Send only what the controller needs. Earlier in this
    document, `port_table` with
    `port_idx`/`up`/`enable`/`speed`/`rx_bytes`/`tx_bytes` was enough, and

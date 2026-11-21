@@ -238,7 +238,7 @@ ifeq ($(PROMETHEUS),1)
 SRCS += metrics.c metrics_cli.c metrics_tcp.c
 endif
 ifeq ($(UNIFI),1)
-SRCS += crypto/aes_gcm.c crypto/gcm_selftest.c
+SRCS += crypto/aes_gcm.c crypto/gcm_selftest.c unifi.c
 endif
 # The bounded hardware readers serve both SNMP and the Prometheus exporter.
 ifneq ($(filter 1,$(SNMP) $(PROMETHEUS)),)

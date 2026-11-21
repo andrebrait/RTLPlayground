@@ -15,6 +15,9 @@
 #ifdef PROMETHEUS
 #include "metrics.h"
 #endif
+#ifdef UNIFI
+#include "unifi.h"
+#endif
 
 // #define DEBUG
 #include "debug.h"
@@ -1154,12 +1157,22 @@ do_send:
 }
 
 
-#ifdef PROMETHEUS
+#if defined(PROMETHEUS) || defined(UNIFI)
 void tcp_appcall(void)
 {
-	if (uip_conn->lport == HTONS(METRICS_PORT))
+#ifdef PROMETHEUS
+	if (uip_conn->lport == HTONS(METRICS_PORT)) {
 		metrics_appcall();
-	else
-		httpd_appcall();
+		return;
+	}
+#endif
+#ifdef UNIFI
+	/* uip_connect() never takes a listening port as its local port */
+	if (uip_conn->lport != HTONS(80)) {
+		unifi_appcall();
+		return;
+	}
+#endif
+	httpd_appcall();
 }
 #endif
