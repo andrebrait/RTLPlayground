@@ -57,6 +57,7 @@
 #define U_RECV		4
 #define U_REPLY		5	/* reply received, check its header */
 #define U_DECRYPT	6
+#define U_PORTS		7	/* writing the port table, one port per tick */
 
 #define UE_DNS		1
 #define UE_CONN		2
@@ -288,66 +289,60 @@ static void u_counter(__code const char *name, __xdata uint8_t k, __xdata uint8_
  * RTL837x, ASIC port 8 and, on an RTL8372, port 3 are the 10G lanes: an
  * SFP+ cage, or copper when the board has 10G PHYs (n_10g). Duplex is not
  * reported: the RTL837x status the firmware reads has no duplex bit. */
-static void u_ports(void)
+static void u_port_entry(void)
 {
-	u_cnt = 0;	/* entries written */
-	for (u_ph = MACHINE_MIN_PORT; u_ph <= MACHINE_MAX_PORT; u_ph++) {
-		if (!machine.log_to_phys_port[u_ph])
-			continue;
-		if (snmp_hw_link(u_ph, &u_link)) {
-			if ((uint16_t)u_link >> u_ph & 1)
-				u_links |= (uint16_t)1 << u_ph;
-			else
-				u_links &= ~((uint16_t)1 << u_ph);
-		}
-		u_up = 0;
-		if (u_links >> u_ph & 1)
-			u_up = 1;
-		u_mbps = 0;
-		if (u_up)
-			snmp_hw_speed(u_ph, &u_mbps);
-		u_adm = 1;	/* admin state: up unless the PHY is powered down */
-		snmp_hw_admin(u_ph, &u_adm);
-		if (u_cnt++)
-			u_c(',');
-		u_s("{\"port_idx\":");
-		u_dec(machine.log_to_phys_port[u_ph]);
-		if (machine.is_sfp[u_ph])
-			u_s(",\"media\":\"SFP+\",\"speed_caps\":288");
-#if SOC_FAMILY == RTL836X
+	if (snmp_hw_link(u_ph, &u_link)) {
+		if ((uint16_t)u_link >> u_ph & 1)
+			u_links |= (uint16_t)1 << u_ph;
 		else
-			u_s(",\"media\":\"GE\",\"speed_caps\":1048623");
-#else
-		else if (machine.n_10g && (u_ph == 8 || (u_ph == 3 && !machine.isRTL8373)))
-			u_s(",\"media\":\"GE\",\"speed_caps\":1049064");	/* 100M to 10G */
-		else
-			u_s(",\"media\":\"GE\",\"speed_caps\":1048682");	/* 10M to 2.5G */
-#endif
-		if (u_up)
-			u_s(",\"up\":true");
-		else
-			u_s(",\"up\":false");
-		if (u_adm == 2)
-			u_s(",\"enable\":false");
-		else
-			u_s(",\"enable\":true");
-		u_s(",\"speed\":");
-		u_dec(u_mbps);
-		u_counter(",\"rx_bytes\":", 0, 0, 0);
-		u_counter(",\"tx_bytes\":", 1, 1, 1);
-#if SOC_FAMILY != RTL836X
-		/* The RTL836x packet counters are 32 bits: their sum would go back
-		 * whenever one wraps, so only its 64-bit byte counters are sent */
-		u_counter(",\"rx_packets\":", 2, 2, 4);
-		u_counter(",\"tx_packets\":", 3, 5, 7);
-#endif
-		u_c('}');
+			u_links &= ~((uint16_t)1 << u_ph);
 	}
+	u_up = 0;
+	if (u_links >> u_ph & 1)
+		u_up = 1;
+	u_mbps = 0;
+	if (u_up)
+		snmp_hw_speed(u_ph, &u_mbps);
+	u_adm = 1;	/* admin state: up unless the PHY is powered down */
+	snmp_hw_admin(u_ph, &u_adm);
+	if (u_cnt++)
+		u_c(',');
+	u_s("{\"port_idx\":");
+	u_dec(machine.log_to_phys_port[u_ph]);
+	if (machine.is_sfp[u_ph])
+		u_s(",\"media\":\"SFP+\",\"speed_caps\":288");
+#if SOC_FAMILY == RTL836X
+	else
+		u_s(",\"media\":\"GE\",\"speed_caps\":1048623");
+#else
+	else if (machine.n_10g && (u_ph == 8 || (u_ph == 3 && !machine.isRTL8373)))
+		u_s(",\"media\":\"GE\",\"speed_caps\":1049064");	/* 100M to 10G */
+	else
+		u_s(",\"media\":\"GE\",\"speed_caps\":1048682");	/* 10M to 2.5G */
+#endif
+	if (u_up)
+		u_s(",\"up\":true");
+	else
+		u_s(",\"up\":false");
+	if (u_adm == 2)
+		u_s(",\"enable\":false");
+	else
+		u_s(",\"enable\":true");
+	u_s(",\"speed\":");
+	u_dec(u_mbps);
+	u_counter(",\"rx_bytes\":", 0, 0, 0);
+	u_counter(",\"tx_bytes\":", 1, 1, 1);
+#if SOC_FAMILY != RTL836X
+	/* The RTL836x packet counters are 32 bits: their sum would go back
+	 * whenever one wraps, so only its 64-bit byte counters are sent */
+	u_counter(",\"rx_packets\":", 2, 2, 4);
+	u_counter(",\"tx_packets\":", 3, 5, 7);
+#endif
+	u_c('}');
 }
 
 
-/* The inform JSON, then the TNBU header in front of it. Starts the
- * encryption. */
+/* The inform JSON up to its port table */
 static void u_build(void)
 {
 	unifi.pos = HROOM + TNBU_HDR;
@@ -382,8 +377,29 @@ static void u_build(void)
 		u_s("\",\"default\":true,\"state\":1,");
 	u_s("\"fw_caps\":0,\"isolated\":false,\"locating\":false,"
 	    "\"selfrun_beacon\":false,\"port_table\":[");
-	u_ports();
+	u_ph = MACHINE_MIN_PORT;
+	u_cnt = 0;	/* entries written */
+}
+
+/* The next port table entry. Its hardware reads take a few milliseconds,
+ * so one port per tick keeps the main loop responsive. Returns 1 once the
+ * table is complete and the JSON closed. */
+static uint8_t u_ports(void)
+{
+	while (u_ph <= MACHINE_MAX_PORT && !machine.log_to_phys_port[u_ph])
+		u_ph++;
+	if (u_ph <= MACHINE_MAX_PORT) {
+		u_port_entry();
+		u_ph++;
+		return 0;
+	}
 	u_s("]}");
+	return 1;
+}
+
+/* The TNBU header in front of the JSON. Starts the encryption. */
+static void u_seal(void)
+{
 	unifi.end = unifi.pos;
 
 	/* Packet version 0, then the fields that are not zero */
@@ -1007,6 +1023,12 @@ void unifi_tick(void) __banked
 		}
 		memcpy(unifi.addr, dns_state.addr, 4);
 		u_build();
+		unifi.phase = U_PORTS;
+		return;
+	case U_PORTS:
+		if (!u_ports())
+			return;
+		u_seal();
 		unifi.phase = U_ENCRYPT;
 		return;
 	case U_ENCRYPT:
