@@ -76,7 +76,7 @@ void gcm_selftest(void) { selftests++; }
 /* The UniFi state sector */
 struct flash_region_t flash_region;
 static uint8_t sector[8192];	/* both UniFi sectors */
-static int erases, saves, cut, broken, no_commit;	/* cut: the next write stops after that many bytes */
+static int erases, saves, cut, broken, no_commit, partial;	/* cut: the next write stops after that many bytes */
 static uint8_t *at(void)
 {
 	uint32_t o = flash_region.addr - UNIFI_STATE_START;
@@ -92,7 +92,14 @@ void flash_sector_erase(void)
 		printf("FAIL erase outside the UniFi sectors\n");
 		exit(1);
 	}
-	memset(at() , 0xff, 4096);
+	if (partial) {
+		/* Cut short: bits only went up, here the top byte of each seq */
+		for (int i = 0; i < 64; i++)
+			at()[i * 64 + 7] = 0xff;
+		partial = 0;
+	} else {
+		memset(at(), 0xff, 4096);
+	}
 	erases++;
 }
 void flash_write_bytes(uint8_t *p)
@@ -116,7 +123,7 @@ void flash_read_bulk(uint8_t *d)
 }
 
 /* The complete record with the highest sequence number. Layout: magic 0,
- * seq 4, boot 8, key 12, cfgversion 28, sum 45, commit 46. */
+ * seq 4, boot 8, key 12, cfgversion 28, sum 45, commit 47. */
 static const uint8_t *last_rec(void)
 {
 	const uint8_t *r = sector;
@@ -124,7 +131,7 @@ static const uint8_t *last_rec(void)
 	for (int i = 0; i < 128; i++) {
 		const uint8_t *s = sector + i * 64;
 		memcpy(&seq, s + 4, 4);
-		if (!memcmp(s, "UNF2", 4) && !s[46] && seq > best) {
+		if (!memcmp(s, "UNF2", 4) && !s[47] && seq > best) {
 			best = seq;
 			r = s;
 		}
@@ -695,7 +702,7 @@ static void test_adopt(void)
 	unifi_init();
 	check(unifi.boot == b && unifi.adopted, "flash: a record without its commit byte is skipped");
 
-	/* A power cut during the erase of the other sector: the full one stays */
+	/* The write after an erase fails: the full sector stays */
 	while (u_slot < 64) {
 		unifi.boot++;
 		u_save();
@@ -707,7 +714,22 @@ static void test_adopt(void)
 	broken = 0;
 	unifi_init();
 	check(erases == 2 && unifi.boot == b && unifi.adopted && u_sec == 1,
-	      "flash: an erase cut short keeps the last good record in the other sector");
+	      "flash: a failed write after an erase keeps the last good record in the other sector");
+
+	/* A power cut during that erase: stale records with a raised seq stay */
+	while (u_slot < 64) {
+		unifi.boot++;
+		u_save();
+	}
+	b = unifi.boot;
+	partial = 1;
+	broken = 1;
+	unifi.boot++;
+	u_save();
+	broken = 0;
+	unifi_init();
+	check(erases == 3 && unifi.boot == b && u_sec == 1,
+	      "flash: an erase cut short brings no stale record back");
 
 	unifi_reset();
 	unifi_init();
@@ -781,6 +803,12 @@ static void test_bounds(void)
 	}
 	check(saves == before + 3 && unifi.err == UE_FLASH && connects == c + 1,
 	      "flash: a broken flash is not worn by endless retries");
+	cmd("unifi forget");
+	c = connects;
+	uptime_secs += 100;
+	ticks();
+	check(!unifi.adopted && unifi.unsaved && connects == c + 1,
+	      "flash: a failed save does not stop informs under the public default key");
 	broken = 0;
 }
 

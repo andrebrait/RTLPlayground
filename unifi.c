@@ -116,9 +116,10 @@ struct u_rec {
 	uint32_t boot;
 	uint8_t key[16];
 	char cfgver[UNIFI_CFGVER_LEN];
-	uint8_t sum;	/* the bytes before it add up to this */
+	uint8_t sum[2];	/* Fletcher-16 of the bytes before it */
 	uint8_t commit;	/* 0 once the record is complete */
 };
+#define U_REC_LEN	(offsetof(struct u_rec, commit) + 1)	/* without host padding */
 typedef char u_rec_fits[sizeof(struct u_rec) <= UNIFI_SLOT ? 1 : -1];
 static __xdata struct u_rec u_rec, u_back;
 static __xdata uint8_t u_sec, u_slot;	/* the current sector and its next free slot */
@@ -499,13 +500,19 @@ static void u_reply(void)
 }
 
 
-/* The sum of u_rec's bytes before .sum */
-static uint8_t u_sum(void)
+/* Fletcher-16 of u_rec's bytes before .sum, into u_d[0] and u_d[1]. A
+ * partial erase only sets bits, and a stale record whose bits it changed
+ * passes this about 1 time in 65536. */
+static void u_sum(void)
 {
 	u_d[0] = 0;
-	for (u_d[1] = 0; u_d[1] < offsetof(struct u_rec, sum); u_d[1]++)
-		u_d[0] += ((__xdata uint8_t *)&u_rec)[u_d[1]];
-	return u_d[0];
+	u_d[1] = 0;
+	for (u_d[5] = 0; u_d[5] < offsetof(struct u_rec, sum); u_d[5]++) {
+		u_i = u_d[0] + ((__xdata uint8_t *)&u_rec)[u_d[5]];
+		u_d[0] = u_i % 255;
+		u_i = u_d[1] + u_d[0];
+		u_d[1] = u_i % 255;
+	}
 }
 
 static uint32_t u_addr(void)
@@ -525,7 +532,9 @@ static uint8_t u_save(void)
 	u_rec.boot = unifi.boot;
 	memcpy(u_rec.key, unifi.key, 16);
 	memcpy(u_rec.cfgver, unifi.cfgver, UNIFI_CFGVER_LEN);
-	u_rec.sum = u_sum();
+	u_sum();
+	u_rec.sum[0] = u_d[0];
+	u_rec.sum[1] = u_d[1];
 	u_rec.commit = 0xff;
 	if (u_slot >= UNIFI_SLOTS) {
 		u_sec ^= 1;
@@ -534,17 +543,17 @@ static uint8_t u_save(void)
 		flash_sector_erase();
 	}
 	flash_region.addr = u_addr();
-	flash_region.len = sizeof(u_rec) - 1;
+	flash_region.len = U_REC_LEN - 1;
 	flash_write_bytes((__xdata uint8_t *)&u_rec);
 	u_rec.commit = 0;
 	flash_region.addr = u_addr() + offsetof(struct u_rec, commit);
 	flash_region.len = 1;
 	flash_write_bytes(&u_rec.commit);
 	flash_region.addr = u_addr();
-	flash_region.len = sizeof(u_back);
+	flash_region.len = U_REC_LEN;
 	flash_read_bulk((__xdata uint8_t *)&u_back);
 	u_slot++;
-	if (memcmp(&u_back, &u_rec, sizeof(u_rec))) {
+	if (memcmp(&u_back, &u_rec, U_REC_LEN)) {
 		unifi.flash_fails++;
 		return 0;
 	}
@@ -747,9 +756,10 @@ void unifi_tick(void) __banked
 			unifi.booted = 1;
 			unifi.unsaved = 1;
 		}
-		/* No inform goes out until the state is in flash: under the
-		 * authkey, the boot counter in the IV must be saved first */
-		if (unifi.unsaved && !u_save()) {
+		/* Under the authkey no inform goes out until the state is in
+		 * flash: the boot counter in the IV must be saved first. The
+		 * default key is public, so a failed save does not stop those. */
+		if (unifi.unsaved && !u_save() && unifi.adopted) {
 			u_fail(UE_FLASH);
 			return;
 		}
@@ -845,15 +855,18 @@ void unifi_init(void) __banked
 		for (u_d[3] = 0; u_d[3] < UNIFI_SLOTS; u_d[3]++) {
 			flash_region.addr = UNIFI_STATE_START + (uint16_t)u_d[2] * FLASH_SECTOR_SIZE
 				+ (uint16_t)u_d[3] * UNIFI_SLOT;
-			flash_region.len = sizeof(u_rec);
+			flash_region.len = U_REC_LEN;
 			flash_read_bulk((__xdata uint8_t *)&u_rec);
-			for (u_d[4] = 0; u_d[4] < sizeof(u_rec); u_d[4]++)
+			for (u_d[4] = 0; u_d[4] < U_REC_LEN; u_d[4]++)
 				if (((__xdata uint8_t *)&u_rec)[u_d[4]] != 0xff)
 					break;
-			if (u_d[4] == sizeof(u_rec))
+			if (u_d[4] == U_REC_LEN)
 				continue;	/* erased */
 			u_free[u_d[2]] = u_d[3] + 1;
-			if (!strstart(u_rec.magic, u_magic) || u_rec.sum != u_sum() || u_rec.commit)
+			if (!strstart(u_rec.magic, u_magic) || u_rec.commit)
+				continue;
+			u_sum();
+			if (u_rec.sum[0] != u_d[0] || u_rec.sum[1] != u_d[1])
 				continue;
 			if (u_rec.seq <= u_best)
 				continue;
