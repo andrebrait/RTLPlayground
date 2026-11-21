@@ -9,6 +9,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Front ports 1 and 2 have PoE: 1 permitted, 2 switched off */
+#define MACHINE_POE_PORTS 2
 #include "../crypto/aes_gcm.c"
 #include "../unifi.c"
 
@@ -73,6 +75,21 @@ bool strstart(const uint8_t *a, const uint8_t *b)
 }
 
 void gcm_selftest(void) { selftests++; }
+
+uint8_t poe_admin_mask(void) { return 0x01; }
+
+/* LLDP neighbours: front port 1 (ASIC 4) with a named port, front port 2
+ * (ASIC 5) with a MAC port ID; skipped are a network-address chassis, an
+ * expired entry and one on an unused ASIC port */
+__xdata struct lldp_neighbor lldp_nb[LLDP_NB_MAX] = {
+	{ .port = 4, .chassis_subtype = 4, .chassis_len = 6, .chassis = { 0x1c, 0x2a, 0xa3, 0x23, 0xd8, 0x68 },
+	  .port_id = "Port 7", .sys_desc = "MokerLink \"ZX\"", .port_desc = "uplink", .ttl = 120 },
+	{ .port = 5, .chassis_subtype = 4, .chassis_len = 6, .chassis = { 0x84, 0x78, 0x48, 0x88, 0x39, 0xc9 },
+	  .port_id_mac = 1, .port_id = { 0x84, 0x78, 0x48, 0x88, 0x39, 0xca }, .sys_desc = "U7-Lite", .ttl = 90 },
+	{ .port = 6, .chassis_subtype = 5, .chassis_len = 5, .chassis = { 1, 10, 0, 0, 6 }, .port_id = "x", .ttl = 60 },
+	{ .port = 7, .chassis_subtype = 4, .chassis_len = 6, .port_id = "gone", .ttl = 0 },
+	{ .port = 1, .chassis_subtype = 4, .chassis_len = 6, .port_id = "unused", .ttl = 60 },
+};
 
 /* The hardware, laid out like an RTL8372 4T2XH: ASIC ports 3..8 are front
  * ports 5, 1, 2, 3, 4, 6; 3 is 10G copper, 8 an SFP+ at 10G, 4 down and
@@ -414,10 +431,15 @@ static void test_request(void)
 		"\"isolated\":false,\"locating\":false,\"selfrun_beacon\":false,\"port_table\":["
 		"{\"port_idx\":5,\"media\":\"GE\",\"speed_caps\":1049064,\"up\":true,\"enable\":true,\"speed\":10000,"
 		"\"rx_bytes\":18446744073709551615,\"tx_bytes\":3001,\"rx_packets\":9009,\"tx_packets\":9018},"
-		"{\"port_idx\":1,\"media\":\"GE\",\"speed_caps\":1048682,\"up\":false,\"enable\":false,\"speed\":0,"
+		"{\"port_idx\":1,\"media\":\"GE\",\"speed_caps\":1048682,\"up\":false,\"enable\":false,"
+		"\"port_poe\":true,\"poe_caps\":7,\"poe_enable\":true,\"poe_mode\":\"auto\",\"speed\":0,"
 		"\"rx_bytes\":4000,\"tx_bytes\":4001,\"rx_packets\":12009,\"tx_packets\":12018},";
 	const char *last = "{\"port_idx\":6,\"media\":\"SFP+\",\"speed_caps\":288,\"up\":true,\"enable\":true,"
-		"\"speed\":10000,\"rx_bytes\":8000,\"tx_bytes\":8001,\"rx_packets\":24009,\"tx_packets\":24018}]}";
+		"\"speed\":10000,\"rx_bytes\":8000,\"tx_bytes\":8001,\"rx_packets\":24009,\"tx_packets\":24018}],"
+		"\"lldp_table\":[{\"chassis_id\":\"1c:2a:a3:23:d8:68\",\"port_id\":\"Port 7\",\"port_descr\":\"uplink\","
+		"\"chassis_descr\":\"MokerLink \\\"ZX\\\"\",\"local_port_idx\":1,\"local_port_name\":\"Port 1\",\"is_wired\":true},"
+		"{\"chassis_id\":\"84:78:48:88:39:c9\",\"port_id\":\"84:78:48:88:39:ca\",\"port_descr\":\"\","
+		"\"chassis_descr\":\"U7-Lite\",\"local_port_idx\":2,\"local_port_name\":\"Port 2\",\"is_wired\":true}]}";
 	const char *got = (char *)copy + 40;
 	check(!strncmp(got, want, strlen(want)) && strlen(got) > strlen(last)
 	      && !strcmp(got + strlen(got) - strlen(last), last),
@@ -428,6 +450,13 @@ static void test_request(void)
 	for (const char *q = got; (q = strstr(q, "\"port_idx\":")); q++)
 		ports++;
 	check(ports == 6, "request: one port_table entry per used port, unused ASIC ports left out");
+	check(strstr(got, "{\"port_idx\":2,") && strstr(strstr(got, "{\"port_idx\":2,"),
+	      "\"port_poe\":true,\"poe_caps\":7,\"poe_enable\":false,\"poe_mode\":\"off\"")
+	      < strstr(got, "{\"port_idx\":3,"), "request: a PoE port switched off reports poe_mode off");
+	int poe = 0;
+	for (const char *q = got; (q = strstr(q, "\"port_poe\"")); q++)
+		poe++;
+	check(poe == 2, "request: PoE fields on the PoE ports only");
 
 
 	static const char nf[] = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";

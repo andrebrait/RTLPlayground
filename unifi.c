@@ -27,6 +27,10 @@
 #include "snmp_hw.h"
 #include "crypto/aes_gcm.h"
 #include "unifi.h"
+#include "rtl837x_lldp.h"
+#ifdef MACHINE_POE_PORTS
+#include "poe.h"
+#endif
 
 #pragma codeseg BANK5
 #pragma constseg BANK5
@@ -195,13 +199,15 @@ static void u_ip(__xdata const uint8_t *a)
 	}
 }
 
-/* The MAC as aa:bb:cc:dd:ee:ff, or as AABBCCDDEEFF when sep is 0 */
+/* The MAC at u_ma as aa:bb:cc:dd:ee:ff, or as AABBCCDDEEFF when sep is 0 */
+static __xdata const uint8_t *__xdata u_ma;
+
 static void u_mac(__xdata char sep)
 {
 	for (u_i = 0; u_i < 6; u_i++) {
 		if (u_i && sep)
 			u_c(sep);
-		u_d[0] = uip_ethaddr.addr[u_i];
+		u_d[0] = u_ma[u_i];
 		u_d[1] = u_hex[u_d[0] >> 4];
 		u_d[2] = u_hex[u_d[0] & 15];
 		if (!sep) {
@@ -256,6 +262,9 @@ static __xdata uint8_t u_dg[20];
 static __xdata uint8_t u_ph, u_up, u_cnt, u_adm, u_ok;	/* u_d is the digit helpers' */
 static __xdata uint32_t u_link;
 static __xdata uint16_t u_mbps;
+#ifdef MACHINE_POE_PORTS
+static __xdata uint8_t u_poe;	/* PoE permitted, bit 0 = front port 1 */
+#endif
 
 /* u_acc in decimal; u_acc is used up */
 static void u_dec64(void)
@@ -354,6 +363,16 @@ static void u_port_entry(void)
 		u_s(",\"enable\":false");
 	else
 		u_s(",\"enable\":true");
+#ifdef MACHINE_POE_PORTS
+	/* PoE is switched by GPIO and not measured, so no power is reported */
+	u_d[0] = machine.log_to_phys_port[u_ph];
+	if (u_d[0] <= MACHINE_POE_PORTS) {
+		if (u_poe >> (u_d[0] - 1) & 1)
+			u_s(",\"port_poe\":true,\"poe_caps\":7,\"poe_enable\":true,\"poe_mode\":\"auto\"");
+		else
+			u_s(",\"port_poe\":true,\"poe_caps\":7,\"poe_enable\":false,\"poe_mode\":\"off\"");
+	}
+#endif
 	u_s(",\"speed\":");
 	u_dec(u_pcp->mbps);
 	u_counter(",\"rx_bytes\":", 0, 0, 0);
@@ -373,6 +392,7 @@ static void u_build(void)
 {
 	unifi.pos = HROOM + TNBU_HDR;
 	u_s("{\"mac\":\"");
+	u_ma = uip_ethaddr.addr;
 	u_mac(':');
 	u_s("\",\"serial\":\"");
 	u_mac(0);
@@ -408,6 +428,47 @@ static void u_build(void)
 	    "\"selfrun_beacon\":false,\"port_table\":[");
 	u_ph = MACHINE_MIN_PORT;
 	u_cnt = 0;	/* entries written */
+#ifdef MACHINE_POE_PORTS
+	u_poe = poe_admin_mask();
+#endif
+}
+
+/* The LLDP neighbours, so the controller can draw the topology. Only
+ * neighbours with a MAC chassis ID: the controller matches them to devices
+ * by MAC. */
+static __xdata struct lldp_neighbor *__xdata u_nb;
+
+static void u_lldp(void)
+{
+	u_s("],\"lldp_table\":[");
+	u_cnt = 0;
+	for (u_nb = lldp_nb; u_nb < lldp_nb + LLDP_NB_MAX; u_nb++) {
+		if (!u_nb->ttl || u_nb->chassis_subtype != LLDP_CHASSIS_ID_TLV_SUBTYPE
+		    || u_nb->chassis_len != 6 || u_nb->port > MACHINE_MAX_PORT
+		    || !machine.log_to_phys_port[u_nb->port])
+			continue;
+		if (u_cnt++)
+			u_c(',');
+		u_s("{\"chassis_id\":\"");
+		u_ma = u_nb->chassis;
+		u_mac(':');
+		u_s("\",\"port_id\":\"");
+		if (u_nb->port_id_mac) {
+			u_ma = (__xdata const uint8_t *)u_nb->port_id;
+			u_mac(':');
+		} else {
+			u_x(u_nb->port_id);
+		}
+		u_s("\",\"port_descr\":\"");
+		u_x(u_nb->port_desc);
+		u_s("\",\"chassis_descr\":\"");
+		u_x(u_nb->sys_desc);
+		u_s("\",\"local_port_idx\":");
+		u_dec(machine.log_to_phys_port[u_nb->port]);
+		u_s(",\"local_port_name\":\"Port ");
+		u_dec(machine.log_to_phys_port[u_nb->port]);
+		u_s("\",\"is_wired\":true}");
+	}
 }
 
 /* The next port table entry. Its hardware reads take a few milliseconds,
@@ -422,6 +483,7 @@ static uint8_t u_ports(void)
 		u_ph++;
 		return 0;
 	}
+	u_lldp();
 	u_s("]}");
 	return 1;
 }
