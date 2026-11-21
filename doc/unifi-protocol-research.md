@@ -907,8 +907,9 @@ rate. Expected wall time at that speed:
 | Largest `system_cfg` seen | 7.6 KB | ≈1.3 s |
 | `noop` | 163 B | ≈30 ms |
 
-Two blocks per main-loop pass is about 5.5 ms. The TL-SG108PE V5 has not been
-measured yet.
+Two blocks per main-loop pass is about 5.5 ms. Building the 8-bit table at
+key setup takes 30 ms, once per key (at boot and when the controller sends a
+new `authkey`). The TL-SG108PE V5 has not been measured yet.
 
 ### Compact protocol design
 
