@@ -1105,6 +1105,9 @@ void flash_default_config(void)
 	}
 
 	print_string("Written default config to flash\n");
+#ifdef UNIFI
+	unifi_reset();
+#endif
 }
 
 void handle_button(void)

@@ -51,5 +51,6 @@ void unifi_init(void) __banked;
 void unifi_tick(void) __banked;
 void unifi_appcall(void) __banked;
 void unifi_parse(void) __banked;
+void unifi_reset(void) __banked;
 
 #endif
