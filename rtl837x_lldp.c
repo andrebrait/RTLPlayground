@@ -327,23 +327,18 @@ void lldp_set_rtl_wrapper(void) __banked {
     LLDP_O->ether_type = HTONS(LLDP_ETHERTYPE);
 }
 
-/* The port name, or "Port <front-panel number>" for a port without one */
+/* The port name, or "Port <front-panel number>" for a port without one.
+ * Front-panel numbers are 1..9: the port maps have nine entries. */
 uint8_t lldp_portdesc(__xdata uint8_t *p, uint8_t port) __banked
 {
     uint8_t name_length = strlen_x(port_names[port]);
-    uint8_t n;
 
     if (!name_length) {
-        n = machine.log_to_phys_port[port];
-        name_length = n >= 10 ? 7 : 6;
         *p++ = LLDP_TYPE(LLDP_PORT_DESC_TLV_TYPE);
-        *p++ = name_length;
+        *p++ = 6;
         memcpyc(p, LLDP_PORT_DESC_PREFIX, 5);
-        p += 5;
-        if (n >= 10)
-            *p++ = '0' + n / 10;
-        *p = '0' + n % 10;
-        return name_length + 2;
+        p[5] = '0' + machine.log_to_phys_port[port];
+        return 8;
     }
     *p++ = LLDP_TYPE(LLDP_PORT_DESC_TLV_TYPE);
     *p++ = name_length;
