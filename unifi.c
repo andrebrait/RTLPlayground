@@ -281,9 +281,12 @@ static void u_add(__xdata uint8_t sel)
 	}
 }
 
-/* "name":<sum of counters first..last>, or the last good sum (slot k) */
+/* "name":<sum of counters first..last>, or the last good sum (slot k), or
+ * nothing when slot k was never read */
 static void u_counter(__code const char *__xdata name, __xdata uint8_t k, __xdata uint8_t first, __xdata uint8_t last)
 {
+	if (k >= U_CTRS)
+		return;
 	memset(u_acc.bytes, 0, 8);
 	u_ok = 1;
 	for (; first <= last; first++)
@@ -320,8 +323,8 @@ static void u_port_entry(void)
 		u_up = 1;
 	if (!u_up)
 		u_pcp->mbps = 0;
-	else if (snmp_hw_speed(u_ph, &u_mbps))
-		u_pcp->mbps = u_mbps;
+	else if (snmp_hw_speed(u_ph, &u_mbps) && u_mbps)
+		u_pcp->mbps = u_mbps;	/* 0 here is the reader's own view of a link going down */
 	if (snmp_hw_admin(u_ph, &u_adm))
 		u_pcp->adm = u_adm;
 	if (u_cnt++)
