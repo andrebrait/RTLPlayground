@@ -221,6 +221,14 @@
   - Firmware upgrades offered by the controller are acknowledged: the switch
     reports the offered version from then on, kept in flash, so the controller
     stops offering it. Nothing is downloaded or installed.
+  - The controller's settings are applied by area: `unifi apply` takes any of `vlans`,
+    `ports`, `lag`, `stp`, `igmp`, `jumbo` and `mirror`, or `all` or `none` (the default).
+    In an applied area the controller's settings replace that area's lines in
+    `config.txt`, which the switch writes itself, and only the commands that change
+    something run. The switch claims the matching capabilities, so the controller offers
+    only those settings. The management VLAN, port names, per-port STP and EEE and flow
+    control on SFP ports are left alone. A selection change makes the controller send its
+    settings again.
 
 ## Changed
 

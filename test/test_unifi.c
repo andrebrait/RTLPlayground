@@ -171,12 +171,20 @@ bool snmp_hw_stat(uint8_t port, uint8_t selector, bool high, bool low, struct sn
 	return high && low;
 }
 
-/* The UniFi state sector */
+/* The UniFi state sector, and config.txt's in front of it */
 struct flash_region_t flash_region;
 static uint8_t sector[8192];	/* both UniFi sectors */
+static uint8_t config_sector[CONFIG_LEN];
+static int config_erases, config_writes;
 static int erases, saves, cut, broken, no_commit, partial;	/* cut: the next write stops after that many bytes */
+static int in_config(void)
+{
+	return flash_region.addr >= CONFIG_START && flash_region.addr + flash_region.len <= CONFIG_START + CONFIG_LEN;
+}
 static uint8_t *at(void)
 {
+	if (in_config())
+		return config_sector + (flash_region.addr - CONFIG_START);
 	uint32_t o = flash_region.addr - UNIFI_STATE_START;
 	if (flash_region.addr < UNIFI_STATE_START || o + flash_region.len > sizeof(sector)) {
 		printf("FAIL flash access outside the UniFi sector: %x+%u\n", flash_region.addr, flash_region.len);
@@ -186,6 +194,11 @@ static uint8_t *at(void)
 }
 void flash_sector_erase(void)
 {
+	if (flash_region.addr == CONFIG_START) {
+		memset(config_sector, 0xff, sizeof(config_sector));
+		config_erases++;
+		return;
+	}
 	if (flash_region.addr != UNIFI_STATE_START && flash_region.addr != UNIFI_STATE_START + 4096) {
 		printf("FAIL erase outside the UniFi sectors\n");
 		exit(1);
@@ -203,6 +216,12 @@ void flash_sector_erase(void)
 void flash_write_bytes(uint8_t *p)
 {
 	uint8_t *d = at();
+	if (in_config()) {
+		for (int i = 0; i < flash_region.len; i++)
+			d[i] &= p[i];
+		config_writes++;
+		return;
+	}
 	if (flash_region.len == 1) {	/* the commit byte */
 		if (!no_commit && !broken)
 			*d &= *p;
@@ -246,6 +265,17 @@ void itoa_short(uint16_t v) { char s[8]; snprintf(s, sizeof s, "%u", v); print_s
 void print_ip(__xdata uint8_t *ip) { char s[16]; snprintf(s, sizeof s, "%u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]); print_string(s); }
 
 static int failures;
+
+/* What the firmware's command parser would have run, one line each */
+__xdata uint16_t management_vlan = 10;
+__xdata char save_cmd = 1;
+static char ran[2048];
+void cmd_tokenize(void) {}
+void cmd_parser(void)
+{
+	strcat(ran, (char *)cmd_buffer);
+	strcat(ran, "\n");
+}
 
 static void check(int ok, const char *what)
 {
@@ -349,7 +379,7 @@ static const uint8_t *cur_key = key;
 
 static uint16_t reply(uint8_t *p, const char *json, int with_clen, int tamper)
 {
-	uint8_t pkt[1024], k[16];
+	uint8_t pkt[2048], k[16];
 	uint16_t n = strlen(json), hl;
 
 	memset(pkt, 0, 40);
@@ -1239,6 +1269,108 @@ static void test_mac_table(void)
 	rx_gateway = 0;
 }
 
+/* "unifi apply": the controller's settings replace config.txt's lines of
+ * the areas applied, and only what changed runs */
+static void test_apply(void)
+{
+	static const uint8_t newkey[16] = {
+		0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
+		0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff
+	};
+	static const char old[] = "hostname sw\nvlan 10 mgmt\nvlan 1 1 2 3 4 5 6\nvlan 30 3t\npvid 1 1\n"
+		"port 2 off\nport 5 name up\nmtu 1 9216\nlag 2 3 4\nlaghash 2 sip\nmirror 5 6\nstp on\n"
+		"stp prio 8\nigmp off\nunifi on";
+	/* Front ports 5, 1, 2, 3, 4, 6 on ASIC 3..8; 6 is the SFP+. VLAN 10 is
+	 * the management VLAN: never touched. Port 10 is not on this board. */
+	static const char cfg[] = "{\"_type\":\"setparam\",\"cfgversion\":\"00000000000000aa\",\"system_cfg\":\""
+		"# switch\\nswitch.managementvlan=1\\nswitch.jumboframes=disabled\\nswitch.stp.version=rstp\\n"
+		"switch.stp.priority=4096\\nswitch.stp.status=enabled\\n"
+		"switch.vlan.1.id=1\\nswitch.vlan.1.mode=untagged\\nswitch.vlan.2.id=20\\nswitch.vlan.2.mode=tagged\\n"
+		"switch.vlan.2.igmp_snooping=true\\nswitch.vlan.3.id=10\\nswitch.vlan.3.mode=tagged\\n"
+		"switch.vlan.1.port.3.mode=exclude\\nswitch.vlan.2.port.3.mode=untagged\\nswitch.vlan.3.port.3.mode=exclude\\n"
+		"switch.port.3.pvid=20\\nswitch.port.1.status=disabled\\nswitch.port.1.eee=enabled\\n"
+		"switch.port.2.autoneg=disabled\\nswitch.port.2.speed=100\\nswitch.port.2.duplex=enabled\\n"
+		"switch.port.4.opmode=aggregate\\nswitch.port.4.lag=1\\nswitch.port.5.opmode=aggregate\\nswitch.port.5.lag=1\\n"
+		"switch.port.6.eee=enabled\\nswitch.port.6.flowctrl=enabled\\nswitch.port.3.opmode=mirror\\n"
+		"switch.port.3.mirror_port=2\\nswitch.port.10.name=x\\nswitch.port.2.name=a\\\\nb\\n\"}";
+	const char *j;
+
+	cmd("unifi forget");
+	cur_key = key;
+	inform();
+	answer("{\"_type\":\"setparam\",\"mgmt_cfg\":\"authkey=00112233445566778899aabbccddeeff\\n\"}");
+	cur_key = newkey;
+
+	memset(config_sector, 0xff, sizeof(config_sector));
+	memcpy(config_sector, old, sizeof(old));	/* NUL-terminated, without a last newline */
+
+	cmd("unifi apply vlans bogus");
+	check(err_status != ERR_OK && !ua_mask, "apply: an unknown area is refused");
+	strcpy(unifi.cfgver, "1111");
+	cmd("unifi apply all");
+	check(ua_mask == UA_ALL && !unifi.cfgver[0] && unifi.next == uptime_secs,
+	      "apply: all areas; the cfgversion is forgotten so that the controller sends its settings");
+	inform();
+	j = req_json();
+	check(j && strstr(j, ",\"switch_caps\":{\"feature_caps\":532800,\"max_aggregate_sessions\":4,\"max_mirror_sessions\":1}}")
+	      && strstr(j, "{\"port_idx\":5,\"media\":\"GE\",\"speed_caps\":1049064,\"port_caps\":1,")
+	      && strstr(j, "{\"port_idx\":6,\"media\":\"SFP+\",\"speed_caps\":288,\"up\""),
+	      "apply: the inform claims STP, IGMP, LACP and jumbo, and EEE on copper ports only");
+
+	ran[0] = 0;
+	config_writes = 0;
+	answer(cfg);
+	check(unifi.phase == U_IDLE && !ua_busy && config_writes == 1, "apply: the commands ran and config.txt was written once");
+	static const char want_ran[] =
+		"vlan 30 d\nport 2 on\nmtu 1 1522\nlag 2 d\n"
+		"vlan 1 1 2 4 5 6\nvlan 20 1t 2t 3 4t 5t 6t\npvid 2 1\npvid 3 20\npvid 4 1\npvid 5 1\npvid 6 1\n"
+		"port 1 off\neee on 1\nport 2 100m full\nlag 1 lacp 4 5\nstp version rstp\nstp prio 1\nigmp on\nmirror 3 2\n";
+	check(!strcmp(ran, want_ran), "apply: undo what went, then run only the new lines");
+	if (strcmp(ran, want_ran))
+		printf("  ran:\n%s", ran);
+	static const char want_cfg[] = "hostname sw\nvlan 10 mgmt\nport 5 name up\nlaghash 2 sip\nunifi on\n"
+		"vlan 1 1 2 4 5 6\nvlan 20 1t 2t 3 4t 5t 6t\npvid 1 1\npvid 2 1\npvid 3 20\npvid 4 1\npvid 5 1\npvid 6 1\n"
+		"port 1 off\neee on 1\nport 2 100m full\nlag 1 lacp 4 5\nstp on\nstp version rstp\nstp prio 1\nigmp on\nmirror 3 2\n";
+	check(!strcmp((char *)config_sector, want_cfg), "apply: config.txt keeps the other lines and holds the controller's");
+	if (strcmp((char *)config_sector, want_cfg))
+		printf("  config.txt:\n%s", (char *)config_sector);
+
+	/* The same settings again, as after a reboot: nothing runs */
+	strcpy(unifi.cfgver, "1111");
+	inform();
+	ran[0] = 0;
+	config_writes = 0;
+	answer(cfg);
+	check(!ran[0] && !config_writes, "apply: settings already in config.txt run nothing and write nothing");
+
+	/* Nothing applied: the areas are only reported */
+	cmd("unifi apply none");
+	strcpy(unifi.cfgver, "1111");
+	inform();
+	j = req_json();
+	check(j && !strstr(j, "switch_caps") && !strstr(j, "port_caps"), "apply none: no capabilities claimed");
+	ran[0] = 0;
+	config_writes = 0;
+	out_len = 0;
+	answer(cfg);
+	check(!ran[0] && !config_writes && strstr(out, "UniFi: not applied: vlans") && strstr(out, "not applied: mirror"),
+	      "apply none: nothing runs, the areas the controller set are logged as not applied");
+
+	/* Only VLANs: the port, LAG and mirror lines stay */
+	memset(config_sector, 0xff, sizeof(config_sector));
+	memcpy(config_sector, old, sizeof(old));
+	cmd("unifi apply vlans");
+	inform();
+	ran[0] = 0;
+	answer(cfg);
+	check(strstr(ran, "vlan 30 d\n") && !strstr(ran, "port 2 on") && !strstr(ran, "lag ") && !strstr(ran, "mirror")
+	      && strstr((char *)config_sector, "port 2 off\n") && strstr((char *)config_sector, "lag 2 3 4\n"),
+	      "apply vlans: only the VLAN lines change");
+	cmd("unifi");
+	check(strstr(out, "Applies: vlans") != NULL, "show: the areas applied");
+	cmd("unifi apply none");
+}
+
 int main(void)
 {
 	memset(sector, 0xff, sizeof(sector));
@@ -1261,5 +1393,6 @@ int main(void)
 	test_failed_reads();
 	test_upgrade();
 	test_mac_table();
+	test_apply();
 	return failures != 0;
 }
