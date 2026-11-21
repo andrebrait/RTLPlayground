@@ -82,7 +82,7 @@ const struct machine machine = {
 	.log_to_phys_port = { 0, 0, 0, 5, 1, 2, 3, 4, 6 },
 	.is_sfp = { 0, 0, 0, 0, 0, 0, 0, 0, 1 },
 };
-static int link_fail, stat_fail, stat_calls;
+static int link_fail, stat_fail, stat_calls, speed_fail, admin_fail;
 static uint64_t stat_bump;
 bool snmp_hw_link(uint8_t port, uint32_t *value)
 {
@@ -93,11 +93,16 @@ bool snmp_hw_link(uint8_t port, uint32_t *value)
 }
 bool snmp_hw_speed(uint8_t port, uint16_t *mbps)
 {
+	*mbps = 0;	/* as the RTL837x reader does before it can fail */
+	if (speed_fail)
+		return false;
 	*mbps = port == 8 || port == 3 ? 10000 : 2500;
 	return true;
 }
 bool snmp_hw_admin(uint8_t port, uint8_t *state)
 {
+	if (admin_fail)
+		return false;
 	*state = port == 4 ? 2 : 1;
 	return true;
 }
@@ -328,8 +333,6 @@ static void deliver(const uint8_t *p, uint16_t len)
 	for (uint16_t o = 0; o < len && unifi.phase == U_RECV; o += 50)
 		appcall(UIP_NEWDATA, p + o, len - o > 50 ? 50 : len - o);
 }
-
-static const char *req_json(void);
 
 static void test_url(void)
 {
@@ -951,11 +954,15 @@ static void test_failed_reads(void)
 	appcall(UIP_NEWDATA, nf0, sizeof(nf0) - 1);
 	link_fail = 1;
 	stat_fail = 2;
+	speed_fail = 1;
+	admin_fail = 1;
 	stat_bump = 100;
 	inform();
 	j = req_json();
 	check(j && !strcmp(strstr(j, "\"port_table\""), before),
-	      "ports: failed link and counter reads repeat the last good values");
+	      "ports: failed link, speed, admin and counter reads repeat the last good values");
+	speed_fail = 0;
+	admin_fail = 0;
 	appcall(UIP_NEWDATA, nf0, sizeof(nf0) - 1);
 
 	/* Half the reads fail: a packet sum of three counters never goes out
@@ -974,6 +981,16 @@ static void test_failed_reads(void)
 	j = req_json();
 	check(j && strstr(j, "\"tx_bytes\":3101"), "ports: once reads work again the counters move on");
 	appcall(UIP_NEWDATA, nf0, sizeof(nf0) - 1);
+
+	/* Counters never read yet are left out, not sent as 0 */
+	memset(u_pc, 0, sizeof(u_pc));
+	stat_fail = 2;
+	inform();
+	j = req_json();
+	check(j && strstr(j, "\"port_idx\":5,") && !strstr(j, "_bytes\"") && !strstr(j, "_packets\""),
+	      "ports: a counter never read is left out");
+	appcall(UIP_NEWDATA, nf0, sizeof(nf0) - 1);
+	stat_fail = 0;
 	stat_bump = 0;
 }
 

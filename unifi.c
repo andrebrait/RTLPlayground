@@ -229,11 +229,24 @@ static void u_fail(__xdata uint8_t e)
 
 
 /* Port counters: a 64-bit big-endian value, its sum, and its digits. The
- * last good sums are kept per port, so that a read that fails repeats them
- * rather than sending 0 or a partial sum, which the controller would take
- * for a counter that went back. The same holds for the link state. */
+ * last good values are kept per port, so that a read that fails repeats
+ * them rather than sending 0 or a partial sum, which the controller would
+ * take for a counter that went back or a link that flapped. A counter
+ * never read yet is left out. */
+#if SOC_FAMILY == RTL836X
+#define U_CTRS	2	/* bytes only: the packet counters are 32 bits */
+#else
+#define U_CTRS	4
+#endif
+struct u_pc {
+	uint8_t seen;	/* bit k: counter k read once */
+	uint8_t adm;	/* 2 when the PHY is powered down */
+	uint16_t mbps;
+	struct snmp_counter c[U_CTRS];
+};
+static __xdata struct u_pc u_pc[MACHINE_MAX_PORT - MACHINE_MIN_PORT + 1];
+static __xdata struct u_pc *__xdata u_pcp;	/* u_ph's */
 static __xdata struct snmp_counter u_ctr, u_acc;
-static __xdata struct snmp_counter u_last[MACHINE_MAX_PORT + 1][4];
 static __xdata uint16_t u_links;	/* last good link state, one bit per port */
 static __xdata uint8_t u_dg[20];
 static __xdata uint8_t u_ph, u_up, u_cnt, u_adm, u_ok;	/* u_d is the digit helpers' */
@@ -269,17 +282,21 @@ static void u_add(__xdata uint8_t sel)
 }
 
 /* "name":<sum of counters first..last>, or the last good sum (slot k) */
-static void u_counter(__code const char *name, __xdata uint8_t k, __xdata uint8_t first, __xdata uint8_t last)
+static void u_counter(__code const char *__xdata name, __xdata uint8_t k, __xdata uint8_t first, __xdata uint8_t last)
 {
-	u_s(name);
 	memset(u_acc.bytes, 0, 8);
 	u_ok = 1;
 	for (; first <= last; first++)
 		u_add(first);
-	if (u_ok)
-		memcpy(u_last[u_ph][k].bytes, u_acc.bytes, 8);
-	else
-		memcpy(u_acc.bytes, u_last[u_ph][k].bytes, 8);
+	if (u_ok) {
+		memcpy(u_pcp->c[k].bytes, u_acc.bytes, 8);
+		u_pcp->seen |= 1 << k;
+	} else if (u_pcp->seen & 1 << k) {
+		memcpy(u_acc.bytes, u_pcp->c[k].bytes, 8);
+	} else {
+		return;
+	}
+	u_s(name);
 	u_dec64();
 }
 
@@ -297,14 +314,16 @@ static void u_port_entry(void)
 		else
 			u_links &= ~((uint16_t)1 << u_ph);
 	}
+	u_pcp = &u_pc[u_ph - MACHINE_MIN_PORT];
 	u_up = 0;
 	if (u_links >> u_ph & 1)
 		u_up = 1;
-	u_mbps = 0;
-	if (u_up)
-		snmp_hw_speed(u_ph, &u_mbps);
-	u_adm = 1;	/* admin state: up unless the PHY is powered down */
-	snmp_hw_admin(u_ph, &u_adm);
+	if (!u_up)
+		u_pcp->mbps = 0;
+	else if (snmp_hw_speed(u_ph, &u_mbps))
+		u_pcp->mbps = u_mbps;
+	if (snmp_hw_admin(u_ph, &u_adm))
+		u_pcp->adm = u_adm;
 	if (u_cnt++)
 		u_c(',');
 	u_s("{\"port_idx\":");
@@ -324,12 +343,12 @@ static void u_port_entry(void)
 		u_s(",\"up\":true");
 	else
 		u_s(",\"up\":false");
-	if (u_adm == 2)
+	if (u_pcp->adm == 2)
 		u_s(",\"enable\":false");
 	else
 		u_s(",\"enable\":true");
 	u_s(",\"speed\":");
-	u_dec(u_mbps);
+	u_dec(u_pcp->mbps);
 	u_counter(",\"rx_bytes\":", 0, 0, 0);
 	u_counter(",\"tx_bytes\":", 1, 1, 1);
 #if SOC_FAMILY != RTL836X
