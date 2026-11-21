@@ -2522,7 +2522,7 @@ var CONF_CMDS = [
     /^session\s+\d{1,5}$/,
     /^dns\s+server\s+(\d{1,3}\.){3}\d{1,3}(\s+(\d{1,3}\.){3}\d{1,3})?$/,
     /^unifi\s+(on|off)$/,
-    /^unifi\s+inform\s+http:\/\/[A-Za-z0-9._-]{1,47}(:([1-9]\d{0,3}|[1-5]\d{4}|6[0-4]\d{3}|65[0-4]\d\d|655[0-2]\d|6553[0-5]))?(\/[^\s"\\]{0,46})?$/,
+    /^unifi\s+inform\s+http:\/\/[A-Za-z0-9._-]{1,47}(:([1-9]\d{0,3}|[1-5]\d{4}|6[0-4]\d{3}|65[0-4]\d\d|655[0-2]\d|6553[0-5]))?(\/[!#-\[\]-~]{0,46})?$/,
     /^ntp\s+(on|off)$/,
     /^ntp\s+server\s+[A-Za-z0-9.-]{1,47}$/,
     /^ntp\s+interval\s+\d{1,4}$/,
@@ -6762,7 +6762,7 @@ function unifiLoad() {
 });
 $("un-apply").addEventListener("click", function() {
     var url = $("un-url").value.trim();
-    if (!/^http:\/\/[A-Za-z0-9._-]{1,47}(:([1-9]\d{0,3}|[1-5]\d{4}|6[0-4]\d{3}|65[0-4]\d\d|655[0-2]\d|6553[0-5]))?(\/[^\s"\\]{0,46})?$/.test(url)) {
+    if (!/^http:\/\/[A-Za-z0-9._-]{1,47}(:([1-9]\d{0,3}|[1-5]\d{4}|6[0-4]\d{3}|65[0-4]\d\d|655[0-2]\d|6553[0-5]))?(\/[!#-\[\]-~]{0,46})?$/.test(url)) {
         toast(t("un_url_err"), "err");
         return;
     }
@@ -6771,7 +6771,10 @@ $("un-apply").addEventListener("click", function() {
         return unifiLoad()
     }).catch(function() {});
 });
-$("un-refresh").addEventListener("click", unifiLoad);
+$("un-refresh").addEventListener("click", function() {
+    delete $("un-card").dataset.dirty;
+    unifiLoad()
+});
 $("un-forget").addEventListener("click", function() {
     confirmModal(t("un_forget_q"), t("un_forget_d"), function() {
         postCmds(["unifi forget"]).then(unifiLoad).catch(function() {});

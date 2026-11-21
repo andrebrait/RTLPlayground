@@ -1028,6 +1028,12 @@ static void test_upgrade(void)
 	answer("{\"_type\":\"upgrade\",\"version\":\"1.0\\\"x\"}");
 	check(!strcmp(unifi.version, "2.1.10.10"), "upgrade: a version with other characters is refused");
 	inform();
+	answer("{\"_type\":\"upgrade\",\"version\":\"\"}");
+	check(!strcmp(unifi.version, "2.1.10.10"), "upgrade: an empty version is refused");
+	inform();
+	answer("{\"_type\":\"upgrade\",\"version\":\"3.0.1");
+	check(!strcmp(unifi.version, "2.1.10.10"), "upgrade: a version string without its closing quote is refused");
+	inform();
 	answer("{\"_type\":\"upgrade\",\"version\":\"123456789012345678901234\"}");
 	check(!strcmp(unifi.version, "2.1.10.10"), "upgrade: a version that does not fit is refused");
 	unifi_init();

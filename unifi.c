@@ -861,6 +861,8 @@ static uint16_t u_string(__code const char *name)
 		return 0xffff;
 	u_ms = ++u_i;
 	u_me = u_strend();
+	if (u_me >= u_n)
+		return 0xffff;	/* no closing quote */
 	return u_ms;
 }
 
