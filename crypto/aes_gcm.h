@@ -8,7 +8,9 @@
  * the forward cipher is needed: GCM decrypts with the same keystream.
  *
  * One message at a time:
- *   gcm_setkey(key);              once per key
+ *   gcm_setkey(key);              once per key; it builds a 4 KB table and
+ *                                 stalls about 30 ms, more than a 20 ms
+ *                                 LACP tick, so call it where that is safe
  *   gcm_start(iv, decrypt);
  *   gcm_aad(aad, len);            all of the AAD, under 8 KB, in one call,
  *                                 or none; the buffer is written back unchanged
@@ -23,7 +25,7 @@
 
 struct gcm_t {
 	uint8_t rk[176];	/* AES-128 round keys */
-	uint8_t m[16][16];	/* m[n] = n * H, 4-bit table */
+	uint8_t m[256][16];	/* m[n] = n * H, 8-bit table */
 	uint8_t j0[16];		/* pre-counter block */
 	uint8_t ctr[16];
 	uint8_t blk[16];	/* AES block in place; the tag after gcm_finish */

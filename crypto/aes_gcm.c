@@ -1,6 +1,6 @@
 /*
  * AES-128-GCM with a 16-byte IV, forward cipher only (see aes_gcm.h).
- * GHASH uses a 4-bit table of multiples of H (Shoup's method), 256 bytes.
+ * GHASH uses an 8-bit table of multiples of H (Shoup's method), 4 KB.
  * This code is in the Public Domain
  */
 
@@ -36,12 +36,6 @@ static __code const uint8_t shift_src[16] = {
 	0, 5, 10, 15, 4, 9, 14, 3, 8, 13, 2, 7, 12, 1, 6, 11
 };
 
-/* Reduction of the 4 bits shifted out of the GHASH accumulator: the high
- * byte of each entry; the low byte is (r << 5) & 0xff. */
-static __code const uint8_t last4_hi[16] = {
-	0x00, 0x1c, 0x38, 0x24, 0x70, 0x6c, 0x48, 0x54,
-	0xe1, 0xfd, 0xd9, 0xc5, 0x91, 0x8d, 0xa9, 0xb5
-};
 
 #define XTIME(a) ((uint8_t)(((a) << 1) ^ (((a) & 0x80) ? 0x1b : 0)))
 
@@ -72,26 +66,24 @@ void aes_encrypt_blk(void) __banked
 		gcm.blk[i] = aes_t[i] ^ gcm.rk[160 + i];
 }
 
-/* gcm.x = gcm.x * H */
+/* gcm.x = gcm.x * H, a byte at a time from the last byte to the first */
 static void ghash_mult(void)
 {
 	__xdata uint8_t *p;
-	uint8_t i, k, n, r;
+	uint8_t i, k, r;
 
 	for (k = 0; k < 16; k++)
 		gcm.z[k] = 0;
-	/* Nibbles from the last bit of the block to the first. */
-	i = 32;
+	i = 16;
 	do {
 		i--;
-		n = gcm.x[i >> 1];
-		n = (i & 1) ? n & 0x0f : n >> 4;
-		p = gcm.m[n];
-		r = gcm.z[15] & 0x0f;
+		p = gcm.m[gcm.x[i]];
+		r = gcm.z[15];
 		for (k = 15; k; k--)
-			gcm.z[k] = ((gcm.z[k] >> 4) | (gcm.z[k - 1] << 4)) ^ p[k];
-		gcm.z[0] = (gcm.z[0] >> 4) ^ p[0] ^ last4_hi[r];
-		gcm.z[1] ^= r << 5;
+			gcm.z[k] = gcm.z[k - 1] ^ p[k];
+		/* Reduce the byte r shifted out: r * 0xe1 lands in the top 16 bits. */
+		gcm.z[0] = p[0] ^ r ^ (r >> 1) ^ (r >> 2) ^ (r >> 7);
+		gcm.z[1] ^= (uint8_t)((r << 1) ^ (r << 6) ^ (r << 7));
 	} while (i);
 	for (k = 0; k < 16; k++)
 		gcm.x[k] = gcm.z[k];
@@ -129,23 +121,23 @@ static void aes_expand(__xdata const uint8_t *key)
 	}
 }
 
-/* The 4-bit table from H in gcm.blk: m[8] = H, m[4] = H * x, m[2] = H * x^2,
- * m[1] = H * x^3, and every other entry the sum of those. */
+/* The 8-bit table from H in gcm.blk: m[0x80] = H, m[0x40] = H * x, down to
+ * m[0x01] = H * x^7, and every other entry the sum of those. */
 static void ghash_table(void)
 {
 	uint8_t i, j, r;
 
 	for (i = 0; i < 16; i++) {
 		gcm.m[0][i] = 0;
-		gcm.m[8][i] = gcm.blk[i];
+		gcm.m[0x80][i] = gcm.blk[i];
 	}
-	for (j = 4; j; j >>= 1) {
+	for (j = 0x40; j; j >>= 1) {
 		r = (gcm.m[j << 1][15] & 1) ? 0xe1 : 0;
 		for (i = 15; i; i--)
 			gcm.m[j][i] = (gcm.m[j << 1][i] >> 1) | (gcm.m[j << 1][i - 1] << 7);
 		gcm.m[j][0] = (gcm.m[j << 1][0] >> 1) ^ r;
 	}
-	for (j = 2; j < 16; j <<= 1)
+	for (j = 2; j; j <<= 1)
 		for (r = 1; r < j; r++)
 			for (i = 0; i < 16; i++)
 				gcm.m[j + r][i] = gcm.m[j][i] ^ gcm.m[r][i];
