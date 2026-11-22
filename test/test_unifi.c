@@ -9,6 +9,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Front ports 1 and 2 have PoE: 1 permitted, 2 switched off */
+#define MACHINE_POE_PORTS 2
 #include "../crypto/aes_gcm.c"
 #include "../unifi.c"
 
@@ -73,6 +75,56 @@ bool strstart(const uint8_t *a, const uint8_t *b)
 }
 
 void gcm_selftest(void) { selftests++; }
+
+/* The L2 table: learned entries by slot, as the ASIC's next-entry lookup
+ * returns them. Empty but for the mac_table test. */
+static struct { uint16_t idx; uint8_t mac[6]; uint8_t port; } l2_tab[300];
+static int l2_n;
+
+/* LAG groups by ASIC port, PORT_LAG_NONE for none */
+static uint8_t lag_of[10] = { [0 ... 9] = PORT_LAG_NONE };
+uint8_t port_lag_of(uint8_t port) { return lag_of[port]; }
+static uint8_t u_l2_next(void)
+{
+	for (int i = 0; i < l2_n; i++) {
+		if (l2_tab[i].idx < u_l2i)
+			continue;
+		memcpy(u_l2mac, l2_tab[i].mac, 6);
+		u_l2port = l2_tab[i].port;
+		u_l2i = l2_tab[i].idx + 1;
+		return 1;
+	}
+	return 0;
+}
+
+/* The controller's replies arrive on ASIC port 8, the SFP+ (front port 6) */
+__xdata uint8_t rx_ingress = 8;
+__xdata uint8_t rx_gateway;	/* 1 + ASIC port, set by the gateway test */
+__xdata uip_ipaddr_t uip_draddr;
+static int gw_arps;
+void uip_arp_request_draddr(void) { gw_arps++; uip_len = 42; }
+void tcpip_output(void) {}
+
+uint8_t poe_admin_mask(void) { return 0x01; }
+
+static int lldp_resends;
+void lldp_resend(void) { lldp_resends++; }
+
+/* LLDP neighbours: front port 1 (ASIC 4) with a named port, front port 2
+ * (ASIC 5) with a MAC port ID; skipped are a network-address chassis, an
+ * expired entry, one on an unused ASIC port, one beyond the port map and
+ * a MAC chassis ID that is not six bytes */
+__xdata struct lldp_neighbor lldp_nb[LLDP_NB_MAX] = {
+	{ .port = 4, .chassis_subtype = 4, .chassis_len = 6, .chassis = { 0x1c, 0x2a, 0xa3, 0x23, 0xd8, 0x68 },
+	  .port_id = "Port \"7\"", .sys_desc = "MokerLink", .port_desc = "uplink", .ttl = 120 },
+	{ .port = 5, .chassis_subtype = 4, .chassis_len = 6, .chassis = { 0x84, 0x78, 0x48, 0x88, 0x39, 0xc9 },
+	  .port_id_mac = 1, .port_id = { 0x84, 0x78, 0x48, 0x88, 0x39, 0xca }, .sys_desc = "U7-Lite", .ttl = 90 },
+	{ .port = 6, .chassis_subtype = 5, .chassis_len = 5, .chassis = { 1, 10, 0, 0, 6 }, .port_id = "x", .ttl = 60 },
+	{ .port = 7, .chassis_subtype = 4, .chassis_len = 6, .port_id = "gone", .ttl = 0 },
+	{ .port = 1, .chassis_subtype = 4, .chassis_len = 6, .port_id = "unused", .ttl = 60 },
+	{ .port = 9, .chassis_subtype = 4, .chassis_len = 6, .port_id = "beyond", .ttl = 60 },
+	{ .port = 6, .chassis_subtype = 4, .chassis_len = 8, .port_id = "long", .ttl = 60 },
+};
 
 /* The hardware, laid out like an RTL8372 4T2XH: ASIC ports 3..8 are front
  * ports 5, 1, 2, 3, 4, 6; 3 is 10G copper, 8 an SFP+ at 10G, 4 down and
@@ -241,7 +293,7 @@ static void ticks(void)
 }
 
 /* The request as sent */
-static uint8_t req[8192];
+static uint8_t req[UNIFI_BUF_SIZE];
 static uint16_t req_len;
 
 static void keep_sent(void)
@@ -397,7 +449,7 @@ static void test_request(void)
 		return;
 
 	uint8_t k[16];
-	static uint8_t copy[8192];
+	static uint8_t copy[UNIFI_BUF_SIZE];
 	memcpy(copy, p, clen);
 	memcpy(k, key, 16);
 	gcm_setkey(k);
@@ -412,12 +464,18 @@ static void test_request(void)
 		"\"hostname\":\"sw\\\"1\",\"inform_url\":\"http://10.0.0.1:8080/inform\","
 		"\"uptime\":1234,\"cfgversion\":\"?\",\"default\":true,\"state\":1,\"fw_caps\":0,"
 		"\"isolated\":false,\"locating\":false,\"selfrun_beacon\":false,\"port_table\":["
-		"{\"port_idx\":5,\"media\":\"GE\",\"speed_caps\":1049064,\"up\":true,\"enable\":true,\"speed\":10000,"
-		"\"rx_bytes\":18446744073709551615,\"tx_bytes\":3001,\"rx_packets\":9009,\"tx_packets\":9018},"
-		"{\"port_idx\":1,\"media\":\"GE\",\"speed_caps\":1048682,\"up\":false,\"enable\":false,\"speed\":0,"
-		"\"rx_bytes\":4000,\"tx_bytes\":4001,\"rx_packets\":12009,\"tx_packets\":12018},";
-	const char *last = "{\"port_idx\":6,\"media\":\"SFP+\",\"speed_caps\":288,\"up\":true,\"enable\":true,"
-		"\"speed\":10000,\"rx_bytes\":8000,\"tx_bytes\":8001,\"rx_packets\":24009,\"tx_packets\":24018}]}";
+		"{\"port_idx\":5,\"media\":\"GE\",\"speed_caps\":1049064,\"up\":true,\"enable\":true,\"poe_caps\":0,\"speed\":10000,"
+		"\"rx_bytes\":18446744073709551615,\"tx_bytes\":3001,\"rx_packets\":9009,\"tx_packets\":9018,\"mac_table\":[]},"
+		"{\"port_idx\":1,\"media\":\"GE\",\"speed_caps\":1048682,\"up\":false,\"enable\":false,"
+		"\"port_poe\":true,\"poe_caps\":7,\"poe_enable\":true,\"poe_mode\":\"auto\",\"speed\":0,"
+		"\"rx_bytes\":4000,\"tx_bytes\":4001,\"rx_packets\":12009,\"tx_packets\":12018,"
+		"\"mac_table\":[{\"mac\":\"1c:2a:a3:23:d8:68\",\"age\":0,\"uptime\":0,\"static\":false}]},";
+	const char *last = "{\"port_idx\":6,\"media\":\"SFP+\",\"speed_caps\":288,\"up\":true,\"enable\":true,\"poe_caps\":0,"
+		"\"speed\":10000,\"rx_bytes\":8000,\"tx_bytes\":8001,\"rx_packets\":24009,\"tx_packets\":24018,\"mac_table\":[]}],"
+		"\"lldp_table\":[{\"chassis_id\":\"1c:2a:a3:23:d8:68\",\"port_id\":\"Port \\\"7\\\"\","
+		"\"local_port_idx\":1,\"local_port_name\":\"Port 1\",\"is_wired\":true},"
+		"{\"chassis_id\":\"84:78:48:88:39:c9\",\"port_id\":\"84:78:48:88:39:ca\","
+		"\"local_port_idx\":2,\"local_port_name\":\"Port 2\",\"is_wired\":true}]}";
 	const char *got = (char *)copy + 40;
 	check(!strncmp(got, want, strlen(want)) && strlen(got) > strlen(last)
 	      && !strcmp(got + strlen(got) - strlen(last), last),
@@ -428,6 +486,19 @@ static void test_request(void)
 	for (const char *q = got; (q = strstr(q, "\"port_idx\":")); q++)
 		ports++;
 	check(ports == 6, "request: one port_table entry per used port, unused ASIC ports left out");
+	const char *p2 = strstr(got, "{\"port_idx\":2,"), *p3 = strstr(got, "{\"port_idx\":3,");
+	const char *off = p2 ? strstr(p2, "\"port_poe\":true,\"poe_caps\":7,\"poe_enable\":false,\"poe_mode\":\"off\"") : NULL;
+	check(p2 && p3 && off && off < p3, "request: a PoE port switched off reports poe_mode off");
+	int poe = 0, nopoe = 0;
+	for (const char *q = got; (q = strstr(q, "\"port_poe\"")); q++)
+		poe++;
+	for (const char *q = got; (q = strstr(q, "\"poe_caps\":0")); q++)
+		nopoe++;
+	check(poe == 2 && nopoe == 4, "request: PoE fields on the PoE ports, poe_caps 0 on the others");
+	const char *p3e = p3 ? strstr(p3, "}") : NULL;
+	check(p2 && p3 && strstr(p2, "\"mac_table\":[{\"mac\":\"84:78:48:88:39:c9\",") < p3
+	      && p3e && strstr(p3, "\"mac_table\":[]}") == p3e - 14,
+	      "request: each port's LLDP neighbours with a MAC chassis ID are its mac_table, the others are not");
 
 
 	static const char nf[] = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
@@ -473,13 +544,17 @@ static void test_rexmit(void)
 	uptime_secs = unifi.next;
 	ticks();
 	appcall(UIP_CONNECTED, 0, 0);
+	lldp_resends = 0;
 	cmd("unifi off");
 	appcall(UIP_POLL, 0, 0);
 	int before = connects;
 	ticks();
 	check(uip_flags == UIP_ABORT && unifi.phase == U_IDLE && !unifi.conn && connects == before,
 	      "unifi off: the connection is reset and no inform starts");
+	cmd("unifi off");
 	cmd("unifi on");
+	cmd("unifi on");
+	check(lldp_resends == 2, "unifi on/off: LLDP resends once per change, not on a repeat");
 }
 
 static void test_replies(void)
@@ -593,7 +668,7 @@ static void test_replies(void)
 	/* More data than the buffer holds, without a header end */
 	inform();
 	memset(r, 'x', 1000);
-	for (int i = 0; i < 11 && unifi.phase == U_RECV; i++)
+	for (int i = 0; i < UNIFI_BUF_SIZE / 1000 + 1 && unifi.phase == U_RECV; i++)
 		appcall(UIP_NEWDATA, r, 1000);
 	check(unifi.err == UE_HTTP && !unifi.conn, "reply: data beyond the buffer is refused");
 
@@ -616,7 +691,7 @@ static uint8_t req_iv[16];
 
 static const char *req_json(void)
 {
-	static uint8_t copy[8192];
+	static uint8_t copy[UNIFI_BUF_SIZE];
 	char *body = memmem(req, req_len, "\r\n\r\n", 4);
 	if (!body)
 		return NULL;
@@ -671,6 +746,9 @@ static void test_adopt(void)
 	cur_key = newkey;
 	inform();
 	j = req_json();
+	check(j && strstr(j, "{\"port_idx\":6,\"media\":\"SFP+\",\"speed_caps\":288,\"is_uplink\":true,\"up\":true")
+	      && !strstr(strstr(j, "is_uplink") + 1, "is_uplink"),
+	      "uplink: the port the controller's replies arrive on, and only it, is the uplink");
 	check(j && strstr(j, "\"cfgversion\":\"cfe5c9df7757b6f5\",\"default\":false,\"state\":4,")
 	      && req_iv[11] == unifi.boot && unifi.boot == 1,
 	      "adopt: the next inform uses the new key, echoes the cfgversion and counts the boot");
@@ -953,6 +1031,23 @@ static void test_failed_reads(void)
 		return;
 	strcpy(before, strstr(j, "\"port_table\""));
 	appcall(UIP_NEWDATA, nf0, sizeof(nf0) - 1);
+
+	/* Once the gateway answers, its port is the uplink: the controller
+	 * itself may hang off any port */
+	rx_gateway = 4 + 1;	/* ASIC 4, front port 1 */
+	inform();
+	j = req_json();
+	check(j && strstr(j, "{\"port_idx\":1,\"media\":\"GE\",\"speed_caps\":1048682,\"is_uplink\":true,")
+	      && !strstr(strstr(j, "is_uplink") + 1, "is_uplink"),
+	      "uplink: the gateway's port wins over the controller's");
+	check(!gw_arps, "uplink: no gateway, no ARP for it");
+	uip_ipaddr(&uip_draddr, 10, 0, 0, 1);
+	appcall(UIP_NEWDATA, nf0, sizeof(nf0) - 1);
+	inform();
+	check(gw_arps == 1 && !uip_len, "uplink: each inform asks for the gateway first");
+	memset(&uip_draddr, 0, sizeof(uip_draddr));
+	rx_gateway = 0;
+	appcall(UIP_NEWDATA, nf0, sizeof(nf0) - 1);
 	link_fail = 1;
 	stat_fail = 2;
 	speed_fail = 1;
@@ -972,7 +1067,7 @@ static void test_failed_reads(void)
 	stat_calls = 0;
 	inform();
 	j = req_json();
-	check(j && strstr(j, "\"port_idx\":2,") && strstr(j, "\"rx_packets\":15009,") && strstr(j, "\"tx_packets\":15018}")
+	check(j && strstr(j, "\"port_idx\":2,") && strstr(j, "\"rx_packets\":15009,") && strstr(j, "\"tx_packets\":15018,")
 	      && !strstr(j, "\"rx_bytes\":0,") && !strstr(j, "\"tx_bytes\":0,"),
 	      "ports: a sum with a failed read repeats the last good sum");
 	appcall(UIP_NEWDATA, nf0, sizeof(nf0) - 1);
@@ -1059,6 +1154,91 @@ static void test_upgrade(void)
 	cur_key = key;
 }
 
+/* The MACs learned on a port are its mac_table, after its LLDP neighbours */
+static void test_mac_table(void)
+{
+	static const struct { uint16_t idx; uint8_t mac[6]; uint8_t port; } t[] = {
+		{ 3, { 0x1c, 0x2a, 0xa3, 0x23, 0xd8, 0x68 }, 4 },	/* the LLDP neighbour on front port 1 */
+		{ 10, { 2, 0, 0, 0, 0, 1 }, 4 },
+		{ 11, { 2, 0, 0, 0, 0, 9 }, 0xff },	/* static */
+		{ 20, { 2, 0, 0, 0, 0, 8 }, 8 },	/* the uplink, front port 6 */
+		{ 4095, { 2, 0, 0, 0, 0, 3 }, 6 },	/* front port 3, in the last slot */
+	};
+	const char *j, *p1, *p3, *p6;
+
+	l2_n = 5;
+	memcpy(l2_tab, t, sizeof(t));
+	rx_gateway = 8 + 1;
+	inform();
+	j = req_json();
+	p1 = j ? strstr(j, "{\"port_idx\":1,") : NULL;
+	p3 = j ? strstr(j, "{\"port_idx\":3,") : NULL;
+	p6 = j ? strstr(j, "{\"port_idx\":6,") : NULL;
+	check(p1 && strstr(p1, "\"mac_table\":[{\"mac\":\"1c:2a:a3:23:d8:68\",\"age\":0,\"uptime\":0,\"static\":false},"
+				"{\"mac\":\"02:00:00:00:00:01\",\"age\":0,\"uptime\":0,\"static\":false}]}"),
+	      "mac_table: the LLDP neighbour, then the learned MACs, the neighbour's not twice");
+	check(p3 && strstr(p3, "\"mac_table\":[{\"mac\":\"02:00:00:00:00:03\",") && p6
+	      && strstr(p6, "\"mac_table\":[]}") && !strstr(j, "02:00:00:00:00:09"),
+	      "mac_table: per port; the uplink's and static entries are left out");
+	answer("{\"_type\":\"noop\",\"interval\":10}");
+
+	/* More MACs than fit: each port stops where the rest still fits */
+	l2_n = 300;
+	for (int i = 0; i < l2_n; i++) {
+		l2_tab[i].idx = i;
+		memcpy(l2_tab[i].mac, t[1].mac, 6);
+		l2_tab[i].mac[4] = i >> 8;
+		l2_tab[i].mac[5] = i;
+		l2_tab[i].port = 3 + i % 4;	/* front ports 5, 1, 2, 3 */
+	}
+	inform();
+	j = req_json();
+	int n = 0;
+	for (const char *q = j; q && (q = strstr(q, "\"02:00:00:")); q++)
+		n++;
+	check(j && n > 100 && n < 300 && strstr(j, "\"lldp_table\":[{") && unifi.end < UNIFI_BUF_SIZE - 512,
+	      "mac_table: a full L2 table takes what is left, and the inform stays whole");
+	answer("{\"_type\":\"noop\",\"interval\":10}");
+
+	/* A LAG uplink: ASIC 8 and 7 (front ports 6 and 4) both uplinks */
+	l2_n = 5;
+	memcpy(l2_tab, t, sizeof(t));
+	l2_tab[4].port = 7;
+	lag_of[7] = lag_of[8] = 1;
+	rx_gateway = 8 + 1;
+	inform();
+	j = req_json();
+	p6 = j ? strstr(j, "{\"port_idx\":4,") : NULL;
+	check(p6 && strstr(p6, "\"is_uplink\":true") && strstr(p6, "\"mac_table\":[]}") < strstr(p6, "}")
+	      && !strstr(j, "02:00:00:00:00:03"),
+	      "mac_table: every member of a LAG uplink is an uplink, without MACs");
+	answer("{\"_type\":\"noop\",\"interval\":10}");
+	lag_of[7] = lag_of[8] = PORT_LAG_NONE;
+
+	/* The gateway stopped answering: the uplink falls back to the
+	 * controller's port, ASIC 8, after one inform */
+	rx_gateway = 4 + 1;
+	inform();
+	answer("{\"_type\":\"noop\",\"interval\":10}");
+	inform();
+	j = req_json();
+	p6 = j ? strstr(j, "{\"port_idx\":6,") : NULL;
+	p1 = j ? strstr(j, "{\"port_idx\":1,") : NULL;
+	check(p6 && p1 && strstr(p6, "\"is_uplink\":true") && !memmem(p1, p6 - p1, "is_uplink", 9),
+	      "uplink: a gateway that no longer answers stops deciding it");
+	answer("{\"_type\":\"noop\",\"interval\":10}");
+
+	/* No uplink known: the L2 table is not walked */
+	u_uplink = 0;
+	inform();
+	j = req_json();
+	check(j && !strstr(j, "02:00:00:00:00:01") && strstr(j, "\"1c:2a:a3:23:d8:68\""),
+	      "mac_table: no learned MACs while no uplink is known");
+	answer("{\"_type\":\"noop\",\"interval\":10}");
+	l2_n = 0;
+	rx_gateway = 0;
+}
+
 int main(void)
 {
 	memset(sector, 0xff, sizeof(sector));
@@ -1080,5 +1260,6 @@ int main(void)
 	test_json();
 	test_failed_reads();
 	test_upgrade();
+	test_mac_table();
 	return failures != 0;
 }

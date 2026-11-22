@@ -115,6 +115,15 @@ void lldp_init(void) __banked
         lldp_nb[i].ttl = 0;
 }
 
+/* Every usable port sends on the next tick: what the frames say changed */
+void lldp_resend(void) __banked
+{
+    uint8_t i;
+
+    for (i = 0; i <= MACHINE_MAX_PORT; i++)
+        lldp_ttr[i] = 0;
+}
+
 /* 802.1AB: a transmit timer per port. A usable port sends at once and then every interval;
  * the fast frames go out only on a port that learned a new neighbour. */
 void lldp_tick(void) __banked
@@ -188,7 +197,6 @@ static void lldp_send_ports(uint16_t ttl, uint16_t ports) __reentrant
 {
     __xdata uint8_t *p;
     __xdata uint8_t *tail;
-    uint8_t port_position;
 
     lldp_set_addresses();
     lldp_set_rtl_wrapper();
@@ -203,14 +211,13 @@ static void lldp_send_ports(uint16_t ttl, uint16_t ports) __reentrant
     memcpy(p, uip_ethaddr.addr, MAC_ADDR_LEN);
     p += MAC_ADDR_LEN;
 
-    //Port ID
+    //Port ID: the switch MAC on every port, as UniFi devices and lldpd send
+    //it; the Port Description tells the ports apart
     *p++ = LLDP_TYPE(LLDP_PORT_ID_TLV_TYPE);
     *p++ = LLDP_PORT_ID_TLV_LENGTH;
-    *p++ = LLDP_PORT_ID_TLV_SUBTYPE;
-    memcpyc(p, LLDP_PORT_ID_PREFIX, LLDP_PORT_ID_PREFIX_LENGTH);
-    p += LLDP_PORT_ID_PREFIX_LENGTH;
-    port_position = (p-LLDP_O->payload);
-	*p++ = '0';       // filled in per port below
+    *p++ = LLDP_PORT_ID_SUBTYPE_MAC;
+    memcpy(p, uip_ethaddr.addr, MAC_ADDR_LEN);
+    p += MAC_ADDR_LEN;
 
     //TTL
     *p++ = LLDP_TYPE(LLDP_TTL_TLV_TYPE);
@@ -252,7 +259,6 @@ static void lldp_send_ports(uint16_t ttl, uint16_t ports) __reentrant
     for (uint8_t port = MACHINE_MIN_PORT; port <= MACHINE_MAX_PORT; port++) {
 
         if ((1 << port) & ports) {
-            LLDP_O->payload[port_position] = '0' + machine.log_to_phys_port[port];
             LLDP_O->rtl_tag.pmask = HTONS((uint16_t)1 << port);
 
             p = tail;
@@ -321,12 +327,19 @@ void lldp_set_rtl_wrapper(void) __banked {
     LLDP_O->ether_type = HTONS(LLDP_ETHERTYPE);
 }
 
+/* The port name, or "Port <front-panel number>" for a port without one.
+ * Front-panel numbers are 1..9: the port maps have nine entries. */
 uint8_t lldp_portdesc(__xdata uint8_t *p, uint8_t port) __banked
 {
     uint8_t name_length = strlen_x(port_names[port]);
 
-    if (!name_length)
-        return 0;
+    if (!name_length) {
+        *p++ = LLDP_TYPE(LLDP_PORT_DESC_TLV_TYPE);
+        *p++ = 6;
+        memcpyc(p, LLDP_PORT_DESC_PREFIX, 5);
+        p[5] = '0' + machine.log_to_phys_port[port];
+        return 8;
+    }
     *p++ = LLDP_TYPE(LLDP_PORT_DESC_TLV_TYPE);
     *p++ = name_length;
     memcpy(p, port_names[port], name_length);

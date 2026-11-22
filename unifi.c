@@ -22,33 +22,28 @@
 #include "rtl837x_common.h"
 #include "cmd_parser.h"
 #include "uip/uip.h"
+#include "uip/uip_arp.h"
 #include "dns.h"
 #include "rtl837x_flash.h"
 #include "snmp_hw.h"
 #include "crypto/aes_gcm.h"
 #include "unifi.h"
+#include "rtl837x_lldp.h"
+#include "rtl837x_port.h"
+#ifndef RTLP_HOST_TEST
+#include "rtl837x_sfr.h"
+#include "rtl837x_regs.h"
+#if SOC_FAMILY == RTL836X
+#include "rtl836x_regs.h"
+#endif
+#endif
+#ifdef MACHINE_POE_PORTS
+#include "poe.h"
+#endif
 
 #pragma codeseg BANK5
 #pragma constseg BANK5
 
-/* The reported model. The TL-SG108PE V5 (RTL836x, 8 x 1G, PoE on 1-4)
- * maps to the USW-Lite-8-PoE, the 8 x 2.5G + SFP+ boards to the
- * USW-Flex-2.5G-8. The version is the model's current release as UniFi
- * Network 10.6.109 listed it, which is above its minimumFirmwareRequired. */
-#ifndef SOC_FAMILY
-#error "machine.h must define SOC_FAMILY"
-#endif
-#ifndef UNIFI_MODEL
-#if SOC_FAMILY == RTL836X
-#define UNIFI_MODEL	"USL8LP"
-#define UNIFI_DISPLAY	"USW-Lite-8-PoE"
-#define UNIFI_VERSION	"7.5.15.17146"
-#else
-#define UNIFI_MODEL	"USWED36"
-#define UNIFI_DISPLAY	"USW-Flex-2.5G-8"
-#define UNIFI_VERSION	"2.1.8.971"
-#endif
-#endif
 
 #define U_IDLE		0
 #define U_RESOLVE	1
@@ -195,13 +190,15 @@ static void u_ip(__xdata const uint8_t *a)
 	}
 }
 
-/* The MAC as aa:bb:cc:dd:ee:ff, or as AABBCCDDEEFF when sep is 0 */
+/* The MAC at u_ma as aa:bb:cc:dd:ee:ff, or as AABBCCDDEEFF when sep is 0 */
+static __xdata const uint8_t *__xdata u_ma;
+
 static void u_mac(__xdata char sep)
 {
 	for (u_i = 0; u_i < 6; u_i++) {
 		if (u_i && sep)
 			u_c(sep);
-		u_d[0] = uip_ethaddr.addr[u_i];
+		u_d[0] = u_ma[u_i];
 		u_d[1] = u_hex[u_d[0] >> 4];
 		u_d[2] = u_hex[u_d[0] & 15];
 		if (!sep) {
@@ -256,6 +253,141 @@ static __xdata uint8_t u_dg[20];
 static __xdata uint8_t u_ph, u_up, u_cnt, u_adm, u_ok;	/* u_d is the digit helpers' */
 static __xdata uint32_t u_link;
 static __xdata uint16_t u_mbps;
+extern __xdata uint8_t rx_ingress, rx_gateway;
+static __xdata uint8_t u_uplink;	/* 1 + the ASIC port the controller's replies arrive on, 0 = none yet */
+static __xdata struct lldp_neighbor *__xdata u_nb;
+static __xdata uint8_t u_mt;	/* mac_table entries written */
+static __xdata uint8_t u_isup;	/* the port is the uplink */
+static __xdata uint8_t u_upk;	/* 1 + the uplink's ASIC port, 0 = not known */
+static __xdata uint8_t u_gw;	/* rx_gateway as the last inform's gateway ARP left it */
+static __xdata uint8_t u_inmt;	/* the port's learned MACs are being listed */
+static __xdata uint8_t u_l2n;	/* L2 walk steps this tick */
+static __xdata uint16_t u_mtend;	/* mac_table entries stop here */
+/* Kept free for a port entry without learned MACs, and for the LLDP
+ * table, the end of the JSON and the tag (see u_lldp()) */
+#define U_PORT_ROOM	400
+#define U_TAIL_ROOM	(2800 + LLDP_NB_MAX * 64)	/* and the neighbours' mac_table entries */
+#define U_L2_STEPS	32	/* L2 walk steps per tick */
+
+/* The L2 table's learned unicast entries, walked with the ASIC's "next
+ * entry" lookup: one step per entry, not one per slot of the 4K table.
+ * u_l2_next() searches from slot u_l2i, fills u_l2mac, u_l2port (the ASIC
+ * port, 0xff for a static entry) and moves u_l2i past the entry; 0 at the
+ * end of the table or when the table does not answer. */
+static __xdata uint16_t u_l2i;
+static __xdata uint8_t u_l2mac[6], u_l2port;
+#ifdef RTLP_HOST_TEST
+static uint8_t u_l2_next(void);
+#else
+static __xdata uint16_t u_l2e;
+static __xdata uint8_t u_l2w;
+#endif
+#ifdef RTLP_HOST_TEST
+#elif SOC_FAMILY == RTL836X
+static __xdata uint16_t u_lw[6];	/* SDK rtl8367c_getAsicL2LookupTb layout */
+
+static uint8_t u_l2_idle(void)
+{
+	u_l2w = 0;
+	do {
+		reg_read(RTL836X_REG_TABLE_LUT_ADDR);
+		if (!(SFR_DATA_U16 & TABLE_LUT_ADDR_BUSY))
+			return 1;
+	} while (++u_l2w);
+	return 0;
+}
+
+static uint8_t u_l2_next(void)
+{
+	if (u_l2i >= RTL836X_LUT_SIZE || !u_l2_idle())
+		return 0;
+	REG_SET(RTL836X_REG_TABLE_ACCESS_ADDR, u_l2i);
+	REG_SET(RTL836X_REG_TABLE_ACCESS_CTRL, TABLE_ACCESS_LUT_NEXT_UC);
+	if (!u_l2_idle() || !(SFR_DATA_U16 & TABLE_LUT_HIT))
+		return 0;
+	/* The status splits the address: bits 11 and 12 are swapped */
+	u_l2e = SFR_DATA_U16;
+	u_lw[0] = u_l2e & 0x07ff;
+	if (u_l2e & 0x4000)
+		u_lw[0] |= 0x0800;
+	if (u_l2e & 0x0800)
+		u_lw[0] |= 0x1000;
+	u_l2e = u_lw[0];
+	if (u_l2e < u_l2i)
+		return 0;	/* wrapped round */
+	u_l2i = u_l2e + 1;
+	for (u_l2w = 0; u_l2w < 6; u_l2w++) {
+		reg_read(RTL836X_REG_TABLE_READ_DATA0 + u_l2w);
+		u_lw[u_l2w] = SFR_DATA_U16;
+	}
+	for (u_l2w = 0; u_l2w < 6; u_l2w += 2) {
+		u_l2mac[u_l2w] = u_lw[2 - u_l2w / 2] >> 8;
+		u_l2mac[u_l2w + 1] = u_lw[2 - u_l2w / 2];
+	}
+	u_l2port = (u_lw[4] >> 8) & 7;
+	if (u_lw[3] & 0x8000)
+		u_l2port |= 8;
+	if (u_lw[5] & 0x0020)
+		u_l2port = 0xff;	/* static */
+	return 1;
+}
+#else
+static uint8_t u_l2_wait(void)
+{
+	u_l2w = 0;
+	do {
+		reg_read_m(RTL837X_TBL_CTRL);
+		if (!(sfr_data[3] & TBL_EXECUTE))
+			return 1;
+	} while (++u_l2w);
+	return 0;
+}
+
+static uint8_t u_l2_next(void)
+{
+	if (u_l2i >= 0x1000 || !u_l2_wait())
+		return 0;
+	reg_read_m(RTL837x_TBL_DATA_0);
+	REG_WRITE(RTL837x_TBL_DATA_0, sfr_data[0], sfr_data[1] & 0xfc, sfr_data[2] | (TBL_LUTREAD_NEXT_L2UC << 6), sfr_data[3]);
+	REG_WRITE(RTL837X_TBL_CTRL, u_l2i >> 8, u_l2i, TBL_L2_UNICAST, TBL_EXECUTE);
+	if (!u_l2_wait())
+		return 0;
+	reg_read_m(RTL837x_TBL_DATA_0);
+	u_l2e = sfr_data[2] & 0x0f;
+	u_l2e = (u_l2e << 8) | sfr_data[3];
+	reg_read_m(RTL837x_L2_DATA_OUT_B);
+	if (u_l2e < u_l2i)
+		return 0;	/* wrapped round */
+	u_l2i = u_l2e + 1;
+	if (!(sfr_data[0] & 0x20)) {
+		u_l2port = 0xff;	/* not valid: skipped, as the web walker does */
+		return 1;
+	}
+	u_l2mac[0] = sfr_data[2];
+	u_l2mac[1] = sfr_data[3];
+	u_l2port = sfr_data[0] >> 6;
+	reg_read_m(RTL837x_L2_DATA_OUT_A);
+	memcpy(u_l2mac + 2, sfr_data, 4);
+	reg_read_m(RTL837x_L2_DATA_OUT_C);
+	u_l2port |= (sfr_data[3] & 3) << 2;
+	if (sfr_data[1] & 1)
+		u_l2port = 0xff;	/* static */
+	return 1;
+}
+#endif
+
+/* One mac_table entry for the MAC at u_ma */
+static void u_mt_entry(void)
+{
+	if (u_mt++)
+		u_c(',');
+	u_s("{\"mac\":\"");
+	u_mac(':');
+	u_s("\",\"age\":0,\"uptime\":0,\"static\":false}");
+}
+#ifdef MACHINE_POE_PORTS
+static __xdata uint8_t u_poe;	/* PoE permitted, bit 0 = front port 1 */
+#endif
 
 /* u_acc in decimal; u_acc is used up */
 static void u_dec64(void)
@@ -346,6 +478,25 @@ static void u_port_entry(void)
 	else
 		u_s(",\"media\":\"GE\",\"speed_caps\":1048682");	/* 10M to 2.5G */
 #endif
+	/* The uplink: the port towards the gateway, else towards the
+	 * controller. The controller leaves it out when it places the
+	 * devices behind the other ports, and shows its speed as the
+	 * switch's. The controller can hang off any port, so the gateway
+	 * decides once its ARP has been seen. */
+	u_upk = u_gw;
+	if (!u_upk)
+		u_upk = u_uplink;
+	u_isup = 0;
+	if (u_upk == u_ph + 1)
+		u_isup = 1;
+	else if (u_upk) {
+		/* Every member of a LAG uplink */
+		u_d[0] = port_lag_of(u_upk - 1);
+		if (u_d[0] != PORT_LAG_NONE && u_d[0] == port_lag_of(u_ph))
+			u_isup = 1;
+	}
+	if (u_isup)
+		u_s(",\"is_uplink\":true");
 	if (u_up)
 		u_s(",\"up\":true");
 	else
@@ -354,6 +505,18 @@ static void u_port_entry(void)
 		u_s(",\"enable\":false");
 	else
 		u_s(",\"enable\":true");
+#ifdef MACHINE_POE_PORTS
+	/* PoE is switched by GPIO and not measured, so no power is reported */
+	u_d[0] = machine.log_to_phys_port[u_ph];
+	if (u_d[0] <= MACHINE_POE_PORTS) {
+		if (u_poe >> (u_d[0] - 1) & 1)
+			u_s(",\"port_poe\":true,\"poe_caps\":7,\"poe_enable\":true,\"poe_mode\":\"auto\"");
+		else
+			u_s(",\"port_poe\":true,\"poe_caps\":7,\"poe_enable\":false,\"poe_mode\":\"off\"");
+	} else {
+		u_s(",\"poe_caps\":0");	/* as a USW-Lite-8-PoE reports ports 5-8 */
+	}
+#endif
 	u_s(",\"speed\":");
 	u_dec(u_pcp->mbps);
 	u_counter(",\"rx_bytes\":", 0, 0, 0);
@@ -364,7 +527,47 @@ static void u_port_entry(void)
 	u_counter(",\"rx_packets\":", 2, 2, 4);
 	u_counter(",\"tx_packets\":", 3, 5, 7);
 #endif
-	u_c('}');
+	/* The controller places the devices behind a port that is not the
+	 * uplink by the MACs in its mac_table: the LLDP neighbours, then the
+	 * MACs learned on the port (u_port_macs()). The uplink's are left
+	 * out: the controller ignores them, and they are the rest of the
+	 * network. The room left for the other ports and the LLDP table
+	 * bounds the entries. */
+	u_s(",\"mac_table\":[");
+	u_mt = 0;
+	for (u_nb = lldp_nb; !u_isup && u_nb < lldp_nb + LLDP_NB_MAX; u_nb++) {
+		if (!u_nb->ttl || u_nb->port != u_ph || u_nb->chassis_subtype != LLDP_CHASSIS_ID_TLV_SUBTYPE
+		    || u_nb->chassis_len != 6)
+			continue;
+		u_ma = u_nb->chassis;
+		u_mt_entry();
+	}
+	u_mtend = MACHINE_MAX_PORT - u_ph;
+	u_mtend *= U_PORT_ROOM;
+	u_mtend = UNIFI_BUF_SIZE - U_TAIL_ROOM - u_mtend;
+	u_l2i = 0;
+}
+
+/* The next U_L2_STEPS entries of the L2 walk: the MACs learned on port
+ * u_ph. Returns 1 once the walk is done. While no uplink is known, the
+ * table is not walked: the uplink's MACs would pass for clients. */
+static uint8_t u_port_macs(void)
+{
+	for (u_l2n = 0; u_l2n < U_L2_STEPS; u_l2n++) {
+		if (u_isup || !u_upk || unifi.pos >= u_mtend || !u_l2_next())
+			return 1;
+		if (u_l2port != u_ph)
+			continue;
+		for (u_nb = lldp_nb; u_nb < lldp_nb + LLDP_NB_MAX; u_nb++)
+			if (u_nb->ttl && u_nb->port == u_ph && u_nb->chassis_len == 6
+			    && !memcmp(u_nb->chassis, u_l2mac, 6))
+				break;
+		if (u_nb < lldp_nb + LLDP_NB_MAX)
+			continue;	/* listed as a neighbour */
+		u_ma = u_l2mac;
+		u_mt_entry();
+	}
+	return 0;
 }
 
 
@@ -373,6 +576,7 @@ static void u_build(void)
 {
 	unifi.pos = HROOM + TNBU_HDR;
 	u_s("{\"mac\":\"");
+	u_ma = uip_ethaddr.addr;
 	u_mac(':');
 	u_s("\",\"serial\":\"");
 	u_mac(0);
@@ -407,21 +611,71 @@ static void u_build(void)
 	u_s("\"fw_caps\":0,\"isolated\":false,\"locating\":false,"
 	    "\"selfrun_beacon\":false,\"port_table\":[");
 	u_ph = MACHINE_MIN_PORT;
+	u_inmt = 0;
 	u_cnt = 0;	/* entries written */
+#ifdef MACHINE_POE_PORTS
+	u_poe = poe_admin_mask();
+#endif
 }
 
-/* The next port table entry. Its hardware reads take a few milliseconds,
- * so one port per tick keeps the main loop responsive. Returns 1 once the
- * table is complete and the JSON closed. */
+/* The LLDP neighbours, so the controller can draw the topology, with the
+ * members a USW-Lite-8-PoE (7.5.15, libubnt) sends but mgmt_ips. Only
+ * neighbours with a MAC chassis ID: the controller matches them to devices
+ * by MAC. Budget: an entry is at most about 150 bytes (lldp_printable()
+ * leaves nothing to escape), so LLDP_NB_MAX of them take about 2.4 KB,
+ * within U_TAIL_ROOM. The port table's learned MACs take what the head,
+ * the ports and this table leave of the UNIFI_BUF_SIZE buffer. */
+static void u_lldp(void)
+{
+	u_s("],\"lldp_table\":[");
+	u_cnt = 0;
+	for (u_nb = lldp_nb; u_nb < lldp_nb + LLDP_NB_MAX; u_nb++) {
+		if (!u_nb->ttl || u_nb->chassis_subtype != LLDP_CHASSIS_ID_TLV_SUBTYPE
+		    || u_nb->chassis_len != 6 || u_nb->port > MACHINE_MAX_PORT
+		    || !machine.log_to_phys_port[u_nb->port])
+			continue;
+		if (u_cnt++)
+			u_c(',');
+		u_s("{\"chassis_id\":\"");
+		u_ma = u_nb->chassis;
+		u_mac(':');
+		u_s("\",\"port_id\":\"");
+		if (u_nb->port_id_mac) {
+			u_ma = (__xdata const uint8_t *)u_nb->port_id;
+			u_mac(':');
+		} else {
+			u_x(u_nb->port_id);
+		}
+		u_s("\",\"local_port_idx\":");
+		u_dec(machine.log_to_phys_port[u_nb->port]);
+		u_s(",\"local_port_name\":\"Port ");
+		u_dec(machine.log_to_phys_port[u_nb->port]);
+		u_s("\",\"is_wired\":true}");
+	}
+}
+
+/* The next port table entry, then its learned MACs a few at a time. The
+ * hardware reads take a few milliseconds, so one step per tick keeps the
+ * main loop responsive. Returns 1 once the table is complete and the JSON
+ * closed. */
 static uint8_t u_ports(void)
 {
+	if (u_inmt) {
+		if (!u_port_macs())
+			return 0;
+		u_s("]}");
+		u_inmt = 0;
+		u_ph++;
+		return 0;
+	}
 	while (u_ph <= MACHINE_MAX_PORT && !machine.log_to_phys_port[u_ph])
 		u_ph++;
 	if (u_ph <= MACHINE_MAX_PORT) {
 		u_port_entry();
-		u_ph++;
+		u_inmt = 1;
 		return 0;
 	}
+	u_lldp();
 	u_s("]}");
 	return 1;
 }
@@ -617,6 +871,8 @@ void unifi_appcall(void) __banked
 		}
 	}
 	if (unifi.phase == U_RECV && uip_newdata()) {
+		/* The controller is reached through this port: the uplink */
+		u_uplink = rx_ingress + 1;
 		u_d[0] = 2;
 		if (uip_len <= UNIFI_BUF_SIZE - unifi.pos) {
 			u_scan = unifi.pos;
@@ -1063,6 +1319,16 @@ void unifi_tick(void) __banked
 			gcm_setkey(unifi.key);
 			unifi.keyed = 1;
 		}
+		/* Ask for the gateway: its reply arrives through the uplink,
+		 * which the port table reports (rx_gateway). Once per inform,
+		 * so a changed layout shows within an interval. */
+		u_gw = rx_gateway;	/* the answer to the last inform's request, if any */
+		rx_gateway = 0;
+		if (uip_draddr[0] | uip_draddr[1]) {
+			uip_arp_request_draddr();
+			tcpip_output();
+			uip_len = 0;
+		}
 		/* The reply fields describe the inform being made */
 		unifi.status = 0;
 		unifi.type[0] = 0;
@@ -1336,13 +1602,13 @@ void unifi_parse(void) __banked
 		cmd_nosave = 1;	/* a status query, polled by the web page */
 		return;
 	}
-	if (cmd_words_len == 2 && u_word("on")) {
-		unifi.enabled = 1;
-		u_stop();
-		return;
-	}
-	if (cmd_words_len == 2 && u_word("off")) {
-		unifi.enabled = 0;
+	if (cmd_words_len == 2 && (u_word("on") || u_word("off"))) {
+		u_d[0] = u_word("on");
+		/* LLDP describes the switch as a UniFi one while on: neighbours
+		 * get the new frames at once, the old entry ages out */
+		if (unifi.enabled != u_d[0])
+			lldp_resend();
+		unifi.enabled = u_d[0];
 		u_stop();
 		return;
 	}

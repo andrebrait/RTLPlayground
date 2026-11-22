@@ -2,15 +2,35 @@
 #define _UNIFI_H_
 
 #include <stdint.h>
+#include "machine.h"
 #include "dns.h"
 
 /* The message buffer: one inform out, then its reply in. The largest reply
  * seen in the lab, a 6.9 KB system_cfg, is 7.6 KB encrypted. */
-#define UNIFI_BUF_SIZE	10240
+#define UNIFI_BUF_SIZE	14336
 #define UNIFI_PATH_LEN	48
 #define UNIFI_TYPE_LEN	16
 #define UNIFI_CFGVER_LEN	17	/* 16 hex digits */
 #define UNIFI_VERSION_LEN	24	/* the reported firmware version */
+
+/* The reported model. The TL-SG108PE V5 (RTL836x, 8 x 1G, PoE on 1-4)
+ * maps to the USW-Lite-8-PoE, the 8 x 2.5G + SFP+ boards to the
+ * USW-Flex-2.5G-8. The version is the model's current release as UniFi
+ * Network 10.6.109 listed it, which is above its minimumFirmwareRequired. */
+#ifndef SOC_FAMILY
+#error "machine.h must define SOC_FAMILY"
+#endif
+#ifndef UNIFI_MODEL
+#if SOC_FAMILY == RTL836X
+#define UNIFI_MODEL	"USL8LP"
+#define UNIFI_DISPLAY	"USW-Lite-8-PoE"
+#define UNIFI_VERSION	"7.5.15.17146"
+#else
+#define UNIFI_MODEL	"USWED36"
+#define UNIFI_DISPLAY	"USW-Flex-2.5G-8"
+#define UNIFI_VERSION	"2.1.8.971"
+#endif
+#endif
 
 struct uip_conn;
 

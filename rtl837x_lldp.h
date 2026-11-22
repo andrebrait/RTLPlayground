@@ -13,9 +13,8 @@
 #define LLDP_FAST_TX_COUNT   4
 
 #define LLDP_PORT_ID_TLV_TYPE 2
-#define LLDP_PORT_ID_PREFIX "Port "
-#define LLDP_PORT_ID_PREFIX_LENGTH 5
-#define LLDP_PORT_ID_TLV_LENGTH (1 + LLDP_PORT_ID_PREFIX_LENGTH + 1)
+#define LLDP_PORT_DESC_PREFIX "Port "
+#define LLDP_PORT_ID_TLV_LENGTH (1 + 6)	/* subtype, MAC */
 #define LLDP_PORT_ID_TLV_SUBTYPE 0x05
 #define LLDP_PORT_ID_SUBTYPE_MAC 3
 
@@ -152,6 +151,7 @@ extern __xdata struct lldp_neighbor lldp_nb[LLDP_NB_MAX];
 void lldp_init(void) __banked;
 void lldp_tick(void) __banked;
 void lldp_send(void) __banked;
+void lldp_resend(void) __banked;
 void lldp_shutdown(uint16_t ports) __banked;
 bool lldp_in(void) __banked;
 void lldp_neighbors_to_html(void) __banked;

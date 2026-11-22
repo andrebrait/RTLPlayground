@@ -52,6 +52,7 @@ TESTS = $(BUILDDIR)/test_cmd_editor \
         $(BUILDDIR)/test_lacp \
         $(BUILDDIR)/test_lldp \
         $(BUILDDIR)/test_lldp_tx \
+        $(BUILDDIR)/test_lldp_tx_unifi \
         $(BUILDDIR)/test_rtl8370n_console \
         $(BUILDDIR)/test_rtl836x_regs \
         $(BUILDDIR)/test_rtl836x_nic \
@@ -106,7 +107,7 @@ $(BUILDDIR)/test_aes_gcm: test_aes_gcm.c gcm_vectors.h $(SRCROOT)/crypto/aes_gcm
 
 # unifi.c and aes_gcm.c are included by the test
 TESTS += $(BUILDDIR)/test_unifi
-$(BUILDDIR)/test_unifi: test_unifi.c $(SRCROOT)/unifi.c $(SRCROOT)/unifi.h $(SRCROOT)/dns.h $(SRCROOT)/snmp_hw.h $(SRCROOT)/machine.h $(SRCROOT)/crypto/aes_gcm.c $(SRCROOT)/crypto/aes_gcm.h | $(BUILDDIR)
+$(BUILDDIR)/test_unifi: test_unifi.c $(SRCROOT)/unifi.c $(SRCROOT)/unifi.h $(SRCROOT)/dns.h $(SRCROOT)/snmp_hw.h $(SRCROOT)/machine.h $(SRCROOT)/crypto/aes_gcm.c $(SRCROOT)/crypto/aes_gcm.h $(SRCROOT)/rtl837x_lldp.h $(SRCROOT)/poe.h | $(BUILDDIR)
 	$(CC) $(CFLAGS) -DUNIFI $< -o $@ $(LDFLAGS)
 
 TESTS += $(BUILDDIR)/test_cable_836x
@@ -249,6 +250,10 @@ test_mirror:
 
 $(BUILDDIR)/test_lldp_tx: test_lldp_tx.c $(SRCROOT)/rtl837x_lldp.c $(SRCROOT)/rtl837x_lldp_tx_strings.c $(SRCROOT)/httpd/html_out.c $(SRCROOT)/timer.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) $(GC_CFLAGS) $^ -o $@ $(LDFLAGS) $(GC_LDFLAGS)
+
+# The same frames with UniFi built in: on, the switch describes itself as one
+$(BUILDDIR)/test_lldp_tx_unifi: test_lldp_tx.c $(SRCROOT)/rtl837x_lldp.c $(SRCROOT)/rtl837x_lldp_tx_strings.c $(SRCROOT)/httpd/html_out.c $(SRCROOT)/timer.c $(SRCROOT)/unifi.h | $(BUILDDIR)
+	$(CC) $(CFLAGS) $(GC_CFLAGS) -DUNIFI $(filter %.c,$^) -o $@ $(LDFLAGS) $(GC_LDFLAGS)
 
 run: $(TESTS) $(BUILDDIR)/fileadder snmp snmp-horaco-profile snmp-status snmp-cli snmp-replay config-replay prometheus-replay test_mirror l2-delete l2-load
 	@fail=0; for t in $(TESTS); do \

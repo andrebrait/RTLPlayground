@@ -8,6 +8,10 @@
 #include "rtl837x_port.h"
 #include "rtl837x_regs.h"
 #include "rtl837x_sfr.h"
+#ifdef UNIFI
+#include "unifi.h"
+struct unifi_state unifi = {.version = "7.6.11.17272"};
+#endif
 
 uint8_t uip_buf[UIP_CONF_BUFFER_ALLOC_SIZE];
 uint16_t uip_len;
@@ -56,7 +60,8 @@ static const uint8_t *tlv(unsigned p,unsigned wanted,unsigned *length){
 static void check(unsigned p,unsigned ttl,int management){
     unsigned n;
     const uint8_t *v=tlv(p,1,&n);assert(v&&n==7&&v[0]==4&&!memcmp(v+1,uip_ethaddr.addr,6));
-    v=tlv(p,2,&n);assert(v&&n==7&&v[0]==5&&!memcmp(v+1,p?"Port 9":"Port 1",6));
+    v=tlv(p,2,&n);assert(v&&n==7&&v[0]==3&&!memcmp(v+1,uip_ethaddr.addr,6));
+    v=tlv(p,4,&n);assert(v&&n==6&&!memcmp(v,p?"Port 9":"Port 1",6));
     v=tlv(p,3,&n);assert(v&&n==2&&(((unsigned)v[0]<<8)|v[1])==ttl);
     v=tlv(p,5,&n);assert(v&&n==23&&!memcmp(v,hostname,n));
     v=tlv(p,7,&n);assert(v&&n==4&&!memcmp(v,"\0\4\0\4",4));
@@ -69,7 +74,7 @@ int main(void){
     uint8_t ip[4]={10,0,0,7};memcpy(uip_hostaddr,ip,4);
     lldp_tlv_mask=LLDP_TX_ALL;lldp_logical_port_status=3;
     lldp_send();assert(emitted==2);check(0,120,1);check(1,120,1);
-    puts("PASS normal TX: Port 1/Port 9 subtype 5, TTL 120, bridge caps 0x0004/0x0004, IPv4 10.0.0.7, End TLV");
+    puts("PASS normal TX: Port ID the switch MAC, Port Description Port 1/Port 9, TTL 120, bridge caps 0x0004/0x0004, IPv4 10.0.0.7, End TLV");
     emitted=0;lldp_shutdown(2);assert(emitted==1);check(1,0,1);
     puts("PASS selected-port shutdown: only Port 9, TTL 0");
     emitted=0;lldp_shutdown(lldp_logical_port_status);assert(emitted==2);check(0,0,1);check(1,0,1);
@@ -78,5 +83,28 @@ int main(void){
     puts("PASS unconfigured IPv4: no Management Address TLV");
     lldp_tlv_mask&=~LLDP_TX_SYSCAP;lldp_send();unsigned n;assert(!tlv(0,7,&n));
     puts("PASS optional System Capabilities switch omits TLV");
+    strcpy(port_names[1],"uplink");emitted=0;lldp_send();
+    const uint8_t *v=tlv(1,4,&n);assert(v&&n==6&&!memcmp(v,"uplink",6));
+    v=tlv(0,4,&n);assert(v&&n==6&&!memcmp(v,"Port 1",6));
+    port_names[1][0]=0;
+    puts("PASS a named port describes itself by its name, the others as Port N");
+#ifdef UNIFI
+    /* With UniFi on, as a UniFi switch: the system description is
+     * "<model>, <reported version>" */
+    unifi.enabled=1;emitted=0;lldp_send();assert(emitted==2);
+    static const char desc[]=UNIFI_DISPLAY ", 7.6.11.17272";
+    v=tlv(1,6,&n);assert(v&&n==sizeof desc-1&&!memcmp(v,desc,n));
+    v=tlv(1,0,&n);assert(v&&n==0);
+    puts("PASS UniFi on: system description " UNIFI_DISPLAY ", <version>");
+    /* An upgrade the controller offered: the longest version the state holds */
+    strcpy(unifi.version,"12345678901234567890123");emitted=0;lldp_send();
+    static const char longdesc[]=UNIFI_DISPLAY ", 12345678901234567890123";
+    v=tlv(1,6,&n);assert(v&&n==sizeof longdesc-1&&!memcmp(v,longdesc,n));
+    v=tlv(1,0,&n);assert(v&&n==0);
+    puts("PASS UniFi on: a 23-character offered version fills the description");
+    unifi.enabled=0;emitted=0;lldp_send();
+    v=tlv(1,6,&n);assert(v&&n>15&&!memcmp(v,"Host LLDP test ",15));
+    puts("PASS UniFi off: the firmware's own description again");
+#endif
     return 0;
 }

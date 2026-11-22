@@ -100,6 +100,9 @@ void uip_arp_arpin(void) __banked;
    the Ethernet frame that should be transmitted. */
 void uip_arp_out(void) __banked;
 
+/* An ARP request for the default router into uip_buf, for tcpip_output() */
+void uip_arp_request_draddr(void) __banked;
+
 /* The uip_arp_timer() function should be called every ten seconds. It
    is responsible for flushing old entries in the ARP table. */
 void uip_arp_timer(void) __banked;

@@ -704,6 +704,66 @@ picture. For the two chosen models (`USWED36`, `USL8LP`) the layouts already
 match, so this is only needed for the other RTLPlayground layouts (for
 example 5 x 2.5G + 1 x SFP+).
 
+### LLDP as a UniFi switch sends and reports it
+
+Read from the USW-Lite-8-PoE firmware 7.5.15.17146
+(`4154-USL8LP-7.5.15-…bin`, the URL in the controller's `firmware.json`,
+md5 `a2043a48ac04154cc544d481d1a343b1`): the LLDP agent is the kernel
+module `l2g_lldp.ko` (Realtek SDK), the inform is built by `mcad` with
+`libubnt`.
+
+- **Frames sent** (the frame builder in `l2g_lldp.ko`, disassembled):
+  - Chassis ID: subtype 4 (MAC address), the system MAC.
+  - Port ID: subtype 7 (locally assigned), `Port %u` with the front-panel
+    port number.
+  - Source MAC: the port's own MAC (`rsd_sys_portMacAddr_get`).
+  - Then TTL, the port description (`rsd_port_descp_get`), system name and
+    description (`rsd_sys_info_get`), capabilities, the management address,
+    LLDP-MED, PoE, link aggregation and VLAN TLVs, and a Ubiquiti
+    organisation TLV with the controller host and port while the switch is
+    in its default state (`ubnthal_get_isDefault`,
+    `ubnthal_get_controller_host`).
+  - The system description is set by `ubntbox` as
+    `configure system description "%s, %s.%s"`: model, version and build,
+    as the U7-Lite access points here send `U7-Lite, 8.8.14.20179`.
+- **`lldp_table` in the inform** (`libubnt`): `chassis_id`, `port_id`,
+  `local_port_name`, `local_port_idx`, `is_wired` and `mgmt_ips`. No
+  descriptions.
+- **What the firmware does:** the Port ID is the switch MAC (subtype 3) on
+  every port, as the U7-Lite access points and lldpd on OpenWrt send it,
+  and the Port Description is the port name or `Port N`, so neighbours tell
+  the ports apart by it. The switch has one MAC, not one per port as the
+  USW. While UniFi is on, the system description is `<model display>,
+  <reported version>`. Its `lldp_table` has the same members as the USW's
+  but `mgmt_ips`, whose value type was not established. It sends no
+  Ubiquiti TLV.
+
+### Topology: uplink and `mac_table`
+
+The controller places devices by the port table (`com/ubnt/service/bp`,
+Network 11.1.50), not by `lldp_table`: a device sits behind the port whose
+`mac_table` lists its MAC, on a port that is not `is_uplink`.
+
+- **Uplink.** Before each inform the switch sends an ARP request for the
+  default gateway. The port the gateway's ARP arrived on since the last
+  inform is the uplink, else the port the controller's replies arrive on;
+  a gateway that stops answering stops deciding it after one inform. Every
+  member of a LAG uplink is an uplink.
+- **`mac_table`.** Each port that is not the uplink lists its LLDP
+  neighbours with a MAC chassis ID, then the MACs the L2 table learned on
+  it, static entries left out. The uplink's are not sent: the controller
+  ignores them, and they are the rest of the network.
+- **Cost.** The L2 table is walked with the ASIC's "next learned unicast
+  entry" lookup (RTL837x `TBL_LUTREAD_NEXT_L2UC`, RTL836x
+  `TABLE_ACCESS_LUT_NEXT_UC`), one step per learned entry rather than one
+  per slot of the 4K table, and nothing is kept in RAM. Each port walks
+  the table again, 32 steps per tick, so a large table never holds up the
+  main loop. While no uplink is known, the table is not walked: the
+  uplink's MACs would pass for clients.
+- **Size.** Each entry is about 62 bytes. The inform buffer is 14 KB; each
+  port stops adding entries when the room the other ports and the LLDP
+  table need would be gone, about 150 MACs in all.
+
 ### Port index translation
 
 The controller keys every per-port setting on `port_table[].port_idx`, and

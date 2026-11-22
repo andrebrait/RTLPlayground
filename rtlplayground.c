@@ -147,6 +147,8 @@ __xdata uint8_t rx_headers[16]; // RX descriptor
 __xdata uint8_t uip_buf[UIP_CONF_BUFFER_ALLOC_SIZE];
 
 __xdata uint16_t rx_packet_vlan;
+__xdata uint8_t rx_ingress;	/* ASIC port of the last IPv4 frame, from its CPU tag */
+__xdata uint8_t rx_gateway;	/* 1 + the ASIC port the gateway's ARP arrives on, 0 = not seen */
 __xdata uint16_t management_vlan;
 __xdata bool frame_tagged;
 __xdata uint8_t tx_seq;
@@ -1021,11 +1023,16 @@ void handle_rx(void)
 #endif
 			uip_len = 0;	/* Keep other VLANs out of the management IP and ARP state. */
 		} else if (ETH_IN->ether_type == HTONS(0x0806)) { // ARP
+			/* The gateway's ARP, often a request for another host, comes
+			 * in through the uplink: the sender IP follows 14 bytes in */
+			if ((uip_draddr[0] | uip_draddr[1]) && !memcmp(&uip_buf[ETHERTYPE_OFFSET + 2 + 14], uip_draddr, 4))
+				rx_gateway = (((uint8_t)NTOHS(ETH_IN->rtl_tag.pmask)) & 0x0f) + 1;
 			uip_arp_arpin();
 			if (uip_len) {
 			    tcpip_output();
 			}
 		} else if (ETH_IN->ether_type == HTONS(0x0800)) { // IPv4
+			rx_ingress = ((uint8_t)NTOHS(ETH_IN->rtl_tag.pmask)) & 0x0f;
 #if SOC_FAMILY == RTL837X
 			if (dhcp_snoop_on)
 				dhcp_snoop_in();
