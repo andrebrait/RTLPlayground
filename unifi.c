@@ -29,6 +29,7 @@
 #include "crypto/aes_gcm.h"
 #include "unifi.h"
 #include "rtl837x_lldp.h"
+#include "rtl837x_port.h"
 #ifndef RTLP_HOST_TEST
 #include "rtl837x_sfr.h"
 #include "rtl837x_regs.h"
@@ -257,11 +258,16 @@ static __xdata uint8_t u_uplink;	/* 1 + the ASIC port the controller's replies a
 static __xdata struct lldp_neighbor *__xdata u_nb;
 static __xdata uint8_t u_mt;	/* mac_table entries written */
 static __xdata uint8_t u_isup;	/* the port is the uplink */
+static __xdata uint8_t u_upk;	/* 1 + the uplink's ASIC port, 0 = not known */
+static __xdata uint8_t u_gw;	/* rx_gateway as the last inform's gateway ARP left it */
+static __xdata uint8_t u_inmt;	/* the port's learned MACs are being listed */
+static __xdata uint8_t u_l2n;	/* L2 walk steps this tick */
 static __xdata uint16_t u_mtend;	/* mac_table entries stop here */
 /* Kept free for a port entry without learned MACs, and for the LLDP
  * table, the end of the JSON and the tag (see u_lldp()) */
 #define U_PORT_ROOM	400
-#define U_TAIL_ROOM	2800
+#define U_TAIL_ROOM	(2800 + LLDP_NB_MAX * 64)	/* and the neighbours' mac_table entries */
+#define U_L2_STEPS	32	/* L2 walk steps per tick */
 
 /* The L2 table's learned unicast entries, walked with the ASIC's "next
  * entry" lookup: one step per entry, not one per slot of the 4K table.
@@ -350,9 +356,13 @@ static uint8_t u_l2_next(void)
 	u_l2e = sfr_data[2] & 0x0f;
 	u_l2e = (u_l2e << 8) | sfr_data[3];
 	reg_read_m(RTL837x_L2_DATA_OUT_B);
-	if (!(sfr_data[0] & 0x20) || u_l2e < u_l2i)
-		return 0;	/* empty, or wrapped round */
+	if (u_l2e < u_l2i)
+		return 0;	/* wrapped round */
 	u_l2i = u_l2e + 1;
+	if (!(sfr_data[0] & 0x20)) {
+		u_l2port = 0xff;	/* not valid: skipped, as the web walker does */
+		return 1;
+	}
 	u_l2mac[0] = sfr_data[2];
 	u_l2mac[1] = sfr_data[3];
 	u_l2port = sfr_data[0] >> 6;
@@ -473,10 +483,18 @@ static void u_port_entry(void)
 	 * devices behind the other ports, and shows its speed as the
 	 * switch's. The controller can hang off any port, so the gateway
 	 * decides once its ARP has been seen. */
-	u_d[0] = rx_gateway;
-	if (!u_d[0])
-		u_d[0] = u_uplink;
-	u_isup = u_d[0] == u_ph + 1;
+	u_upk = u_gw;
+	if (!u_upk)
+		u_upk = u_uplink;
+	u_isup = 0;
+	if (u_upk == u_ph + 1)
+		u_isup = 1;
+	else if (u_upk) {
+		/* Every member of a LAG uplink */
+		u_d[0] = port_lag_of(u_upk - 1);
+		if (u_d[0] != PORT_LAG_NONE && u_d[0] == port_lag_of(u_ph))
+			u_isup = 1;
+	}
 	if (u_isup)
 		u_s(",\"is_uplink\":true");
 	if (u_up)
@@ -511,12 +529,13 @@ static void u_port_entry(void)
 #endif
 	/* The controller places the devices behind a port that is not the
 	 * uplink by the MACs in its mac_table: the LLDP neighbours, then the
-	 * MACs learned on the port. The uplink's are left out: the controller
-	 * ignores them, and they are the rest of the network. The room left
-	 * for the other ports and the LLDP table bounds the entries. */
+	 * MACs learned on the port (u_port_macs()). The uplink's are left
+	 * out: the controller ignores them, and they are the rest of the
+	 * network. The room left for the other ports and the LLDP table
+	 * bounds the entries. */
 	u_s(",\"mac_table\":[");
 	u_mt = 0;
-	for (u_nb = lldp_nb; u_nb < lldp_nb + LLDP_NB_MAX; u_nb++) {
+	for (u_nb = lldp_nb; !u_isup && u_nb < lldp_nb + LLDP_NB_MAX; u_nb++) {
 		if (!u_nb->ttl || u_nb->port != u_ph || u_nb->chassis_subtype != LLDP_CHASSIS_ID_TLV_SUBTYPE
 		    || u_nb->chassis_len != 6)
 			continue;
@@ -526,7 +545,17 @@ static void u_port_entry(void)
 	u_mtend = MACHINE_MAX_PORT - u_ph;
 	u_mtend *= U_PORT_ROOM;
 	u_mtend = UNIFI_BUF_SIZE - U_TAIL_ROOM - u_mtend;
-	for (u_l2i = 0; !u_isup && unifi.pos < u_mtend && u_l2_next(); ) {
+	u_l2i = 0;
+}
+
+/* The next U_L2_STEPS entries of the L2 walk: the MACs learned on port
+ * u_ph. Returns 1 once the walk is done. While no uplink is known, the
+ * table is not walked: the uplink's MACs would pass for clients. */
+static uint8_t u_port_macs(void)
+{
+	for (u_l2n = 0; u_l2n < U_L2_STEPS; u_l2n++) {
+		if (u_isup || !u_upk || unifi.pos >= u_mtend || !u_l2_next())
+			return 1;
 		if (u_l2port != u_ph)
 			continue;
 		for (u_nb = lldp_nb; u_nb < lldp_nb + LLDP_NB_MAX; u_nb++)
@@ -538,8 +567,7 @@ static void u_port_entry(void)
 		u_ma = u_l2mac;
 		u_mt_entry();
 	}
-	u_c(']');
-	u_c('}');
+	return 0;
 }
 
 
@@ -583,6 +611,7 @@ static void u_build(void)
 	u_s("\"fw_caps\":0,\"isolated\":false,\"locating\":false,"
 	    "\"selfrun_beacon\":false,\"port_table\":[");
 	u_ph = MACHINE_MIN_PORT;
+	u_inmt = 0;
 	u_cnt = 0;	/* entries written */
 #ifdef MACHINE_POE_PORTS
 	u_poe = poe_admin_mask();
@@ -625,16 +654,25 @@ static void u_lldp(void)
 	}
 }
 
-/* The next port table entry. Its hardware reads take a few milliseconds,
- * so one port per tick keeps the main loop responsive. Returns 1 once the
- * table is complete and the JSON closed. */
+/* The next port table entry, then its learned MACs a few at a time. The
+ * hardware reads take a few milliseconds, so one step per tick keeps the
+ * main loop responsive. Returns 1 once the table is complete and the JSON
+ * closed. */
 static uint8_t u_ports(void)
 {
+	if (u_inmt) {
+		if (!u_port_macs())
+			return 0;
+		u_s("]}");
+		u_inmt = 0;
+		u_ph++;
+		return 0;
+	}
 	while (u_ph <= MACHINE_MAX_PORT && !machine.log_to_phys_port[u_ph])
 		u_ph++;
 	if (u_ph <= MACHINE_MAX_PORT) {
 		u_port_entry();
-		u_ph++;
+		u_inmt = 1;
 		return 0;
 	}
 	u_lldp();
@@ -1284,6 +1322,8 @@ void unifi_tick(void) __banked
 		/* Ask for the gateway: its reply arrives through the uplink,
 		 * which the port table reports (rx_gateway). Once per inform,
 		 * so a changed layout shows within an interval. */
+		u_gw = rx_gateway;	/* the answer to the last inform's request, if any */
+		rx_gateway = 0;
 		if (uip_draddr[0] | uip_draddr[1]) {
 			uip_arp_request_draddr();
 			tcpip_output();

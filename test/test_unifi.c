@@ -80,6 +80,10 @@ void gcm_selftest(void) { selftests++; }
  * returns them. Empty but for the mac_table test. */
 static struct { uint16_t idx; uint8_t mac[6]; uint8_t port; } l2_tab[300];
 static int l2_n;
+
+/* LAG groups by ASIC port, PORT_LAG_NONE for none */
+static uint8_t lag_of[10] = { [0 ... 9] = PORT_LAG_NONE };
+uint8_t port_lag_of(uint8_t port) { return lag_of[port]; }
 static uint8_t u_l2_next(void)
 {
 	for (int i = 0; i < l2_n; i++) {
@@ -1194,6 +1198,42 @@ static void test_mac_table(void)
 		n++;
 	check(j && n > 100 && n < 300 && strstr(j, "\"lldp_table\":[{") && unifi.end < UNIFI_BUF_SIZE - 512,
 	      "mac_table: a full L2 table takes what is left, and the inform stays whole");
+	answer("{\"_type\":\"noop\",\"interval\":10}");
+
+	/* A LAG uplink: ASIC 8 and 7 (front ports 6 and 4) both uplinks */
+	l2_n = 5;
+	memcpy(l2_tab, t, sizeof(t));
+	l2_tab[4].port = 7;
+	lag_of[7] = lag_of[8] = 1;
+	rx_gateway = 8 + 1;
+	inform();
+	j = req_json();
+	p6 = j ? strstr(j, "{\"port_idx\":4,") : NULL;
+	check(p6 && strstr(p6, "\"is_uplink\":true") && strstr(p6, "\"mac_table\":[]}") < strstr(p6, "}")
+	      && !strstr(j, "02:00:00:00:00:03"),
+	      "mac_table: every member of a LAG uplink is an uplink, without MACs");
+	answer("{\"_type\":\"noop\",\"interval\":10}");
+	lag_of[7] = lag_of[8] = PORT_LAG_NONE;
+
+	/* The gateway stopped answering: the uplink falls back to the
+	 * controller's port, ASIC 8, after one inform */
+	rx_gateway = 4 + 1;
+	inform();
+	answer("{\"_type\":\"noop\",\"interval\":10}");
+	inform();
+	j = req_json();
+	p6 = j ? strstr(j, "{\"port_idx\":6,") : NULL;
+	p1 = j ? strstr(j, "{\"port_idx\":1,") : NULL;
+	check(p6 && p1 && strstr(p6, "\"is_uplink\":true") && !memmem(p1, p6 - p1, "is_uplink", 9),
+	      "uplink: a gateway that no longer answers stops deciding it");
+	answer("{\"_type\":\"noop\",\"interval\":10}");
+
+	/* No uplink known: the L2 table is not walked */
+	u_uplink = 0;
+	inform();
+	j = req_json();
+	check(j && !strstr(j, "02:00:00:00:00:01") && strstr(j, "\"1c:2a:a3:23:d8:68\""),
+	      "mac_table: no learned MACs while no uplink is known");
 	answer("{\"_type\":\"noop\",\"interval\":10}");
 	l2_n = 0;
 	rx_gateway = 0;

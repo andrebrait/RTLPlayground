@@ -1025,7 +1025,7 @@ void handle_rx(void)
 		} else if (ETH_IN->ether_type == HTONS(0x0806)) { // ARP
 			/* The gateway's ARP, often a request for another host, comes
 			 * in through the uplink: the sender IP follows 14 bytes in */
-			if (!memcmp(&uip_buf[ETHERTYPE_OFFSET + 2 + 14], uip_draddr, 4))
+			if ((uip_draddr[0] | uip_draddr[1]) && !memcmp(&uip_buf[ETHERTYPE_OFFSET + 2 + 14], uip_draddr, 4))
 				rx_gateway = (((uint8_t)NTOHS(ETH_IN->rtl_tag.pmask)) & 0x0f) + 1;
 			uip_arp_arpin();
 			if (uip_len) {
