@@ -738,6 +738,28 @@ module `l2g_lldp.ko` (Realtek SDK), the inform is built by `mcad` with
   but `mgmt_ips`, whose value type was not established. It sends no
   Ubiquiti TLV.
 
+### Topology: uplink and `mac_table`
+
+The controller places devices by the port table (`com/ubnt/service/bp`,
+Network 11.1.50), not by `lldp_table`: a device sits behind the port whose
+`mac_table` lists its MAC, on a port that is not `is_uplink`.
+
+- **Uplink.** Before each inform the switch sends an ARP request for the
+  default gateway. The port its reply arrives on is the uplink, else the
+  port the controller's replies arrive on.
+- **`mac_table`.** Each port that is not the uplink lists its LLDP
+  neighbours with a MAC chassis ID, then the MACs the L2 table learned on
+  it, static entries left out. The uplink's are not sent: the controller
+  ignores them, and they are the rest of the network.
+- **Cost.** The L2 table is walked with the ASIC's "next learned unicast
+  entry" lookup (RTL837x `TBL_LUTREAD_NEXT_L2UC`, RTL836x
+  `TABLE_ACCESS_LUT_NEXT_UC`), one step per learned entry rather than one
+  per slot of the 4K table, and nothing is kept in RAM. The port table is
+  written one port per tick, so each tick walks the table once.
+- **Size.** Each entry is about 62 bytes. The inform buffer is 14 KB; each
+  port stops adding entries when the room the other ports and the LLDP
+  table need would be gone, about 150 MACs in all.
+
 ### Port index translation
 
 The controller keys every per-port setting on `port_table[].port_idx`, and

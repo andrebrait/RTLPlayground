@@ -29,6 +29,13 @@
 #include "crypto/aes_gcm.h"
 #include "unifi.h"
 #include "rtl837x_lldp.h"
+#ifndef RTLP_HOST_TEST
+#include "rtl837x_sfr.h"
+#include "rtl837x_regs.h"
+#if SOC_FAMILY == RTL836X
+#include "rtl836x_regs.h"
+#endif
+#endif
 #ifdef MACHINE_POE_PORTS
 #include "poe.h"
 #endif
@@ -249,6 +256,125 @@ extern __xdata uint8_t rx_ingress, rx_gateway;
 static __xdata uint8_t u_uplink;	/* 1 + the ASIC port the controller's replies arrive on, 0 = none yet */
 static __xdata struct lldp_neighbor *__xdata u_nb;
 static __xdata uint8_t u_mt;	/* mac_table entries written */
+static __xdata uint8_t u_isup;	/* the port is the uplink */
+static __xdata uint16_t u_mtend;	/* mac_table entries stop here */
+/* Kept free for a port entry without learned MACs, and for the LLDP
+ * table, the end of the JSON and the tag (see u_lldp()) */
+#define U_PORT_ROOM	400
+#define U_TAIL_ROOM	2800
+
+/* The L2 table's learned unicast entries, walked with the ASIC's "next
+ * entry" lookup: one step per entry, not one per slot of the 4K table.
+ * u_l2_next() searches from slot u_l2i, fills u_l2mac, u_l2port (the ASIC
+ * port, 0xff for a static entry) and moves u_l2i past the entry; 0 at the
+ * end of the table or when the table does not answer. */
+static __xdata uint16_t u_l2i;
+static __xdata uint8_t u_l2mac[6], u_l2port;
+#ifdef RTLP_HOST_TEST
+static uint8_t u_l2_next(void);
+#else
+static __xdata uint16_t u_l2e;
+static __xdata uint8_t u_l2w;
+#endif
+#ifdef RTLP_HOST_TEST
+#elif SOC_FAMILY == RTL836X
+static __xdata uint16_t u_lw[6];	/* SDK rtl8367c_getAsicL2LookupTb layout */
+
+static uint8_t u_l2_idle(void)
+{
+	u_l2w = 0;
+	do {
+		reg_read(RTL836X_REG_TABLE_LUT_ADDR);
+		if (!(SFR_DATA_U16 & TABLE_LUT_ADDR_BUSY))
+			return 1;
+	} while (++u_l2w);
+	return 0;
+}
+
+static uint8_t u_l2_next(void)
+{
+	if (u_l2i >= RTL836X_LUT_SIZE || !u_l2_idle())
+		return 0;
+	REG_SET(RTL836X_REG_TABLE_ACCESS_ADDR, u_l2i);
+	REG_SET(RTL836X_REG_TABLE_ACCESS_CTRL, TABLE_ACCESS_LUT_NEXT_UC);
+	if (!u_l2_idle() || !(SFR_DATA_U16 & TABLE_LUT_HIT))
+		return 0;
+	/* The status splits the address: bits 11 and 12 are swapped */
+	u_l2e = SFR_DATA_U16;
+	u_lw[0] = u_l2e & 0x07ff;
+	if (u_l2e & 0x4000)
+		u_lw[0] |= 0x0800;
+	if (u_l2e & 0x0800)
+		u_lw[0] |= 0x1000;
+	u_l2e = u_lw[0];
+	if (u_l2e < u_l2i)
+		return 0;	/* wrapped round */
+	u_l2i = u_l2e + 1;
+	for (u_l2w = 0; u_l2w < 6; u_l2w++) {
+		reg_read(RTL836X_REG_TABLE_READ_DATA0 + u_l2w);
+		u_lw[u_l2w] = SFR_DATA_U16;
+	}
+	for (u_l2w = 0; u_l2w < 6; u_l2w += 2) {
+		u_l2mac[u_l2w] = u_lw[2 - u_l2w / 2] >> 8;
+		u_l2mac[u_l2w + 1] = u_lw[2 - u_l2w / 2];
+	}
+	u_l2port = (u_lw[4] >> 8) & 7;
+	if (u_lw[3] & 0x8000)
+		u_l2port |= 8;
+	if (u_lw[5] & 0x0020)
+		u_l2port = 0xff;	/* static */
+	return 1;
+}
+#else
+static uint8_t u_l2_wait(void)
+{
+	u_l2w = 0;
+	do {
+		reg_read_m(RTL837X_TBL_CTRL);
+		if (!(sfr_data[3] & TBL_EXECUTE))
+			return 1;
+	} while (++u_l2w);
+	return 0;
+}
+
+static uint8_t u_l2_next(void)
+{
+	if (u_l2i >= 0x1000 || !u_l2_wait())
+		return 0;
+	reg_read_m(RTL837x_TBL_DATA_0);
+	REG_WRITE(RTL837x_TBL_DATA_0, sfr_data[0], sfr_data[1] & 0xfc, sfr_data[2] | (TBL_LUTREAD_NEXT_L2UC << 6), sfr_data[3]);
+	REG_WRITE(RTL837X_TBL_CTRL, u_l2i >> 8, u_l2i, TBL_L2_UNICAST, TBL_EXECUTE);
+	if (!u_l2_wait())
+		return 0;
+	reg_read_m(RTL837x_TBL_DATA_0);
+	u_l2e = sfr_data[2] & 0x0f;
+	u_l2e = (u_l2e << 8) | sfr_data[3];
+	reg_read_m(RTL837x_L2_DATA_OUT_B);
+	if (!(sfr_data[0] & 0x20) || u_l2e < u_l2i)
+		return 0;	/* empty, or wrapped round */
+	u_l2i = u_l2e + 1;
+	u_l2mac[0] = sfr_data[2];
+	u_l2mac[1] = sfr_data[3];
+	u_l2port = sfr_data[0] >> 6;
+	reg_read_m(RTL837x_L2_DATA_OUT_A);
+	memcpy(u_l2mac + 2, sfr_data, 4);
+	reg_read_m(RTL837x_L2_DATA_OUT_C);
+	u_l2port |= (sfr_data[3] & 3) << 2;
+	if (sfr_data[1] & 1)
+		u_l2port = 0xff;	/* static */
+	return 1;
+}
+#endif
+
+/* One mac_table entry for the MAC at u_ma */
+static void u_mt_entry(void)
+{
+	if (u_mt++)
+		u_c(',');
+	u_s("{\"mac\":\"");
+	u_mac(':');
+	u_s("\",\"age\":0,\"uptime\":0,\"static\":false}");
+}
 #ifdef MACHINE_POE_PORTS
 static __xdata uint8_t u_poe;	/* PoE permitted, bit 0 = front port 1 */
 #endif
@@ -350,7 +476,8 @@ static void u_port_entry(void)
 	u_d[0] = rx_gateway;
 	if (!u_d[0])
 		u_d[0] = u_uplink;
-	if (u_d[0] == u_ph + 1)
+	u_isup = u_d[0] == u_ph + 1;
+	if (u_isup)
 		u_s(",\"is_uplink\":true");
 	if (u_up)
 		u_s(",\"up\":true");
@@ -383,21 +510,33 @@ static void u_port_entry(void)
 	u_counter(",\"tx_packets\":", 3, 5, 7);
 #endif
 	/* The controller places the devices behind a port that is not the
-	 * uplink by the MACs in its mac_table. The L2 table is not read: the
-	 * LLDP neighbours on the port, every UniFi device among them, are
-	 * enough to place the switches and access points. */
+	 * uplink by the MACs in its mac_table: the LLDP neighbours, then the
+	 * MACs learned on the port. The uplink's are left out: the controller
+	 * ignores them, and they are the rest of the network. The room left
+	 * for the other ports and the LLDP table bounds the entries. */
 	u_s(",\"mac_table\":[");
 	u_mt = 0;
 	for (u_nb = lldp_nb; u_nb < lldp_nb + LLDP_NB_MAX; u_nb++) {
 		if (!u_nb->ttl || u_nb->port != u_ph || u_nb->chassis_subtype != LLDP_CHASSIS_ID_TLV_SUBTYPE
 		    || u_nb->chassis_len != 6)
 			continue;
-		if (u_mt++)
-			u_c(',');
-		u_s("{\"mac\":\"");
 		u_ma = u_nb->chassis;
-		u_mac(':');
-		u_s("\",\"age\":0,\"uptime\":0,\"static\":false}");
+		u_mt_entry();
+	}
+	u_mtend = MACHINE_MAX_PORT - u_ph;
+	u_mtend *= U_PORT_ROOM;
+	u_mtend = UNIFI_BUF_SIZE - U_TAIL_ROOM - u_mtend;
+	for (u_l2i = 0; !u_isup && unifi.pos < u_mtend && u_l2_next(); ) {
+		if (u_l2port != u_ph)
+			continue;
+		for (u_nb = lldp_nb; u_nb < lldp_nb + LLDP_NB_MAX; u_nb++)
+			if (u_nb->ttl && u_nb->port == u_ph && u_nb->chassis_len == 6
+			    && !memcmp(u_nb->chassis, u_l2mac, 6))
+				break;
+		if (u_nb < lldp_nb + LLDP_NB_MAX)
+			continue;	/* listed as a neighbour */
+		u_ma = u_l2mac;
+		u_mt_entry();
 	}
 	u_c(']');
 	u_c('}');
@@ -454,9 +593,9 @@ static void u_build(void)
  * members a USW-Lite-8-PoE (7.5.15, libubnt) sends but mgmt_ips. Only
  * neighbours with a MAC chassis ID: the controller matches them to devices
  * by MAC. Budget: an entry is at most about 150 bytes (lldp_printable()
- * leaves nothing to escape), so LLDP_NB_MAX of them take about 2.4 KB;
- * with a port table of about 2.3 KB and the head, an inform stays under
- * 7 KB of the UNIFI_BUF_SIZE buffer. */
+ * leaves nothing to escape), so LLDP_NB_MAX of them take about 2.4 KB,
+ * within U_TAIL_ROOM. The port table's learned MACs take what the head,
+ * the ports and this table leave of the UNIFI_BUF_SIZE buffer. */
 static void u_lldp(void)
 {
 	u_s("],\"lldp_table\":[");

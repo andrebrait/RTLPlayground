@@ -7,7 +7,7 @@
 
 /* The message buffer: one inform out, then its reply in. The largest reply
  * seen in the lab, a 6.9 KB system_cfg, is 7.6 KB encrypted. */
-#define UNIFI_BUF_SIZE	10240
+#define UNIFI_BUF_SIZE	14336
 #define UNIFI_PATH_LEN	48
 #define UNIFI_TYPE_LEN	16
 #define UNIFI_CFGVER_LEN	17	/* 16 hex digits */

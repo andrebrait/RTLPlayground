@@ -209,7 +209,9 @@
   - Port table. Every inform reports each port by its front-panel number: link,
     whether it is enabled, speed, supported speeds, media and byte and packet
     counters. The controller shows the ports and their traffic rates. The inform also
-    lists the LLDP neighbours, so the controller can draw the topology, and on boards
+    lists the LLDP neighbours, marks the uplink (the port towards the gateway) and lists
+    each other port's MACs, its LLDP neighbours and the addresses the switch learned
+    there, so the controller can draw the topology with the clients, and on boards
     with PoE ports whether PoE is permitted on each; power is not measured.
   - LLDP describes the switch as a UniFi one while UniFi is on: the system description is
     the reported model and version, such as `USW-Lite-8-PoE, 7.5.15.17146`.

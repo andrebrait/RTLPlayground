@@ -76,6 +76,23 @@ bool strstart(const uint8_t *a, const uint8_t *b)
 
 void gcm_selftest(void) { selftests++; }
 
+/* The L2 table: learned entries by slot, as the ASIC's next-entry lookup
+ * returns them. Empty but for the mac_table test. */
+static struct { uint16_t idx; uint8_t mac[6]; uint8_t port; } l2_tab[300];
+static int l2_n;
+static uint8_t u_l2_next(void)
+{
+	for (int i = 0; i < l2_n; i++) {
+		if (l2_tab[i].idx < u_l2i)
+			continue;
+		memcpy(u_l2mac, l2_tab[i].mac, 6);
+		u_l2port = l2_tab[i].port;
+		u_l2i = l2_tab[i].idx + 1;
+		return 1;
+	}
+	return 0;
+}
+
 /* The controller's replies arrive on ASIC port 8, the SFP+ (front port 6) */
 __xdata uint8_t rx_ingress = 8;
 __xdata uint8_t rx_gateway;	/* 1 + ASIC port, set by the gateway test */
@@ -272,7 +289,7 @@ static void ticks(void)
 }
 
 /* The request as sent */
-static uint8_t req[8192];
+static uint8_t req[UNIFI_BUF_SIZE];
 static uint16_t req_len;
 
 static void keep_sent(void)
@@ -428,7 +445,7 @@ static void test_request(void)
 		return;
 
 	uint8_t k[16];
-	static uint8_t copy[8192];
+	static uint8_t copy[UNIFI_BUF_SIZE];
 	memcpy(copy, p, clen);
 	memcpy(k, key, 16);
 	gcm_setkey(k);
@@ -647,7 +664,7 @@ static void test_replies(void)
 	/* More data than the buffer holds, without a header end */
 	inform();
 	memset(r, 'x', 1000);
-	for (int i = 0; i < 11 && unifi.phase == U_RECV; i++)
+	for (int i = 0; i < UNIFI_BUF_SIZE / 1000 + 1 && unifi.phase == U_RECV; i++)
 		appcall(UIP_NEWDATA, r, 1000);
 	check(unifi.err == UE_HTTP && !unifi.conn, "reply: data beyond the buffer is refused");
 
@@ -670,7 +687,7 @@ static uint8_t req_iv[16];
 
 static const char *req_json(void)
 {
-	static uint8_t copy[8192];
+	static uint8_t copy[UNIFI_BUF_SIZE];
 	char *body = memmem(req, req_len, "\r\n\r\n", 4);
 	if (!body)
 		return NULL;
@@ -1133,6 +1150,55 @@ static void test_upgrade(void)
 	cur_key = key;
 }
 
+/* The MACs learned on a port are its mac_table, after its LLDP neighbours */
+static void test_mac_table(void)
+{
+	static const struct { uint16_t idx; uint8_t mac[6]; uint8_t port; } t[] = {
+		{ 3, { 0x1c, 0x2a, 0xa3, 0x23, 0xd8, 0x68 }, 4 },	/* the LLDP neighbour on front port 1 */
+		{ 10, { 2, 0, 0, 0, 0, 1 }, 4 },
+		{ 11, { 2, 0, 0, 0, 0, 9 }, 0xff },	/* static */
+		{ 20, { 2, 0, 0, 0, 0, 8 }, 8 },	/* the uplink, front port 6 */
+		{ 4095, { 2, 0, 0, 0, 0, 3 }, 6 },	/* front port 3, in the last slot */
+	};
+	const char *j, *p1, *p3, *p6;
+
+	l2_n = 5;
+	memcpy(l2_tab, t, sizeof(t));
+	rx_gateway = 8 + 1;
+	inform();
+	j = req_json();
+	p1 = j ? strstr(j, "{\"port_idx\":1,") : NULL;
+	p3 = j ? strstr(j, "{\"port_idx\":3,") : NULL;
+	p6 = j ? strstr(j, "{\"port_idx\":6,") : NULL;
+	check(p1 && strstr(p1, "\"mac_table\":[{\"mac\":\"1c:2a:a3:23:d8:68\",\"age\":0,\"uptime\":0,\"static\":false},"
+				"{\"mac\":\"02:00:00:00:00:01\",\"age\":0,\"uptime\":0,\"static\":false}]}"),
+	      "mac_table: the LLDP neighbour, then the learned MACs, the neighbour's not twice");
+	check(p3 && strstr(p3, "\"mac_table\":[{\"mac\":\"02:00:00:00:00:03\",") && p6
+	      && strstr(p6, "\"mac_table\":[]}") && !strstr(j, "02:00:00:00:00:09"),
+	      "mac_table: per port; the uplink's and static entries are left out");
+	answer("{\"_type\":\"noop\",\"interval\":10}");
+
+	/* More MACs than fit: each port stops where the rest still fits */
+	l2_n = 300;
+	for (int i = 0; i < l2_n; i++) {
+		l2_tab[i].idx = i;
+		memcpy(l2_tab[i].mac, t[1].mac, 6);
+		l2_tab[i].mac[4] = i >> 8;
+		l2_tab[i].mac[5] = i;
+		l2_tab[i].port = 3 + i % 4;	/* front ports 5, 1, 2, 3 */
+	}
+	inform();
+	j = req_json();
+	int n = 0;
+	for (const char *q = j; q && (q = strstr(q, "\"02:00:00:")); q++)
+		n++;
+	check(j && n > 100 && n < 300 && strstr(j, "\"lldp_table\":[{") && unifi.end < UNIFI_BUF_SIZE - 512,
+	      "mac_table: a full L2 table takes what is left, and the inform stays whole");
+	answer("{\"_type\":\"noop\",\"interval\":10}");
+	l2_n = 0;
+	rx_gateway = 0;
+}
+
 int main(void)
 {
 	memset(sector, 0xff, sizeof(sector));
@@ -1154,5 +1220,6 @@ int main(void)
 	test_json();
 	test_failed_reads();
 	test_upgrade();
+	test_mac_table();
 	return failures != 0;
 }
