@@ -1301,8 +1301,8 @@ static void u_decrypted(void)
 	u_done();
 	/* After a change the controller expects the next inform at once; other
 	 * replies, such as commands not handled here, wait the interval */
-	if (u_dirty)
-		unifi.next = uptime_secs;
+	if (u_dirty && !ua_defer)
+		unifi.next = uptime_secs;	/* deferred VLANs come again at the interval */
 	if (ua_busy)
 		unifi.phase = U_APPLY;
 }
@@ -1391,7 +1391,8 @@ void unifi_tick(void) __banked
 			return;
 		ua_busy = 0;
 		unifi.phase = U_IDLE;
-		unifi.next = uptime_secs;
+		if (!ua_defer)
+			unifi.next = uptime_secs;	/* report the cfgversion at once */
 		return;
 	case U_PORTS:
 		if (!u_ports())

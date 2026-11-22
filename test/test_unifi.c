@@ -1565,8 +1565,31 @@ static void test_apply(void)
 	ran[0] = 0;
 	answer("{\"_type\":\"setparam\",\"cfgversion\":\"0000000000000018\",\"system_cfg\":\""
 	       "switch.vlan.1.id=1\\nswitch.vlan.1.mode=untagged\\n\"}");
-	check(!ran[0] && !unifi.cfgver[0], "apply: without an uplink the VLANs wait, and no cfgversion is reported");
+	check(!ran[0] && !unifi.cfgver[0] && unifi.next != uptime_secs,
+	      "apply: without an uplink the VLANs wait, no cfgversion is reported, and the retry waits the interval");
+	inform();
+	ran[0] = 0;
+	answer("{\"_type\":\"setparam\",\"cfgversion\":\"0000000000000018\",\"system_cfg\":\""
+	       "switch.vlan.1.id=1\\nswitch.vlan.1.mode=untagged\\n\"}");
+	check(!ran[0] && !unifi.cfgver[0] && unifi.next != uptime_secs, "apply: a second unmapped reply waits again");
 	rx_ingress = 8;
+	inform();
+	ran[0] = 0;
+	answer("{\"_type\":\"setparam\",\"cfgversion\":\"0000000000000018\",\"system_cfg\":\""
+	       "switch.vlan.1.id=1\\nswitch.vlan.1.mode=untagged\\n\"}");
+	check(strstr(ran, "pvid 1 1\n") && !strcmp(unifi.cfgver, "0000000000000018"),
+	      "apply: a reply on a front port applies the VLANs");
+
+	/* A gateway port that is no front port falls back to the reply's */
+	rx_gateway = 1;	/* ASIC port 0 */
+	strcpy(unifi.cfgver, "1111");
+	inform();
+	ran[0] = 0;
+	answer("{\"_type\":\"setparam\",\"cfgversion\":\"0000000000000019\",\"system_cfg\":\""
+	       "switch.vlan.1.id=1\\nswitch.vlan.1.mode=untagged\\n\"}");
+	check(!strcmp(unifi.cfgver, "0000000000000019") && !strstr(ran, "pvid 6 "),
+	      "apply: an unmapped gateway port falls back to the reply's, which keeps its pvid");
+	rx_gateway = 0;
 
 	/* A selection change during an apply: its cfgversion is not reported */
 	ua_busy = 1;
