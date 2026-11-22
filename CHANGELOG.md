@@ -225,10 +225,11 @@
     `ports`, `lag`, `stp`, `igmp`, `jumbo` and `mirror`, or `all` or `none` (the default).
     In an applied area the controller's settings replace that area's lines in
     `config.txt`, which the switch writes itself, and only the commands that change
-    something run. The switch reports the matching capabilities for the selected areas. The management VLAN's lines, the uplink's native VLAN, port and
-    VLAN names, per-port STP and EEE and flow control on SFP ports are left alone. The
-    cfgversion is reported once the settings are applied and written, so an interrupted
-    apply gets them again. A selection change makes the controller send its settings again.
+    something run. The switch reports the matching capabilities for the selected areas.
+    The management VLAN's lines, the uplink's native VLAN, port and VLAN names, per-port
+    STP, and link, EEE and flow control on SFP ports are left alone. The cfgversion is
+    reported once the settings are applied and written, so an interrupted apply gets them
+    again. A selection change makes the controller send its settings again.
 
 ## Changed
 
