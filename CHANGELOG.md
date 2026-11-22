@@ -196,7 +196,8 @@
     over its own TCP connection, encrypted with AES-128-GCM under the default key.
     The switch reports itself as a `USWED36` (RTL837x) or `USL8LP` (RTL836x) and
     shows up in the controller as waiting for adoption. `unifi` shows the state and
-    the last reply.
+    the last reply. The inform leaves out the netmask: with it, a controller in the
+    same subnet (UniFi Network 11.1.50) adopts over SSH, which the switch lacks.
   - Adoption. Adopt in the controller hands the switch its authkey, and the switch
     informs with it from then on and echoes the controller's `cfgversion`. Both are
     kept in two flash sectors of their own, so they survive reboots and firmware

@@ -301,7 +301,8 @@ amd989 `unifi_protocol.py:30-124`, unifi-stubd `docs/en/protocol-notes.md:74-90`
    key-delivery channels"). `mgmt_url` is the controller's web UI link, not an
    inform URL. Treating it as one loses the controller (openUF
    `PROTOCOL-VALIDATION.md` lines 600–604).
-6. **Adoption stays on inform on the controller's own subnet.** In the lab
+6. **Adoption by inform, unless the controller is in the subnet the device
+   reports.** In the lab
    (10.6.109), a fresh controller adopted four emulated devices whose informs
    carried their real IP on the controller's subnet: `USWED36`, `USL8LP`, a
    second `USL8LP` reporting `ip` `0.0.0.0`, and a `U7PG2` access point. For
@@ -320,8 +321,31 @@ amd989 `unifi_protocol.py:30-124`, unifi-stubd `docs/en/protocol-notes.md:74-90`
    the lab controller image. It went from pending to Connected (state 1),
    with `known_cfgversion` equal to the echoed `cfgversion`, within three
    informs. It stayed Connected across a reboot. After Forget in the
-   controller, the next reply was `setdefault`. A production controller
-   has not been tried.
+   controller, the next reply was `setdefault`.
+   **Confirmed on a production controller (UniFi Network 11.1.50, UniFi OS
+   Server):** the controller picks SSH adoption when its own address is in
+   the subnet the device reports (`ip` and `netmask` of the inform), and
+   inform adoption otherwise, logging `discovered via L3 inform, skip SSH
+   adoption` (`SumKAE` and `JxsWMGvtnwo` in `devmgr`, decompiled). A device
+   whose inform has no `netmask` has no subnet to test.
+   - A TL-SG108PE V5 running this firmware (`v0.1.0-9b875a1c`, reporting
+     `USL8LP`) on the controller's own subnet sent its netmask. It got
+     `SSH adopt failed … msg[unreachable]`, then `used default key in
+     ADOPT_FAILED state, reject it!` on every inform, and the app asked
+     for a reset.
+   - The same switch on `v0.1.0-8efc8a31`, which sends no `netmask`, was
+     adopted by inform: `discovered via L3 inform, skip SSH adoption`,
+     `initial mgmt_cfg sent`, `adoption - completed`, then `noop` replies
+     with its `cfgversion` echoed (Connected). A device record created
+     from an earlier inform that had a netmask still went to SSH; removing
+     it in the controller was enough.
+   - The ZX-SWTGW218AS above sent its netmask too, but the lab controller
+     (10.213.77.10, on a Docker network) was outside the switch's subnet.
+     Whether the emulated devices' informs carried a netmask was not
+     recorded, so the lab runs neither confirm nor refute the rule for
+     10.6.109.
+
+   The firmware therefore sends no `netmask`.
 7. Ways for the device to learn the inform URL: manual configuration (the
    web UI or CLI here), DHCP option 43 sub-option 1 carrying the IPv4 address
    (fxkr README), and the DNS name `unifi` (the default URL). Ubiquiti's help
@@ -387,7 +411,9 @@ The base fields come from TNBU `BaseInformBody` (`BaseInformBody.cs:3-49`):
 serial, inform_url, default, state, cfgversion, uptime, time, uplink,
 isolated, locating, bootrom_version, board_rev, architecture, anon_id,
 hash_id, manufacturer_id, selfrun_beacon, inform_min_interval, inform_as_notif,
-notif_reason, discovery_response`. The controller rejects an inform without
+notif_reason, discovery_response`. This firmware leaves out `netmask` on
+purpose: with it, a controller in the same subnet adopts over SSH
+([Adoption flow](#adoption-flow-layer-3-no-ssh), item 6). The controller rejects an inform without
 `version` (`invalid inform: 'version' not found in payload`) and checks
 `hash_id` (`Invalid hash_id [{}] from device[{}] inform, ignored`), both
 *string evidence*.
@@ -1407,9 +1433,11 @@ Connected.
 - Responses uncompressed: **confirmed**. Uncompressed informs accepted:
   **confirmed** (CBC and GCM). GCM from the first inform: **confirmed**.
 - Adoption reply in the request's mode: **confirmed**.
-- Inform adoption on the controller's own subnet, with the device's real IP:
-  **confirmed** in the lab, also with `sshd_port` reported. The trigger for
-  SSH adoption seen with the OpenWrt agent is **not reproduced** (see
+- Inform adoption with the device's real IP: **confirmed** in the lab, also
+  with `sshd_port` reported. The trigger for SSH adoption is **identified**
+  on 11.1.50: the controller's address inside the subnet of the inform's
+  `ip` and `netmask`. Without a `netmask`, inform adoption on the
+  controller's own subnet is **confirmed** on hardware (see
   [Adoption flow](#adoption-flow-layer-3-no-ssh), item 6).
 - `mgmt_cfg` contains `inform_url`: **refuted** for 10.6.109.
 - `setstate` for switch port config: **not seen**; port overrides arrive in
