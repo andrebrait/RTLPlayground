@@ -2528,6 +2528,7 @@ var CONF_CMDS = [
     /^session\s+\d{1,5}$/,
     /^dns\s+server\s+(\d{1,3}\.){3}\d{1,3}(\s+(\d{1,3}\.){3}\d{1,3})?$/,
     /^unifi\s+(on|off)$/,
+    /^unifi\s+apply(\s+(all|none|vlans|ports|lag|stp|igmp|jumbo|mirror))+$/,
     /* as loose as the firmware's parser: a line it took must survive Save */
     /^unifi\s+inform\s+http:\/\/[A-Za-z0-9._-]{1,47}(:\d+)?(\/[^ "\\]*)?$/,
     /^ntp\s+(on|off)$/,
@@ -6216,7 +6217,7 @@ var CONF_OVERWRITE = [
     /^stp\s+(prio|hello|maxage|fwd|txhold|version)\b/,
     /^stp\s+(port\s+\d{1,2}|lag\s+[1-4])\s+(edge|cost|prio|guard|filter|p2p)\b/,
     /^igmp\b/, /^mtu\s+\d{1,2}\b/, /^storm\s+\d{1,2}\s+(bcast|mcast|ucast|umcast)\b/,
-    /^unifi\s+inform\b/,
+    /^unifi\s+inform\b/, /^unifi\s+apply\b/,
     /^acl\s+\d{1,2}\b/, /^acl\s+(meter|field)\s+\d{1,2}\b/, /^acl\s+counter\s+\d{1,2}\s+(mode|width)\b/, /^acl\s+gpio\s+([0-3]|polarity)\b/, /^acl\s+default\b/, /^dhcp\s+snooping\s+trust\b/,
 ];
 var CONF_TOGGLE = [/^(unifi)\s+(on|off)$/, /^(dhcp snooping)\s+(on|off)$/, /^(snmp)\s+(on|off)$/, /^(prometheus)\s+(on|off)$/, /^(syslog)\s+(on|off)$/, /^(ntp)\s+(on|off)$/, /^(stp)\s+(on|off)$/, /^(lldp)\s+(on|off)$/, /^(lldp\s+tlv\s+\w+)\s+(on|off)$/, /^(stp\s+(port\s+\d{1,2}|lag\s+[1-4]))\s+(on|off)$/];

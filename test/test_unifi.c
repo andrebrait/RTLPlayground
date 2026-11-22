@@ -171,12 +171,22 @@ bool snmp_hw_stat(uint8_t port, uint8_t selector, bool high, bool low, struct sn
 	return high && low;
 }
 
-/* The UniFi state sector */
+/* The UniFi state sector, and config.txt's in front of it */
 struct flash_region_t flash_region;
 static uint8_t sector[8192];	/* both UniFi sectors */
+static uint8_t config_sector[CONFIG_LEN];
+static int config_erases, config_writes, config_write_fail;
+__xdata uint8_t cmd_history[CMD_HISTORY_SIZE];
+__xdata uint16_t cmd_history_ptr;
 static int erases, saves, cut, broken, no_commit, partial;	/* cut: the next write stops after that many bytes */
+static int in_config(void)
+{
+	return flash_region.addr >= CONFIG_START && flash_region.addr + flash_region.len <= CONFIG_START + CONFIG_LEN;
+}
 static uint8_t *at(void)
 {
+	if (in_config())
+		return config_sector + (flash_region.addr - CONFIG_START);
 	uint32_t o = flash_region.addr - UNIFI_STATE_START;
 	if (flash_region.addr < UNIFI_STATE_START || o + flash_region.len > sizeof(sector)) {
 		printf("FAIL flash access outside the UniFi sector: %x+%u\n", flash_region.addr, flash_region.len);
@@ -186,6 +196,11 @@ static uint8_t *at(void)
 }
 void flash_sector_erase(void)
 {
+	if (flash_region.addr == CONFIG_START) {
+		memset(config_sector, 0xff, sizeof(config_sector));
+		config_erases++;
+		return;
+	}
 	if (flash_region.addr != UNIFI_STATE_START && flash_region.addr != UNIFI_STATE_START + 4096) {
 		printf("FAIL erase outside the UniFi sectors\n");
 		exit(1);
@@ -203,6 +218,12 @@ void flash_sector_erase(void)
 void flash_write_bytes(uint8_t *p)
 {
 	uint8_t *d = at();
+	if (in_config()) {
+		for (int i = 0; i < flash_region.len && !config_write_fail; i++)
+			d[i] &= p[i];
+		config_writes++;
+		return;
+	}
 	if (flash_region.len == 1) {	/* the commit byte */
 		if (!no_commit && !broken)
 			*d &= *p;
@@ -246,6 +267,17 @@ void itoa_short(uint16_t v) { char s[8]; snprintf(s, sizeof s, "%u", v); print_s
 void print_ip(__xdata uint8_t *ip) { char s[16]; snprintf(s, sizeof s, "%u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]); print_string(s); }
 
 static int failures;
+
+/* What the firmware's command parser would have run, one line each */
+__xdata uint16_t management_vlan = 10;
+__xdata char save_cmd = 1;
+static char ran[2048];
+void cmd_tokenize(void) {}
+void cmd_parser(void)
+{
+	strcat(ran, (char *)cmd_buffer);
+	strcat(ran, "\n");
+}
 
 static void check(int ok, const char *what)
 {
@@ -349,7 +381,7 @@ static const uint8_t *cur_key = key;
 
 static uint16_t reply(uint8_t *p, const char *json, int with_clen, int tamper)
 {
-	uint8_t pkt[1024], k[16];
+	uint8_t pkt[2048], k[16];
 	uint16_t n = strlen(json), hl;
 
 	memset(pkt, 0, 40);
@@ -1239,6 +1271,355 @@ static void test_mac_table(void)
 	rx_gateway = 0;
 }
 
+/* "unifi apply": the controller's settings replace config.txt's lines of
+ * the areas applied, and only what changed runs */
+static void test_apply(void)
+{
+	static const uint8_t newkey[16] = {
+		0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
+		0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff
+	};
+	/* VLAN 1 has a name; port 2 is forced and then turned off locally;
+	 * port 6 is the SFP+ and the uplink (the controller's replies arrive
+	 * on ASIC 8); EEE is off on port 3, which the controller leaves
+	 * alone. VLAN 10 is the management VLAN: never touched. */
+	static const char old[] = "hostname sw\nvlan 10 mgmt\nvlan 10 4 6t\nvlan 1 lan 1 2 3 4 5 6\nvlan 30 3t\npvid 1 1\n"
+		"pvid 6 10\nport 2 100m full\nport 2 off\nport 5 name up\nport 6 fc off\neee off 6\neee off 3\n"
+		"mtu 1 9216\nlag 2 3 4\nlaghash 2 sip\nmirror 5 6\nstp on\nstp prio 8\nigmp off\nunifi on";
+	/* Front ports 5, 1, 2, 3, 4, 6 on ASIC 3..8. Port 10 is not on this board. */
+	static const char cfg[] = "{\"_type\":\"setparam\",\"cfgversion\":\"00000000000000aa\",\"system_cfg\":\""
+		"# switch\\nswitch.managementvlan=1\\nswitch.jumboframes=disabled\\nswitch.stp.version=rstp\\n"
+		"switch.stp.priority=4096\\nswitch.stp.status=enabled\\n"
+		"switch.vlan.1.id=1\\nswitch.vlan.1.mode=untagged\\nswitch.vlan.2.id=20\\nswitch.vlan.2.mode=tagged\\n"
+		"switch.vlan.2.igmp_snooping=true\\nswitch.vlan.3.id=10\\nswitch.vlan.3.mode=tagged\\n"
+		"switch.vlan.1.port.3.mode=exclude\\nswitch.vlan.2.port.3.mode=untagged\\nswitch.vlan.3.port.3.mode=exclude\\n"
+		"switch.port.3.pvid=20\\nswitch.port.1.status=disabled\\nswitch.port.1.eee=enabled\\n"
+		"switch.port.2.autoneg=disabled\\nswitch.port.2.speed=100\\nswitch.port.2.duplex=enabled\\n"
+		"switch.port.4.opmode=aggregate\\nswitch.port.4.lag=1\\nswitch.port.5.opmode=aggregate\\nswitch.port.5.lag=1\\n"
+		"switch.port.6.eee=enabled\\nswitch.port.6.flowctrl=enabled\\nswitch.port.3.opmode=mirror\\n"
+		"switch.port.3.mirror_port=2\\nswitch.port.10.name=x\\nswitch.port.2.name=a\\\\nb\\n\"}";
+	const char *j;
+
+	cmd("unifi forget");
+	cur_key = key;
+	inform();
+	answer("{\"_type\":\"setparam\",\"mgmt_cfg\":\"authkey=00112233445566778899aabbccddeeff\\n\"}");
+	cur_key = newkey;
+
+	memset(config_sector, 0xff, sizeof(config_sector));
+	memcpy(config_sector, old, sizeof(old));	/* NUL-terminated, without a last newline */
+
+	cmd("unifi apply vlans bogus");
+	check(err_status != ERR_OK && !ua_mask, "apply: an unknown area is refused");
+	strcpy(unifi.cfgver, "1111");
+	cmd("unifi apply all");
+	check(ua_mask == UA_ALL && !unifi.cfgver[0] && unifi.next == uptime_secs,
+	      "apply: all areas; the cfgversion is forgotten so that the controller sends its settings");
+	inform();
+	j = req_json();
+	check(j && strstr(j, ",\"switch_caps\":{\"feature_caps\":532800,\"max_aggregate_sessions\":4,\"max_mirror_sessions\":1}}")
+	      && strstr(j, "{\"port_idx\":5,\"media\":\"GE\",\"speed_caps\":1049064,\"port_caps\":1,")
+	      && strstr(j, "{\"port_idx\":6,\"media\":\"SFP+\",\"speed_caps\":288,\"is_uplink\":true,\"up\""),
+	      "apply: the inform claims STP, IGMP, LACP and jumbo, and EEE on copper ports only");
+
+	ran[0] = 0;
+	config_writes = 0;
+	answer(cfg);
+	check(unifi.phase == U_IDLE && !ua_busy && config_writes == 1, "apply: the commands ran and config.txt was written once");
+	/* port 2 off went: its forced speed, an old line too, runs again */
+	static const char want_ran[] =
+		"vlan 30 d\nport 2 100m full\neee on 3\nmtu 1 1522\nlag 2 d\n"
+		"vlan 1 lan 1 2 4 5 6\nvlan 20 1t 2t 3 4t 5t 6t\npvid 2 1\npvid 3 20\npvid 4 1\npvid 5 1\n"
+		"port 1 off\neee on 1\nlag 1 lacp 4 5\nstp version rstp\nstp prio 1\nigmp on\nmirror 3 2\n";
+	check(!strcmp(ran, want_ran), "apply: undo what went, then run only the new lines");
+	if (strcmp(ran, want_ran))
+		printf("  ran:\n%s", ran);
+	static const char want_cfg[] = "hostname sw\nvlan 10 mgmt\nvlan 10 4 6t\npvid 6 10\nport 5 name up\n"
+		"port 6 fc off\neee off 6\nlaghash 2 sip\nunifi on\nunifi apply vlans ports lag stp igmp jumbo mirror\n"
+		"vlan 1 lan 1 2 4 5 6\nvlan 20 1t 2t 3 4t 5t 6t\npvid 1 1\npvid 2 1\npvid 3 20\npvid 4 1\npvid 5 1\n"
+		"port 1 off\neee on 1\nport 2 100m full\nlag 1 lacp 4 5\nstp on\nstp version rstp\nstp prio 1\nigmp on\nmirror 3 2\n";
+	check(!strcmp((char *)config_sector, want_cfg), "apply: config.txt keeps the other lines and holds the controller's");
+	if (strcmp((char *)config_sector, want_cfg))
+		printf("  config.txt:\n%s", (char *)config_sector);
+	check(!strcmp(unifi.cfgver, "00000000000000aa") && !strcmp((char *)last_rec() + 28, "00000000000000aa"),
+	      "apply: the cfgversion is reported and saved once all ran");
+
+	/* "unifi off" during an apply: the apply runs to its end, so the switch
+	 * and config.txt agree; no cfgversion is saved before that */
+	memset(config_sector, 0xff, sizeof(config_sector));
+	memcpy(config_sector, old, sizeof(old));
+	strcpy(unifi.cfgver, "1111");
+	inform();
+	ran[0] = 0;
+	config_writes = 0;
+	{
+		static uint8_t r[2048];
+		uint16_t n = reply(r, cfg, 1, 0);
+		deliver(r, n);
+		for (int i = 0; i < 1000 && unifi.phase != U_APPLY; i++)
+			unifi_tick();
+		unifi_tick();
+	}
+	check(ua_busy && ran[0] && !unifi.cfgver[0] && !last_rec()[28], "apply: while it runs, no cfgversion is saved");
+	cmd("unifi off");
+	for (int i = 0; i < 100 && ua_busy; i++)
+		unifi_tick();
+	check(!ua_busy && unifi.phase == U_IDLE && !strcmp(ran, want_ran) && !strcmp((char *)config_sector, want_cfg)
+	      && !strcmp(unifi.cfgver, "00000000000000aa"),
+	      "apply: unifi off lets a running apply finish");
+	cmd("unifi on");
+	answer("{\"_type\":\"noop\",\"interval\":10}");
+
+	/* More VLANs than it holds: nothing is applied, rather than some deleted */
+	strcpy(unifi.cfgver, "1111");
+	inform();
+	ran[0] = 0;
+	config_writes = 0;
+	out_len = 0;
+	answer("{\"_type\":\"setparam\",\"cfgversion\":\"00000000000000bb\",\"system_cfg\":\""
+	       "switch.vlan.1.id=1\\nswitch.vlan.33.id=33\\n\"}");
+	check(!ran[0] && !config_writes && strstr(out, "do not fit, nothing applied"), "apply: VLAN slots past 32 apply nothing");
+
+	/* The same settings again, as after a reboot: nothing runs */
+	strcpy(unifi.cfgver, "1111");
+	inform();
+	ran[0] = 0;
+	config_writes = 0;
+	answer(cfg);
+	check(!ran[0] && !config_writes, "apply: settings already in config.txt run nothing and write nothing");
+
+	/* Nothing applied: the areas are only reported */
+	cmd("unifi apply none");
+	strcpy(unifi.cfgver, "1111");
+	inform();
+	j = req_json();
+	check(j && !strstr(j, "switch_caps") && !strstr(j, "port_caps"), "apply none: no capabilities claimed");
+	ran[0] = 0;
+	config_writes = 0;
+	out_len = 0;
+	answer(cfg);
+	check(!ran[0] && !config_writes, "apply none: nothing runs");
+
+	/* Only VLANs: the port, LAG and mirror lines stay */
+	memset(config_sector, 0xff, sizeof(config_sector));
+	memcpy(config_sector, old, sizeof(old));
+	cmd("unifi apply vlans");
+	inform();
+	ran[0] = 0;
+	answer(cfg);
+	check(strstr(ran, "vlan 30 d\n") && !strstr(ran, "port 2 on") && !strstr(ran, "lag ") && !strstr(ran, "mirror")
+	      && strstr((char *)config_sector, "port 2 off\n") && strstr((char *)config_sector, "lag 2 3 4\n"),
+	      "apply vlans: only the VLAN lines change");
+	cmd("unifi");
+	check(strstr(out, "Applies: vlans") != NULL, "show: the areas applied");
+
+	/* VLANs past 32 block only the VLANs: STP alone still applies */
+	cmd("unifi apply stp");
+	strcpy(unifi.cfgver, "1111");
+	inform();
+	ran[0] = 0;
+	answer("{\"_type\":\"setparam\",\"cfgversion\":\"00000000000000cc\",\"system_cfg\":\""
+	       "switch.vlan.33.id=33\\nswitch.stp.priority=8192\\n\"}");
+	check(strstr(ran, "stp prio 2\n") != NULL, "apply stp: VLAN slots past 32 do not block it");
+
+	/* A member-less VLAN gets no name: "vlan 30 dmz" would delete it */
+	memset(config_sector, 0xff, sizeof(config_sector));
+	strcpy((char *)config_sector, "vlan 30 dmz 3t\n");
+	cmd("unifi apply vlans");
+	strcpy(unifi.cfgver, "1111");
+	inform();
+	ran[0] = 0;
+	answer("{\"_type\":\"setparam\",\"cfgversion\":\"00000000000000dd\",\"system_cfg\":\""
+	       "switch.vlan.1.id=30\\nswitch.vlan.1.mode=exclude\\n\"}");
+	check(strstr(ran, "vlan 30\n") && !strstr(ran, "dmz"), "apply vlans: no name on a VLAN without members");
+
+	/* The uplink's native VLAN is left alone like the management VLAN:
+	 * port 6 (the uplink) has pvid 40, which the controller does not know */
+	memset(config_sector, 0xff, sizeof(config_sector));
+	strcpy((char *)config_sector, "vlan 40 6 1\npvid 6 40\nvlan 50 2\n");
+	strcpy(unifi.cfgver, "1111");
+	inform();
+	ran[0] = 0;
+	answer("{\"_type\":\"setparam\",\"cfgversion\":\"00000000000000ee\",\"system_cfg\":\""
+	       "switch.vlan.1.id=1\\nswitch.vlan.1.mode=untagged\\n\"}");
+	check(strstr(ran, "vlan 50 d\n") && !strstr(ran, "vlan 40") && strstr((char *)config_sector, "vlan 40 6 1\npvid 6 40\n"),
+	      "apply vlans: the uplink's native VLAN stays");
+
+	/* Only the selection changed: config.txt still gets it */
+	memset(config_sector, 0xff, sizeof(config_sector));
+	strcpy((char *)config_sector, "vlan 30 3t\npvid 1 1\npvid 2 1\npvid 3 1\npvid 4 1\npvid 5 1\n");
+	strcpy(unifi.cfgver, "1111");
+	inform();
+	ran[0] = 0;
+	config_writes = 0;
+	answer("{\"_type\":\"setparam\",\"cfgversion\":\"00000000000000ff\",\"system_cfg\":\""
+	       "switch.vlan.1.id=30\\nswitch.vlan.1.port.3.mode=tagged\\n\"}");
+	check(!ran[0] && config_writes == 1 && !strcmp((char *)config_sector, "unifi apply vlans\nvlan 30 3t\npvid 1 1\npvid 2 1\npvid 3 1\npvid 4 1\npvid 5 1\n"),
+	      "apply: a new selection alone is written to config.txt");
+
+	/* Leading spaces: still the jumbo area's line */
+	cmd("unifi apply jumbo");
+	memset(config_sector, 0xff, sizeof(config_sector));
+	strcpy((char *)config_sector, "  mtu 1 9216\n");
+	strcpy(unifi.cfgver, "1111");
+	inform();
+	ran[0] = 0;
+	answer("{\"_type\":\"setparam\",\"cfgversion\":\"0000000000000011\",\"system_cfg\":\""
+	       "switch.jumboframes=disabled\\n\"}");
+	check(!strcmp(ran, "mtu 1 1522\n") && !strcmp((char *)config_sector, "unifi apply jumbo\n"),
+	      "apply: a line with leading spaces is still owned");
+
+	/* The command history's lines of the applied areas are blanked, so
+	 * Save to flash does not undo the apply */
+	memset(cmd_history, 0, sizeof(cmd_history));
+	strcpy((char *)cmd_history + 1, "mtu 1 1522\nhostname x\n");
+	cmd_history_ptr = 1 + strlen("mtu 1 1522\nhostname x\n");
+	memset(config_sector, 0xff, sizeof(config_sector));
+	strcpy(unifi.cfgver, "1111");
+	inform();
+	answer("{\"_type\":\"setparam\",\"cfgversion\":\"0000000000000012\",\"system_cfg\":\""
+	       "switch.jumboframes=enabled\\n\"}");
+	check(!memcmp(cmd_history + 1, "          \nhostname x\n", 22), "apply: the history's lines of the applied areas are blanked");
+
+	/* A config.txt that does not read back reports no cfgversion */
+	memset(config_sector, 0xff, sizeof(config_sector));
+	config_write_fail = 1;
+	strcpy(unifi.cfgver, "1111");
+	inform();
+	answer("{\"_type\":\"setparam\",\"cfgversion\":\"0000000000000013\",\"system_cfg\":\""
+	       "switch.jumboframes=enabled\\n\"}");
+	config_write_fail = 0;
+	check(!unifi.cfgver[0] && !ua_busy, "apply: a config.txt that does not read back reports no cfgversion");
+
+	/* SFP ports: no link settings; IGMP waits while VLANs are missing */
+	cmd("unifi apply ports igmp");
+	memset(config_sector, 0xff, sizeof(config_sector));
+	strcpy(unifi.cfgver, "1111");
+	inform();
+	ran[0] = 0;
+	answer("{\"_type\":\"setparam\",\"cfgversion\":\"0000000000000014\",\"system_cfg\":\""
+	       "switch.port.6.status=disabled\\nswitch.port.1.status=disabled\\nswitch.vlan.1.id=1\\n"
+	       "switch.vlan.1.igmp_snooping=false\\nswitch.vlan.33.igmp_snooping=true\\n\"}");
+	check(strstr(ran, "port 1 off\n") && !strstr(ran, "port 6") && !strstr(ran, "igmp"),
+	      "apply: no link settings on SFP ports; no IGMP while VLANs are missing");
+
+	/* An indented uplink pvid keeps its VLAN; an unchanged indented line
+	 * does not run again */
+	cmd("unifi apply vlans ports");
+	memset(config_sector, 0xff, sizeof(config_sector));
+	strcpy((char *)config_sector, "vlan 40 6 1\n  pvid 6 40\n  port 1 off\n");
+	strcpy(unifi.cfgver, "1111");
+	inform();
+	ran[0] = 0;
+	answer("{\"_type\":\"setparam\",\"cfgversion\":\"0000000000000015\",\"system_cfg\":\""
+	       "switch.vlan.1.id=1\\nswitch.vlan.1.mode=untagged\\nswitch.port.1.status=disabled\\n\"}");
+	check(!strstr(ran, "vlan 40") && !strstr(ran, "port 1 off") && strstr((char *)config_sector, "vlan 40 6 1\n"),
+	      "apply: indented lines are compared from their first word");
+
+	/* config.txt already holds the settings: the history is still cleared */
+	cmd("unifi apply jumbo");
+	memset(config_sector, 0xff, sizeof(config_sector));
+	strcpy((char *)config_sector, "unifi apply jumbo\nmtu 1 9216\nmtu 2 9216\nmtu 3 9216\nmtu 4 9216\nmtu 5 9216\nmtu 6 9216\n");
+	memset(cmd_history, 0, sizeof(cmd_history));
+	strcpy((char *)cmd_history + 1, "mtu 1 1522\n");
+	cmd_history_ptr = 1 + strlen("mtu 1 1522\n");
+	strcpy(unifi.cfgver, "1111");
+	inform();
+	ran[0] = 0;
+	config_writes = 0;
+	answer("{\"_type\":\"setparam\",\"cfgversion\":\"0000000000000016\",\"system_cfg\":\""
+	       "switch.jumboframes=enabled\\n\"}");
+	check(!ran[0] && !config_writes && !memcmp(cmd_history + 1, "          \n", 11),
+	      "apply: settings already in config.txt still clear the history's lines");
+
+	/* An edit made while an apply runs stays in the history */
+	cmd("unifi apply jumbo");
+	memset(config_sector, 0xff, sizeof(config_sector));
+	memset(cmd_history, 0, sizeof(cmd_history));
+	strcpy((char *)cmd_history + 1, "mtu 1 1522\n");
+	cmd_history_ptr = 1 + strlen("mtu 1 1522\n");
+	strcpy(unifi.cfgver, "1111");
+	inform();
+	{
+		static uint8_t r[2048];
+		uint16_t n = reply(r, "{\"_type\":\"setparam\",\"cfgversion\":\"0000000000000017\",\"system_cfg\":\""
+				   "switch.jumboframes=enabled\\n\"}", 1, 0);
+		deliver(r, n);
+		for (int i = 0; i < 1000 && unifi.phase != U_APPLY; i++)
+			unifi_tick();
+		strcpy((char *)cmd_history + cmd_history_ptr, "mtu 2 1522\n");
+		cmd_history_ptr += strlen("mtu 2 1522\n");
+		for (int i = 0; i < 100 && ua_busy; i++)
+			unifi_tick();
+	}
+	check(!memcmp(cmd_history + 1, "          \nmtu 2 1522\n", 22) && !ua_busy,
+	      "apply: an edit made while it runs stays in the history");
+
+	/* A Save to flash while the apply runs: its config.txt stays */
+	memset(config_sector, 0xff, sizeof(config_sector));
+	strcpy(unifi.cfgver, "1111");
+	inform();
+	{
+		static uint8_t r[2048];
+		uint16_t n = reply(r, "{\"_type\":\"setparam\",\"cfgversion\":\"000000000000001a\",\"system_cfg\":\""
+				   "switch.jumboframes=disabled\\n\"}", 1, 0);
+		memset(config_sector, 0xff, sizeof(config_sector));
+		strcpy((char *)config_sector, "mtu 1 9216\n");
+		deliver(r, n);
+		for (int i = 0; i < 1000 && unifi.phase != U_APPLY; i++)
+			unifi_tick();
+		strcpy((char *)config_sector, "hostname saved\n");	/* Save to flash */
+		for (int i = 0; i < 100 && ua_busy; i++)
+			unifi_tick();
+	}
+	check(!strcmp((char *)config_sector, "hostname saved\n") && !unifi.cfgver[0] && !ua_busy,
+	      "apply: a Save to flash while it runs keeps its config.txt, and no cfgversion is reported");
+
+	/* No uplink on a front port: the VLANs wait and are asked for again */
+	cmd("unifi apply vlans");
+	u_uplink = 0;
+	rx_gateway = 0;
+	strcpy(unifi.cfgver, "1111");
+	inform();
+	rx_ingress = 0;	/* the reply comes in on ASIC port 0, no front port here */
+	ran[0] = 0;
+	answer("{\"_type\":\"setparam\",\"cfgversion\":\"0000000000000018\",\"system_cfg\":\""
+	       "switch.vlan.1.id=1\\nswitch.vlan.1.mode=untagged\\n\"}");
+	check(!ran[0] && !unifi.cfgver[0] && unifi.next != uptime_secs,
+	      "apply: without an uplink the VLANs wait, no cfgversion is reported, and the retry waits the interval");
+	inform();
+	ran[0] = 0;
+	answer("{\"_type\":\"setparam\",\"cfgversion\":\"0000000000000018\",\"system_cfg\":\""
+	       "switch.vlan.1.id=1\\nswitch.vlan.1.mode=untagged\\n\"}");
+	check(!ran[0] && !unifi.cfgver[0] && unifi.next != uptime_secs, "apply: a second unmapped reply waits again");
+	rx_ingress = 8;
+	inform();
+	ran[0] = 0;
+	answer("{\"_type\":\"setparam\",\"cfgversion\":\"0000000000000018\",\"system_cfg\":\""
+	       "switch.vlan.1.id=1\\nswitch.vlan.1.mode=untagged\\n\"}");
+	check(strstr(ran, "pvid 1 1\n") && !strcmp(unifi.cfgver, "0000000000000018"),
+	      "apply: a reply on a front port applies the VLANs");
+
+	/* A gateway port that is no front port falls back to the reply's */
+	rx_gateway = 1;	/* ASIC port 0 */
+	strcpy(unifi.cfgver, "1111");
+	inform();
+	ran[0] = 0;
+	answer("{\"_type\":\"setparam\",\"cfgversion\":\"0000000000000019\",\"system_cfg\":\""
+	       "switch.vlan.1.id=1\\nswitch.vlan.1.mode=untagged\\n\"}");
+	check(!strcmp(unifi.cfgver, "0000000000000019") && !strstr(ran, "pvid 6 "),
+	      "apply: an unmapped gateway port falls back to the reply's, which keeps its pvid");
+	rx_gateway = 0;
+
+	/* A selection change during an apply: its cfgversion is not reported */
+	ua_busy = 1;
+	strcpy(ua_cfgver, "abc");
+	cmd("unifi apply ports");
+	check(!ua_cfgver[0], "apply: a selection change during an apply drops its cfgversion");
+	ua_busy = 0;
+	cmd("unifi apply none");
+}
+
 int main(void)
 {
 	memset(sector, 0xff, sizeof(sector));
@@ -1261,5 +1642,6 @@ int main(void)
 	test_failed_reads();
 	test_upgrade();
 	test_mac_table();
+	test_apply();
 	return failures != 0;
 }

@@ -53,6 +53,22 @@
 #define U_REPLY		5	/* reply received, check its header */
 #define U_DECRYPT	6
 #define U_PORTS		7	/* writing the port table, one port per tick */
+#define U_APPLY		8	/* applying the controller's settings, one command per tick */
+
+/* The areas "unifi apply" selects (unifi_apply.c) */
+#define UA_VLANS	0x01
+#define UA_PORTS	0x02
+#define UA_LAG		0x04
+#define UA_STP		0x08
+#define UA_IGMP		0x10
+#define UA_JUMBO	0x20
+#define UA_MIRROR	0x40
+#define UA_ALL		0x7f
+#define UA_AREAS	7
+static __xdata uint8_t ua_mask;
+static __xdata uint8_t ua_imask;	/* ua_mask as the inform being built started */
+static __xdata char ua_cfgver[UNIFI_CFGVER_LEN];	/* reported once an apply is done */
+static void ua_caps(void);
 
 #define UE_DNS		1
 #define UE_CONN		2
@@ -497,6 +513,9 @@ static void u_port_entry(void)
 	}
 	if (u_isup)
 		u_s(",\"is_uplink\":true");
+	/* EEE is offered on copper ports while ports are applied */
+	if ((ua_imask & UA_PORTS) && !machine.is_sfp[u_ph])
+		u_s(",\"port_caps\":1");
 	if (u_up)
 		u_s(",\"up\":true");
 	else
@@ -574,6 +593,7 @@ static uint8_t u_port_macs(void)
 /* The inform JSON up to its port table */
 static void u_build(void)
 {
+	ua_imask = ua_mask;
 	unifi.pos = HROOM + TNBU_HDR;
 	u_s("{\"mac\":\"");
 	u_ma = uip_ethaddr.addr;
@@ -676,7 +696,9 @@ static uint8_t u_ports(void)
 		return 0;
 	}
 	u_lldp();
-	u_s("]}");
+	u_c(']');
+	ua_caps();
+	u_c('}');
 	return 1;
 }
 
@@ -1007,6 +1029,7 @@ static void u_forget(void)
 	unifi.adopted = 0;
 	unifi.keyed = 0;
 	unifi.cfgver[0] = 0;
+	ua_cfgver[0] = 0;	/* nor once a running apply is done */
 	/* A version a controller offered was for that controller */
 	memcpyc(unifi.version, u_default_version, sizeof(u_default_version));
 	if (!u_save())
@@ -1201,6 +1224,9 @@ static uint8_t u_version(void)
 	return 1;
 }
 
+static void u_error(__code const char *msg);
+#include "unifi_apply.c"
+
 /* The tag checked out: act on the reply */
 static __xdata uint8_t u_dirty;
 
@@ -1248,8 +1274,12 @@ static void u_decrypted(void)
 		u_i = u_string("cfgversion");
 		if (u_i == 0xffff && u_string("mgmt_cfg") != 0xffff)
 			u_i = u_line("cfgversion=");
-		if (unifi.adopted && u_i != 0xffff && u_cfgver())
+		if (unifi.adopted && u_i != 0xffff && u_cfgver()) {
 			u_dirty = 1;
+			/* A new configuration: apply what is selected */
+			if (u_string("system_cfg") != 0xffff)
+				ua_start();
+		}
 		/* A save that fails is tried again before the next inform */
 		if (u_dirty)
 			u_save();
@@ -1271,8 +1301,10 @@ static void u_decrypted(void)
 	u_done();
 	/* After a change the controller expects the next inform at once; other
 	 * replies, such as commands not handled here, wait the interval */
-	if (u_dirty)
-		unifi.next = uptime_secs;
+	if (u_dirty && !ua_defer)
+		unifi.next = uptime_secs;	/* deferred VLANs come again at the interval */
+	if (ua_busy)
+		unifi.phase = U_APPLY;
 }
 
 
@@ -1293,7 +1325,7 @@ static uint8_t u_crypt(void)
 
 void unifi_tick(void) __banked
 {
-	if (!unifi.enabled || unifi.abort)
+	if (unifi.phase != U_APPLY && (!unifi.enabled || unifi.abort))
 		return;
 	switch (unifi.phase) {
 	case U_IDLE:
@@ -1354,6 +1386,14 @@ void unifi_tick(void) __banked
 		u_build();
 		unifi.phase = U_PORTS;
 		return;
+	case U_APPLY:
+		if (!ua_run())
+			return;
+		ua_busy = 0;
+		unifi.phase = U_IDLE;
+		if (!ua_defer)
+			unifi.next = uptime_secs;	/* report the cfgversion at once */
+		return;
 	case U_PORTS:
 		if (!u_ports())
 			return;
@@ -1396,8 +1436,11 @@ static void u_stop(void)
 {
 	if (unifi.conn)
 		unifi.abort = 1;
-	unifi.phase = U_IDLE;
 	unifi.next = 0;
+	/* An apply runs to its end, even with UniFi off, so the switch and
+	 * config.txt agree; a reboot replays config.txt */
+	if (!ua_busy)
+		unifi.phase = U_IDLE;
 }
 
 
@@ -1570,6 +1613,7 @@ static void u_show(void)
 	if (unifi.unsaved)
 		print_string(", state not saved to flash");
 	write_char('\n');
+	ua_show();
 }
 
 
@@ -1612,6 +1656,10 @@ void unifi_parse(void) __banked
 		u_stop();
 		return;
 	}
+	if (cmd_words_len >= 3 && u_word("apply")) {
+		ua_set();
+		return;
+	}
 	if (cmd_words_len == 3 && u_word("inform")) {
 		if (!u_url()) {
 			u_error("unifi inform http://<host>[:<port>][/<path>]\n");
@@ -1636,5 +1684,5 @@ void unifi_parse(void) __banked
 		unifi.keyed = 0;
 		return;
 	}
-	u_error("unifi [on|off|inform <url>|forget|selftest]\n");
+	u_error("unifi [on|off|inform <url>|apply <areas>|forget|selftest]\n");
 }

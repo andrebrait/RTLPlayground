@@ -764,6 +764,77 @@ Network 11.1.50), not by `lldp_table`: a device sits behind the port whose
   port stops adding entries when the room the other ports and the LLDP
   table need would be gone, about 150 MACs in all.
 
+### Applying the controller's settings (implemented)
+
+`unifi apply <area>...` selects what the switch takes from `system_cfg`:
+`vlans`, `ports`, `lag`, `stp`, `igmp`, `jumbo`, `mirror`, `all` or `none`
+(the default). It is a `config.txt` line like any other.
+
+- **Translation.** Each applied area becomes the commands `config.txt` uses:
+  - VLAN slots become `vlan <vid> <port>[t]...`, with each port's mode taken
+    from its `switch.vlan.K.port.N.mode` line, else the slot's mode;
+  - a VLAN keeps the name `config.txt` gave it last, unless it has no
+    members and the name starts with `d` (`vlan <vid> d...` with three
+    words deletes a VLAN);
+  - `pvid <port> <vid>` for every port but the uplink: `switch.port.N.pvid`,
+    else the slot the port is untagged in, else 1;
+  - on copper ports, one link setting, `port N off` or
+    `port N <speed> [half|full]` (off wins; 10M to 1G on the RTL836x),
+    then `eee on|off N` and `port N fc on|off`;
+  - `lag G lacp <ports>`: each controller LAG id gets the next free group
+    (1..4); on the RTL836x, whose two groups are fixed to ports 0–3 and
+    4–7, the group of its members; a LAG across both leaves the LAGs as
+    they are;
+  - `stp on|off`, `stp version`, `stp prio` (priority / 4096);
+  - `igmp on` when any VLAN slot has `igmp_snooping=true`;
+  - `mtu N 9216` for jumbo frames;
+  - `mirror <dest> <source>`.
+- **`config.txt` is the reference.** The switch reads it, keeps the lines of
+  the other areas, and writes the applied areas' lines as the controller
+  wants them, with a `unifi apply` line for the current selection. A line
+  the controller dropped is undone: when the controller sets the same thing
+  (the same VLAN, port link, group and so on) with a line that was already
+  there, that line runs again; otherwise the default comes back, for example
+  `vlan 30 d`, `lag 2 d`, `port N auto`, `port N fc on`, `eee on N` (the
+  machine's default), `stp prio 8`, `stp version rstp`, `mtu N 1522` and
+  `mirror off`. Only lines that are new run, one command per tick, and the
+  sector is written once at the end. Settings that are already in
+  `config.txt`, for example after a reboot, run nothing.
+- **The cfgversion.** It is reported, and saved, once every command ran and
+  `config.txt` is written and reads back the same. The command history's
+  lines of the applied areas are blanked when the plan is made, so a later
+  Save to flash does not undo the apply; edits made while it runs stay. A
+  Save to flash while it runs wins: `config.txt` is checked before it is
+  written, and if it changed, nothing is written and no cfgversion is
+  reported, so the controller sends the settings for a new plan. A running apply
+  finishes even when UniFi is turned off, so the switch and `config.txt`
+  agree; a reboot replays `config.txt`. The uplink is the gateway's port, else the
+  one the controller's reply came in on, whichever is a front port; while
+  neither is, VLANs wait and no cfgversion is reported, so the controller
+  sends them again. An apply that a reboot interrupts leaves no
+  cfgversion, so the controller sends the settings again, as does a
+  selection change or `unifi forget` while an apply runs. Settings that do not fit apply nothing and are not
+  retried until the controller's next cfgversion; more than 32 VLAN slots
+  count only while VLANs are applied, and keep IGMP as it is.
+- **Left alone:**
+  - the management VLAN's lines (`vlan <mgmt> ...` and `vlan <vid> mgmt`),
+    and the uplink's native VLAN: its `pvid` lines and that VLAN's lines,
+    which keep the switch reachable. The uplink is the port towards the
+    gateway, else the one the controller's replies arrive on, with the
+    other members of its LAG;
+  - port names;
+  - per-port STP;
+  - link, EEE and flow control on SFP ports (`port N` does not set them
+    there);
+  - runtime changes that were never saved to `config.txt`.
+- **Capabilities.** While an area is applied, the inform claims it:
+  `feature_caps` STP 64, IGMP snooping 256, LACP 8192 and jumbo 524288;
+  `max_aggregate_sessions` 4 (2 on the RTL836x) and `max_mirror_sessions` 1;
+  and `port_caps`
+  EEE 1 on copper ports. With nothing applied, nothing is claimed, as before.
+- **Selection changes.** A change of selection at run time forgets the
+  `cfgversion`, so the controller sends its settings again.
+
 ### Port index translation
 
 The controller keys every per-port setting on `port_table[].port_idx`, and
