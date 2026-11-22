@@ -14,10 +14,13 @@
 #include "rtl837x_sfr.h"
 #include "rtl837x_regs.h"
 #include "rtl837x_igmp.h"
-#include "machine.h"
+#include "rtl837x_port.h"
+#include "rtl837x_stp.h"
+#include "rtl837x_trap.h"
 #if SOC_FAMILY == RTL836X
 #include "rtl836x_igmp.h"
 #endif
+#include "machine.h"
 
 extern __code const struct machine machine;
 extern __xdata uint8_t igmpEnabled;
@@ -40,9 +43,24 @@ __xdata uint16_t idx;
 #define IGMP_IP_IHL		0x0f
 #define IGMP_GROUP_OFS		4
 #define IGMP_V3_RECORD_OFS	8
+#define IGMP_V3_RECORD_LEN	8
 
-static __xdata uint8_t igmp_grp;
+static __xdata uint16_t igmp_grp;
 static __xdata uint8_t igmp_join;
+#if SOC_FAMILY == RTL837X
+static __xdata uint8_t igmp_vofs;
+static __xdata uint8_t igmp_query;
+static __xdata uint8_t igmp_report;
+static __xdata uint16_t igmp_rports;
+static __xdata uint16_t igmp_vid;
+static __xdata uint16_t igmp_vmask;
+/* IGMPv3 record walk and IPv4 checks: static, so that SDCC spills no
+ * temporaries into the full internal RAM */
+static __xdata uint16_t igmp_rec, igmp_nrec, igmp_next, igmp_rwords;
+static __xdata uint16_t igmp_end;	/* past the IPv4 datagram, Ethernet padding excluded */
+static __xdata uint8_t *__xdata igmp_p;	/* the current IGMPv3 record */
+static __xdata uint8_t igmp_rres;
+#endif
 
 #if SOC_FAMILY == RTL837X
 #ifdef IPMC_USES_L3MC
@@ -99,14 +117,41 @@ struct igmp_pkt {
 	uint8_t mc_ip[4];
 };
 #define IGMP_I ((__xdata struct igmp_pkt *)&uip_buf[0])
+#define IGMP_V ((__xdata struct igmp_pkt *)&uip_buf[igmp_vofs])
+#define IGMP_ETH_HDR offsetof(struct igmp_pkt, ipv4_tag)
+#define IGMP_STP_FORWARDING 3
+
+struct igmp_out {
+	uint8_t dst[6];
+	uint8_t src[6];
+	struct rtl_tag rtl_tag;
+	struct vlan_tag vlan_tag;
+};
+
+#define IGMP_O ((__xdata struct igmp_out *)&uip_buf[RTL_FRAME_DESC_SIZE])
 
 
 #if SOC_FAMILY == RTL837X
+static void igmp_filter(void)
+{
+	__xdata uint32_t act = LOOKUP_MISS_FLOOD;
+
+	if (igmp_rports) {
+		act = machine_detected.isRTL8373 ? LOOKUP_MISS_DROP_9 : LOOKUP_MISS_DROP_6;
+		reg_bit_set(RTL837X_L2_CTRL, L2_CTRL_LUT_IPMC_HASH);
+	} else {
+		reg_bit_clear(RTL837X_L2_CTRL, L2_CTRL_LUT_IPMC_HASH);
+	}
+	REG_SET(RTL837X_IPV4_PORT_MC_LM_ACT, act);
+}
+
+
 void igmp_setup(void) __banked
 {
 	uint8_t i;
 	print_string("igmp_setup called\n");
 	igmpEnabled = 0;
+	igmp_rports = 0;
 	// For now, forward all unkown IP-MC pkts (2 bits per port. 00: flood via floodmask, 01: drop, 10: trap, 11: to rport)
 	REG_SET(RTL837X_IPV4_PORT_MC_LM_ACT, LOOKUP_MISS_FLOOD);
 	REG_SET(RTL837X_IPV6_PORT_MC_LM_ACT, LOOKUP_MISS_FLOOD);
@@ -155,14 +200,11 @@ void igmp_enable(void) __banked
 {
 	print_string("igmp_enable called\n");
 	igmpEnabled = 1;
-	// Enable lookup of IPv4 MC addresses in table
-	reg_bit_set(RTL837X_L2_CTRL, L2_CTRL_LUT_IPMC_HASH);
+	igmp_rports = 0;
 	// Configure trapping of unhandled IGMP protocol packets to CPU
 	REG_SET(RTL837X_IGMP_TRAP_CFG, IGMP_CPU_PORT | IGMP_TRAP_PRIORITY);
 
-	// Drop unknown IP-MC packets
-	REG_SET(RTL837X_IPV4_PORT_MC_LM_ACT, machine_detected.isRTL8373? LOOKUP_MISS_DROP_9: LOOKUP_MISS_DROP_6);
-//	REG_SET(RTL837X_IPV6_PORT_MC_LM_ACT, machine_detected.isRTL8373? LOOKUP_MISS_DROP_9: LOOKUP_MISS_DROP_6);
+	igmp_filter();
 
 	// Configure per-port IGMP configuration, bits 0-10 enable MC protocol snooping,
 	// bits 16-24 configure max MC group used by that port. Trap to CPU (10)
@@ -217,8 +259,403 @@ void entry_to_l2mc(void)
 	REG_WRITE(RTL837x_TBL_DATA_IN_C, 0x00, entry.igmp_asic & 1, entry.igmp_index, entry.pmask >> 2);
 }
 #endif
-#endif
 
+
+static void igmp_learn(void)
+{
+#ifdef DEBUG
+	print_string("IGMP join "); print_byte(igmp_join); write_char('\n');
+#endif
+	if ((uip_buf[igmp_grp] & 0xf0) != 0xe0
+	    || (uip_buf[igmp_grp] == 0xe0 && !uip_buf[igmp_grp + 1] && !uip_buf[igmp_grp + 2]))
+		return;
+
+#ifdef IPMC_USES_L3MC
+	memset((__xdata uint8_t *)&entry, 0, sizeof(struct ipmc_table_entry));
+	// For IPv4 MC, the Source-IP is 0.0.0.0
+	// For IPv4 MC, the Destination-IP is the IPv4 MC address
+	memcpy(entry.dip, &uip_buf[igmp_grp], sizeof(entry.dip));
+	entry_to_l3mc();
+#else
+	/* The L2 Multicast MAC for IP-Multicast is 01:00:5e:xx:yy:zz, where
+	 * xx = MC_IP[1] & 0x7f
+	 * yy = MC_IP[2]
+	 * zz = MC_IP[3]
+	 */
+	memset((__xdata uint8_t *)&entry, 0, sizeof(struct l2mc_table_entry));
+	entry.mac[0] = 0x01; entry.mac[1] = 0x00; entry.mac[2] = 0x5e;
+	entry.mac[3] = uip_buf[igmp_grp + 1] & 0x7f; entry.mac[4] = uip_buf[igmp_grp + 2]; entry.mac[5] = uip_buf[igmp_grp + 3];
+	entry.vlan = 1; //TODO: Get this out of the packet and compare with VLAN table!
+	entry_to_ipmc();
+#endif
+	// Wait for any pending Table operations to end
+	do {
+		reg_read_m(RTL837X_TBL_CTRL);
+	} while (sfr_data[3] & 1);
+
+	reg_read_m(RTL837x_TBL_DATA_0);
+#ifdef DEBUG
+	print_sfr_data();
+#endif
+	sfr_data[2] &= 0x3f;  // Sets the Read-method to 0 (why MAC-lookup?) and clear the CLEAR-Entry bit
+	sfr_data[1] &= 0xf8;
+	reg_write_m(RTL837x_TBL_DATA_0);
+#ifdef DEBUG
+	print_string(" l2 ctrl now: ");
+	print_sfr_data();
+#endif
+	// First try to find entry to see whether it needs to be updated
+	REG_WRITE(RTL837X_TBL_CTRL, 0x00, 0x00, TBL_L2_UNICAST, TBL_EXECUTE);
+	do {
+		reg_read_m(RTL837X_TBL_CTRL);
+	} while (sfr_data[3] & 0x1);
+#ifdef DEBUG
+	print_string("\nsearch done\n");
+	print_string("Table data searched:\n");
+	reg_read_m(RTL837x_TBL_DATA_IN_A);
+	print_sfr_data(); write_char(' ');
+	reg_read_m(RTL837x_TBL_DATA_IN_B);
+	print_sfr_data(); write_char(' ');
+	reg_read_m(RTL837x_TBL_DATA_IN_C);
+	print_sfr_data(); write_char('\n');
+	print_string("Table data gotten:\n");
+	reg_read_m(RTL837x_L2_DATA_OUT_A); write_char(' ');
+	print_sfr_data();
+	reg_read_m(RTL837x_L2_DATA_OUT_B);
+	print_sfr_data(); write_char(' ');
+	reg_read_m(RTL837x_L2_DATA_OUT_C);
+	print_sfr_data(); write_char('\n');
+	print_string("Result: ");
+#endif
+	reg_read_m(RTL837x_TBL_DATA_0);
+#ifdef DEBUG
+	print_sfr_data();
+#endif
+	idx = ((sfr_data[2] & 0xf) << 8) | sfr_data[3];
+	if (igmp_join) {// Join group
+		if (sfr_data[2] & 0x10) {
+			reg_read_m(RTL837x_L2_DATA_OUT_B);
+			entry.pmask = sfr_data[0] >> 6;
+			reg_read_m(RTL837x_L2_DATA_OUT_C);
+			entry.pmask |= ((uint16_t)sfr_data[3]) << 2;
+		}
+		// Update (found) entry with portmask from trapped Packet
+		entry.pmask |= ((uint16_t)1) << ((IGMP_I->rtl_tag.pmask >> 8) & 0x0f);  // Swap bytes from network order, only 4 LSB count
+//		print_string("\nPort-Mask: "); print_short(entry.pmask); write_char('\n');
+	} else {  // Leave group
+		if (sfr_data[2] & 0x10) {
+			reg_read_m(RTL837x_L2_DATA_OUT_B);
+			entry.pmask = sfr_data[0] >> 6;
+			reg_read_m(RTL837x_L2_DATA_OUT_C);
+			entry.pmask |= ((uint16_t)sfr_data[3]) << 2;
+#ifdef DEBUG
+			print_string("Portmask: ");
+			print_short(entry.pmask);
+			print_string("Index: ");
+			print_short(idx);
+			write_char('\n');
+#endif
+			// Remove portmask of IGMP packet from entry
+			entry.pmask &= ~(((uint16_t)1) << ((IGMP_I->rtl_tag.pmask >> 8) & 0x0f));  // Swap bytes from network order, only 4 LSB count
+//			print_string("\nPort-Mask: "); print_short(entry.pmask); write_char('\n');
+		} else {
+			return;
+		}
+		if (!entry.pmask && idx) { // No more ports in that group and an actual entry?
+			// Delete Entry
+			reg_read_m(RTL837x_TBL_DATA_0);
+			sfr_data[1] |= 0x04;	// Clear entry
+			reg_write_m(RTL837x_TBL_DATA_0);
+			REG_WRITE(RTL837X_TBL_CTRL, idx >> 8, idx & 0xff, TBL_L2_UNICAST, TBL_WRITE | TBL_EXECUTE);
+			do {
+				reg_read_m(RTL837X_TBL_CTRL);
+			} while (sfr_data[3] & 0x1);
+			return;
+		}
+	}
+
+	if (!entry.pmask)
+		return;
+	// Write the updated entry
+#ifdef IPMC_USES_L3MC
+	entry_to_l3mc();
+#else
+	entry_to_ipmc();
+#endif
+	reg_read_m(RTL837x_TBL_DATA_0);
+#ifdef DEBUG
+	print_sfr_data();
+#endif
+	sfr_data[2] &= 0x3f;  // Set the Read-method to 0 and clear the CLEAR-Entry bit
+	sfr_data[1] &= 0xf8;
+	reg_write_m(RTL837x_TBL_DATA_0);
+#ifdef DEBUG
+	print_string(" l2 ctrl now: ");
+	print_sfr_data();
+#endif
+	reg_read_m(RTL837X_TBL_CTRL);
+	REG_WRITE(RTL837X_TBL_CTRL, sfr_data[0], sfr_data[1], TBL_L2_UNICAST, TBL_WRITE | TBL_EXECUTE);
+	do {
+		reg_read_m(RTL837X_TBL_CTRL);
+	} while (sfr_data[3] & 0x1);
+#ifdef DEBUG
+	print_string("\nupdate done\n");
+	print_string("Table data written:\n");
+	reg_read_m(RTL837x_TBL_DATA_IN_A);
+	print_sfr_data(); write_char(' ');
+	reg_read_m(RTL837x_TBL_DATA_IN_B);
+	print_sfr_data(); write_char(' ');
+	reg_read_m(RTL837x_TBL_DATA_IN_C);
+	print_sfr_data(); write_char('\n');
+	print_string("Result: ");
+	reg_read_m(RTL837x_TBL_DATA_0);
+	print_sfr_data();
+#endif
+	return;
+}
+
+/* IPv4 only, unfragmented, with the header and the total length inside the
+ * captured frame; the fork checked this before any table write
+ * (b62a4af5), and upstream's parser does not */
+static uint8_t igmp_ip_valid(void)
+{
+	if ((IGMP_V->hlen >> 4) != 4 || (IGMP_V->hlen & IGMP_IP_IHL) < 5)
+		return 0;
+	if (NTOHS(IGMP_V->flags) & 0x3fff)
+		return 0;
+	igmp_end = NTOHS(IGMP_V->len);
+	if (igmp_end < ((IGMP_V->hlen & IGMP_IP_IHL) << 2) + 8)
+		return 0;
+	if (igmp_end > uip_len - IGMP_IP_HDR - igmp_vofs)
+		return 0;
+	igmp_end += IGMP_IP_HDR + igmp_vofs;
+	return 1;
+}
+
+
+/* The IGMPv3 record at igmp_rec: sets igmp_next past it and igmp_join.
+ * Returns 0 to stop (it does not fit the IPv4 datagram with its sources and
+ * auxiliary data, or has 512 or more sources),
+ * 1 to learn it, 2 to skip it. A leaf on statics only, so nothing spills. */
+static uint8_t igmp_record(void)
+{
+	igmp_next = igmp_rec + IGMP_V3_RECORD_LEN;
+	if (igmp_end < igmp_next)
+		return 0;
+	igmp_p = &uip_buf[igmp_rec];
+	if (igmp_p[2] >= 2)
+		return 0;
+	/* (sources + auxiliary words) * 4 past the record header */
+	igmp_rwords = igmp_p[2];
+	igmp_rwords = (igmp_rwords << 8) | igmp_p[3];
+	igmp_rwords += igmp_p[1];
+	igmp_next += igmp_rwords << 2;
+	if (igmp_end < igmp_next)
+		return 0;
+	switch (igmp_p[0]) {
+	case IGMP_V3_IS_INCLUDE:
+	case IGMP_V3_TO_INCLUDE:
+		igmp_join = 0;
+		if (igmp_p[2] || igmp_p[3])
+			igmp_join = 1;
+		return 1;
+	case IGMP_V3_IS_EXCLUDE:
+	case IGMP_V3_TO_EXCLUDE:
+	case IGMP_V3_ALLOW_NEW:
+		igmp_join = 1;
+		return 1;
+	}
+	return 2;
+}
+
+
+static void igmp_snoop(void)
+{
+
+#ifdef DEBUG
+	print_string("\nIPv4 MC packet:\n");
+	for (uint8_t i = 0; i < 80; i++) {
+		print_byte(uip_buf[i]);
+		write_char(' ');
+	}
+	write_char('\n');
+	print_string("Found IGMP, type: "); print_byte(uip_buf[igmp_grp]); write_char('\n');
+#endif
+	switch (uip_buf[igmp_grp]) {
+	case IGMP_V1_REPORT:
+	case IGMP_V2_REPORT:
+		igmp_join = 1;
+		break;
+	case IGMP_V2_LEAVE:
+		igmp_join = 0;
+		break;
+	case IGMP_V3_REPORT:
+		/* igmp_ip_valid() left at least the 8-byte IGMP header */
+		igmp_rec = igmp_grp + IGMP_V3_RECORD_OFS;
+		igmp_nrec = ((uint16_t)uip_buf[igmp_grp + 6] << 8) | uip_buf[igmp_grp + 7];
+		/* Every record while it fits the IPv4 datagram; 512 or more
+		 * sources end the walk */
+		while (igmp_nrec--) {
+			igmp_rres = igmp_record();
+			if (!igmp_rres)
+				return;
+			if (igmp_rres == 1) {
+				igmp_grp = igmp_rec + IGMP_GROUP_OFS;
+				igmp_learn();
+			}
+			igmp_rec = igmp_next;
+		}
+		return;
+	default:
+		return;
+	}
+	igmp_grp += IGMP_GROUP_OFS;
+	igmp_learn();
+}
+
+
+static __xdata uint16_t igmp_fi, igmp_fpmask, igmp_fm, igmp_flink;
+static __xdata uint8_t igmp_fport, igmp_flag;
+
+/* A querier port that lost its link no longer counts. Checked on every link
+ * change, not only when the next IGMP frame arrives: without a querier the
+ * hosts stop reporting, and unknown multicast must flood again (igmp.md). */
+void igmp_link_change(void) __banked
+{
+	if (!igmpEnabled || !igmp_rports)
+		return;
+	igmp_flink = port_link_mask();
+	if (igmp_rports & ~igmp_flink) {
+		igmp_rports &= igmp_flink;
+		igmp_filter();
+	}
+}
+
+
+static void igmp_forward(void)
+{
+	igmp_fport = ((uint8_t)HTONS(IGMP_I->rtl_tag.pmask)) & 0x0f;
+	igmp_fpmask = machine_detected.isRTL8373 ? PMASK_9 : PMASK_6;
+
+	igmp_fi = igmp_vofs;
+	igmp_fi += IGMP_ETH_HDR;
+	if (uip_len < igmp_fi) {
+		uip_len = 0;
+		return;
+	}
+	/* the frame grows by the CPU tag, and by the VLAN tag when it had none */
+	igmp_fi = uip_len - igmp_vofs;
+	igmp_fi += RTL_FRAME_DESC_SIZE + VLAN_TAG_SIZE;
+	if (igmp_fi > UIP_CONF_BUFFER_ALLOC_SIZE) {
+		uip_len = 0;
+		return;
+	}
+	igmp_flag = port_lag_of(igmp_fport);
+	igmp_fpmask &= igmp_vmask & port_isolation_get(igmp_fport) & ~(igmp_flag == PORT_LAG_NONE ? PORT_BIT(igmp_fport) : port_lag_members_get(igmp_flag));
+	igmp_flink = port_link_mask();
+	for (igmp_fi = 0; stp_enabled && igmp_fi <= MACHINE_MAX_PORT; igmp_fi++)
+		if (stp_port_state(igmp_fi) != IGMP_STP_FORWARDING)
+			igmp_flink &= ~PORT_BIT(igmp_fi);
+	igmp_fpmask &= igmp_flink;
+	if (igmp_rports & ~igmp_flink) {
+		igmp_rports &= igmp_flink;
+		igmp_filter();
+	}
+	if (igmp_report && (igmp_rports & igmp_vmask))
+		igmp_fpmask &= igmp_rports;
+	for (igmp_flag = 0; igmp_flag < 4; igmp_flag++) {
+		igmp_fm = port_lag_members_get(igmp_flag);
+		igmp_fi = igmp_fm & igmp_fpmask;
+		igmp_fpmask &= ~igmp_fm | (igmp_fi & -igmp_fi);
+	}
+	if (!igmp_fpmask) {
+		uip_len = 0;
+		return;
+	}
+	if (igmp_vofs) {
+		for (igmp_fi = uip_len; igmp_fi--;)
+			uip_buf[igmp_fi + RTL_FRAME_DESC_SIZE] = uip_buf[igmp_fi];
+	} else {
+		for (igmp_fi = uip_len; igmp_fi-- > IGMP_ETH_HDR;)
+			uip_buf[igmp_fi + RTL_FRAME_DESC_SIZE + VLAN_TAG_SIZE] = uip_buf[igmp_fi];
+		for (igmp_fi = IGMP_ETH_HDR; igmp_fi--;)
+			uip_buf[igmp_fi + RTL_FRAME_DESC_SIZE] = uip_buf[igmp_fi];
+	}
+
+	IGMP_O->rtl_tag.tag = HTONS(RTL_FRAME_TAG_ID);
+	IGMP_O->rtl_tag.version = RTL_FRAME_TAG_VERSION;
+	IGMP_O->rtl_tag.reason = 0x00;
+	IGMP_O->rtl_tag.flags = HTONS(RTL_TAG_LEARN_DIS);
+	IGMP_O->rtl_tag.pmask = HTONS(igmp_fpmask);
+	if (!igmp_vofs) {
+		IGMP_O->vlan_tag.svlan = HTONS(0x8100);
+		IGMP_O->vlan_tag.vlan = HTONS(igmp_vid);
+		uip_len += VLAN_TAG_SIZE;
+	}
+}
+
+
+uint8_t igmp_packet_handler(void) __banked
+{
+	__xdata uint8_t port = ((uint8_t)HTONS(IGMP_I->rtl_tag.pmask)) & 0x0f;
+	__xdata uint16_t vid, m;
+	__xdata uint8_t lag;
+
+	igmp_vofs = TRAP_RX_BODY() - TRAP_RX_HDR_SIZE;
+	/* At least an Ethernet and IPv4 header, so no stale bytes decide; a
+	 * shorter frame is no use to anyone */
+	if (uip_len < IGMP_IP_HDR + igmp_vofs + 20) {
+		uip_len = 0;
+		return 1;
+	}
+	if (IGMP_V->ipv4_tag != HTONS(UIP_ETHTYPE_IP) || IGMP_V->protocol != IGMP_PROTO)
+		return 0;
+	if (!igmp_ip_valid()) {
+		uip_len = 0;
+		return 1;
+	}
+	if (!MACHINE_PORT_VALID(port) || (stp_enabled && stp_port_state(port) != IGMP_STP_FORWARDING)) {
+		uip_len = 0;
+		return 1;
+	}
+	igmp_grp = IGMP_IP_HDR + igmp_vofs + ((IGMP_V->hlen & IGMP_IP_IHL) << 2);
+	igmp_query = igmp_report = 0;
+	if (uip_len > igmp_grp) {
+		m = uip_buf[igmp_grp];
+		if (m == IGMP_QUERY)
+			igmp_query = 1;
+		if (m == IGMP_V1_REPORT || m == IGMP_V2_REPORT || m == IGMP_V2_LEAVE || m == IGMP_V3_REPORT)
+			igmp_report = 1;
+	}
+	igmp_vid = port_pvid_get(port);
+	if (igmp_vofs) {
+		vid = ((uint16_t)(uip_buf[TRAP_RX_HDR_SIZE + 2] & 0x0f) << 8) | uip_buf[TRAP_RX_HDR_SIZE + 3];
+		if (vid)
+			igmp_vid = vid;
+		uip_buf[TRAP_RX_HDR_SIZE + 2] = (uip_buf[TRAP_RX_HDR_SIZE + 2] & 0xf0) | (igmp_vid >> 8);
+		uip_buf[TRAP_RX_HDR_SIZE + 3] = igmp_vid;
+	}
+	if (vlan_get(igmp_vid) || !(sfr_data[0] & 0x02)
+	    || !((igmp_vmask = ((uint16_t)(sfr_data[2] & 0x03) << 8) | sfr_data[3]) & PORT_BIT(port))) {
+		uip_len = 0;
+		return 1;
+	}
+	if (igmp_query) {
+		lag = port_lag_of(port);
+		m = (lag == PORT_LAG_NONE ? PORT_BIT(port) : port_lag_members_get(lag)) & port_link_mask();
+		if (m & ~igmp_rports) {
+			igmp_rports |= m;
+			igmp_filter();
+		}
+	}
+	igmp_snoop();
+	igmp_forward();
+	return 1;
+}
+
+#else	/* RTL836X: software IGMP snooping through rtl836x_igmp.c */
+
+#define IGMP_LOCAL_NET_0	224
 
 /* Validate the complete report before the first table operation. */
 static uint8_t igmp_report_valid(void)
@@ -307,157 +744,8 @@ uint8_t igmp_packet_handler(void) __banked
 	if (uip_buf[igmp_grp] == IGMP_LOCAL_NET_0 && !uip_buf[igmp_grp + 1] && !uip_buf[igmp_grp + 2])
 		return 1;
 
-#if SOC_FAMILY == RTL836X
 	if (!rtl836x_igmp_update(&uip_buf[igmp_grp], (IGMP_I->rtl_tag.pmask >> 8) & 0x0f, igmp_join))
 		print_string("IGMP table update failed\n");
 	return 1;
-#else
-#ifdef IPMC_USES_L3MC
-	memset((__xdata uint8_t *)&entry, 0, sizeof(struct ipmc_table_entry));
-	// For IPv4 MC, the Source-IP is 0.0.0.0
-	// For IPv4 MC, the Destination-IP is the IPv4 MC address
-	memcpy(entry.dip, &uip_buf[igmp_grp], sizeof(entry.dip));
-	entry_to_l3mc();
-#else
-	/* The L2 Multicast MAC for IP-Multicast is 01:00:5e:xx:yy:zz, where
-	 * xx = MC_IP[1] & 0x7f
-	 * yy = MC_IP[2]
-	 * zz = MC_IP[3]
-	 */
-	memset((__xdata uint8_t *)&entry, 0, sizeof(struct l2mc_table_entry));
-	entry.mac[0] = 0x01; entry.mac[1] = 0x00; entry.mac[2] = 0x5e;
-	entry.mac[3] = uip_buf[igmp_grp + 1] & 0x7f; entry.mac[4] = uip_buf[igmp_grp + 2]; entry.mac[5] = uip_buf[igmp_grp + 3];
-	entry.vlan = 1; //TODO: Get this out of the packet and compare with VLAN table!
-	entry_to_ipmc();
-#endif
-	// Wait for any pending Table operations to end
-	do {
-		reg_read_m(RTL837X_TBL_CTRL);
-	} while (sfr_data[3] & 1);
-
-	reg_read_m(RTL837x_TBL_DATA_0);
-#ifdef DEBUG
-	print_sfr_data();
-#endif
-	sfr_data[2] &= 0x3f;  // Sets the Read-method to 0 (why MAC-lookup?) and clear the CLEAR-Entry bit
-	sfr_data[1] &= 0xf8;
-	reg_write_m(RTL837x_TBL_DATA_0);
-#ifdef DEBUG
-	print_string(" l2 ctrl now: ");
-	print_sfr_data();
-#endif
-	// First try to find entry to see whether it needs to be updated
-	REG_WRITE(RTL837X_TBL_CTRL, 0x00, 0x00, TBL_L2_UNICAST, TBL_EXECUTE);
-	do {
-		reg_read_m(RTL837X_TBL_CTRL);
-	} while (sfr_data[3] & 0x1);
-#ifdef DEBUG
-	print_string("\nsearch done\n");
-	print_string("Table data searched:\n");
-	reg_read_m(RTL837x_TBL_DATA_IN_A);
-	print_sfr_data(); write_char(' ');
-	reg_read_m(RTL837x_TBL_DATA_IN_B);
-	print_sfr_data(); write_char(' ');
-	reg_read_m(RTL837x_TBL_DATA_IN_C);
-	print_sfr_data(); write_char('\n');
-	print_string("Table data gotten:\n");
-	reg_read_m(RTL837x_L2_DATA_OUT_A); write_char(' ');
-	print_sfr_data();
-	reg_read_m(RTL837x_L2_DATA_OUT_B);
-	print_sfr_data(); write_char(' ');
-	reg_read_m(RTL837x_L2_DATA_OUT_C);
-	print_sfr_data(); write_char('\n');
-	print_string("Result: ");
-#endif
-	reg_read_m(RTL837x_TBL_DATA_0);
-#ifdef DEBUG
-	print_sfr_data();
-#endif
-	idx = ((sfr_data[2] & 0xf) << 8) | sfr_data[3];
-	if (igmp_join) {// Join group
-		if (sfr_data[2] & 0x10) {
-			print_string("\nIGMP-Entry FOUND\n");
-			reg_read_m(RTL837x_L2_DATA_OUT_B);
-			entry.pmask = sfr_data[0] >> 6;
-			reg_read_m(RTL837x_L2_DATA_OUT_C);
-			entry.pmask |= ((uint16_t)sfr_data[3]) << 2;
-		}
-		// Update (found) entry with portmask from trapped Packet
-		entry.pmask |= ((uint16_t)1) << ((IGMP_I->rtl_tag.pmask >> 8) & 0x0f);  // Swap bytes from network order, only 4 LSB count
-//		print_string("\nPort-Mask: "); print_short(entry.pmask); write_char('\n');
-	} else {  // Leave group
-		if (sfr_data[2] & 0x10) {
-			print_string("\nIGMP_Entry FOUND\n");
-			reg_read_m(RTL837x_L2_DATA_OUT_B);
-			entry.pmask = sfr_data[0] >> 6;
-			reg_read_m(RTL837x_L2_DATA_OUT_C);
-			entry.pmask |= ((uint16_t)sfr_data[3]) << 2;
-#ifdef DEBUG
-			print_string("Portmask: ");
-			print_short(entry.pmask);
-			print_string("Index: ");
-			print_short(idx);
-			write_char('\n');
-#endif
-			// Remove portmask of IGMP packet from entry
-			entry.pmask &= ~(((uint16_t)1) << ((IGMP_I->rtl_tag.pmask >> 8) & 0x0f));  // Swap bytes from network order, only 4 LSB count
-//			print_string("\nPort-Mask: "); print_short(entry.pmask); write_char('\n');
-		} else {
-			print_string("IGMP Entry already deleted\n");
-			return 1;
-		}
-		if (!entry.pmask && idx) { // No more ports in that group and an actual entry?
-			// Delete Entry
-			reg_read_m(RTL837x_TBL_DATA_0);
-			sfr_data[1] |= 0x04;	// Clear entry
-			reg_write_m(RTL837x_TBL_DATA_0);
-			REG_WRITE(RTL837X_TBL_CTRL, idx >> 8, idx & 0xff, TBL_L2_UNICAST, TBL_WRITE | TBL_EXECUTE);
-			do {
-				reg_read_m(RTL837X_TBL_CTRL);
-			} while (sfr_data[3] & 0x1);
-			print_string("IGMP Entry deleted\n");
-			return 1;
-		}
-	}
-
-	if (!entry.pmask)
-		return 1;
-	print_string("Updating IGMP entry\n");
-	// Write the updated entry
-#ifdef IPMC_USES_L3MC
-	entry_to_l3mc();
-#else
-	entry_to_ipmc();
-#endif
-	reg_read_m(RTL837x_TBL_DATA_0);
-#ifdef DEBUG
-	print_sfr_data();
-#endif
-	sfr_data[2] &= 0x3f;  // Set the Read-method to 0 and clear the CLEAR-Entry bit
-	sfr_data[1] &= 0xf8;
-	reg_write_m(RTL837x_TBL_DATA_0);
-#ifdef DEBUG
-	print_string(" l2 ctrl now: ");
-	print_sfr_data();
-#endif
-	reg_read_m(RTL837X_TBL_CTRL);
-	REG_WRITE(RTL837X_TBL_CTRL, sfr_data[0], sfr_data[1], TBL_L2_UNICAST, TBL_WRITE | TBL_EXECUTE);
-	do {
-		reg_read_m(RTL837X_TBL_CTRL);
-	} while (sfr_data[3] & 0x1);
-#ifdef DEBUG
-	print_string("\nupdate done\n");
-	print_string("Table data written:\n");
-	reg_read_m(RTL837x_TBL_DATA_IN_A);
-	print_sfr_data(); write_char(' ');
-	reg_read_m(RTL837x_TBL_DATA_IN_B);
-	print_sfr_data(); write_char(' ');
-	reg_read_m(RTL837x_TBL_DATA_IN_C);
-	print_sfr_data(); write_char('\n');
-	print_string("Result: ");
-	reg_read_m(RTL837x_TBL_DATA_0);
-	print_sfr_data();
-#endif
-	return 1;
-#endif
 }
+#endif

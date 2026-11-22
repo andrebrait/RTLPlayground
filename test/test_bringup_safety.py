@@ -107,6 +107,9 @@ static void lacp_timers(void) {}
 static void lldp_tick(void) {}
 static void cabletest_tick(void) {}
 static void health_loop_start(void) {}
+static void health_sleep_start(void) {}
+static void health_sleep_end(void) {}
+__attribute__((unused)) static void igmp_link_change(void) {}	/* not called on the RTL836x */
 static void check_links(void) {}
 static uint16_t link_changed;
 static void lacp_link_change(uint16_t bounced) { (void)bounced; }

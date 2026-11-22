@@ -184,7 +184,8 @@ static void aggregation(void) {
           && stp_ent_of[0] == STP_LAG_BASE && stp_ent_of[2] == STP_LAG_BASE
           && stp_ent_of[4] == STP_LAG_BASE + 1 && stp_ent_of[5] == STP_LAG_BASE + 1,
           "both fixed ASIC groups map to exactly two STP aggregation entities");
-    stp_port_admin(STP_LAG_BASE, 0);
+    stp_pflags[STP_LAG_BASE] &= ~STP_PF_ENABLED;	/* STP off on the group: plain forwarding */
+    stp_port_admin(STP_LAG_BASE);
     CHECK(stp_port_state(0) == 3 && stp_port_state(2) == 3
           && stp_port_state(4) == 1 && stp_port_state(5) == 1,
           "one aggregation entity changes every member but not the other group");
@@ -197,10 +198,13 @@ static void aggregation(void) {
 int main(void) {
     registers[0x0a00] = 0xffff;
     registers[0x0a01] = 0xa5a5;
-    stp_port_admin(2, 1);
+    stp_ent_of[2] = 2;	/* its own entity, as stp_setup() maps a port outside a LAG */
+    stp_pflags[2] |= STP_PF_ENABLED;
+    stp_port_admin(2);
     CHECK(registers[0x0a00] == 0xffdf && stp_port_state(2) == 1,
           "port 3 enters blocking without changing other front ports");
-    stp_port_admin(2, 0);
+    stp_pflags[2] &= ~STP_PF_ENABLED;
+    stp_port_admin(2);
     CHECK(registers[0x0a00] == 0xffff && stp_port_state(2) == 3,
           "per-port STP off restores ordinary forwarding");
     registers[0x0a00] = 0xbfff;
