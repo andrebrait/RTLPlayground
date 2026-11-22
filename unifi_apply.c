@@ -314,6 +314,7 @@ static __xdata uint8_t ua_busy;		/* commands are running */
 static __xdata uint16_t ua_upvid, ua_nm, ua_sel;	/* the uplink's native VLAN, 0 none */
 static __xdata uint8_t ua_lg, ua_vm;
 static __xdata uint16_t ua_pb, ua_px;
+static __xdata uint16_t ua_sum, ua_osum;	/* config.txt's sum, as planned */
 static __xdata uint8_t ua_eff;		/* the areas this plan applies */
 static __xdata uint8_t ua_upsrc;	/* 1 + the uplink's ASIC port, as ua_uplink() takes it */
 static __xdata uint8_t ua_defer;	/* VLANs wait for an uplink: report no cfgversion */
@@ -866,6 +867,8 @@ static void ua_read_config(void)
 		if (!u_buf[ua_old_end] || u_buf[ua_old_end] == 0xff)
 			break;
 	u_buf[ua_old_end] = 0;
+	for (ua_sum = 0, ua_a = UA_OLD; ua_a < ua_old_end; ua_a++)
+		ua_sum = (ua_sum << 1 | ua_sum >> 15) + u_buf[ua_a];
 	/* A last line without a newline gets one, so lines compare alike */
 	if (ua_old_end > UA_OLD && u_buf[ua_old_end - 1] != '\n' && ua_old_end < UA_OLD + CONFIG_LEN - 1) {
 		u_buf[ua_old_end++] = '\n';
@@ -889,6 +892,7 @@ static uint8_t ua_plan(void)
 	if (!ua_lag_ok())
 		ua_eff &= ~UA_LAG;
 	ua_read_config();
+	ua_osum = ua_sum;
 
 	/* The uplink: the gateway's port, else the one this reply came in on,
 	 * whichever is a front port. Its native VLAN: its last pvid line,
@@ -1033,6 +1037,13 @@ static uint8_t ua_run(void)
 		}
 		ua_x = ua_a + 1;
 		return 0;
+	}
+	/* A Save to flash while it ran: its config.txt stays, and the
+	 * controller sends the settings again for a new plan */
+	ua_read_config();
+	if (ua_sum != ua_osum) {
+		print_string("UniFi: config.txt changed meanwhile, the controller will send it again\n");
+		return 1;
 	}
 	/* The new config.txt, NUL-terminated as execute_config() reads it */
 	flash_region.addr = CONFIG_START;

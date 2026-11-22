@@ -803,7 +803,10 @@ Network 11.1.50), not by `lldp_table`: a device sits behind the port whose
 - **The cfgversion.** It is reported, and saved, once every command ran and
   `config.txt` is written and reads back the same. The command history's
   lines of the applied areas are blanked when the plan is made, so a later
-  Save to flash does not undo the apply; edits made while it runs stay. A running apply
+  Save to flash does not undo the apply; edits made while it runs stay. A
+  Save to flash while it runs wins: `config.txt` is checked before it is
+  written, and if it changed, nothing is written and no cfgversion is
+  reported, so the controller sends the settings for a new plan. A running apply
   finishes even when UniFi is turned off, so the switch and `config.txt`
   agree; a reboot replays `config.txt`. The uplink is the gateway's port, else the
   one the controller's reply came in on, whichever is a front port; while

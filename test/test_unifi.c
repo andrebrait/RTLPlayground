@@ -1555,6 +1555,26 @@ static void test_apply(void)
 	check(!memcmp(cmd_history + 1, "          \nmtu 2 1522\n", 22) && !ua_busy,
 	      "apply: an edit made while it runs stays in the history");
 
+	/* A Save to flash while the apply runs: its config.txt stays */
+	memset(config_sector, 0xff, sizeof(config_sector));
+	strcpy(unifi.cfgver, "1111");
+	inform();
+	{
+		static uint8_t r[2048];
+		uint16_t n = reply(r, "{\"_type\":\"setparam\",\"cfgversion\":\"000000000000001a\",\"system_cfg\":\""
+				   "switch.jumboframes=disabled\\n\"}", 1, 0);
+		memset(config_sector, 0xff, sizeof(config_sector));
+		strcpy((char *)config_sector, "mtu 1 9216\n");
+		deliver(r, n);
+		for (int i = 0; i < 1000 && unifi.phase != U_APPLY; i++)
+			unifi_tick();
+		strcpy((char *)config_sector, "hostname saved\n");	/* Save to flash */
+		for (int i = 0; i < 100 && ua_busy; i++)
+			unifi_tick();
+	}
+	check(!strcmp((char *)config_sector, "hostname saved\n") && !unifi.cfgver[0] && !ua_busy,
+	      "apply: a Save to flash while it runs keeps its config.txt, and no cfgversion is reported");
+
 	/* No uplink on a front port: the VLANs wait and are asked for again */
 	cmd("unifi apply vlans");
 	u_uplink = 0;
