@@ -311,12 +311,11 @@ static __xdata uint8_t ua_c8, ua_w, ua_m, ua_g, ua_gu, ua_area, ua_t, ua_p;
 static __xdata uint16_t ua_bit;
 static __xdata uint8_t ua_changed;	/* the new config.txt differs */
 static __xdata uint8_t ua_busy;		/* commands are running */
-static __xdata char ua_cfgver[UNIFI_CFGVER_LEN];	/* reported once applied */
 static __xdata uint16_t ua_upvid, ua_nm, ua_sel;	/* the uplink's native VLAN, 0 none */
 static __xdata uint8_t ua_lg, ua_vm;
 static __xdata uint16_t ua_pb;
 static __xdata uint8_t ua_eff;		/* the areas this plan applies */
-static __xdata uint8_t ua_dirty;	/* a stopped apply left the switch unlike config.txt */
+static __xdata uint16_t ua_hend;	/* the command history's end when the plan was made */
 
 /* Writing at unifi.pos, below ua_lim */
 static uint8_t ua_room(void)
@@ -436,9 +435,9 @@ static uint8_t ua_copper(__xdata uint8_t p)
  * controller, as the last inform reported it), or in its LAG? */
 static uint8_t ua_uplink(__xdata uint8_t p)
 {
-	ua_t = u_upk;
+	ua_t = u_gw;	/* the gateway's port, else the one this reply came in on */
 	if (!ua_t)
-		ua_t = u_uplink;	/* the reply being handled, before any port table */
+		ua_t = u_uplink;
 	if (p >= UA_NP || !ua_t || !ua_asic[p])
 		return 0;
 	if (ua_asic[p] == ua_t)
@@ -543,9 +542,10 @@ static uint16_t ua_find(__xdata uint16_t o)
 static uint8_t ua_has(__xdata uint16_t o, __xdata uint16_t from, __xdata uint16_t to)
 {
 	ua_hb = ua_eolat(o);
+	o = ua_lead(o);	/* from the first word on */
 	for (ua_ha = from; ua_ha < to; ua_ha = ua_eolat(ua_ha) + 1) {
 		ua_hy = o;
-		ua_hz = ua_ha;
+		ua_hz = ua_lead(ua_ha);
 		while (ua_hy < ua_hb && u_buf[ua_hz] == u_buf[ua_hy]) {
 			ua_hy++;
 			ua_hz++;
@@ -852,6 +852,9 @@ static uint8_t ua_lag_ok(void)
 	return 1;
 }
 
+extern __xdata uint8_t cmd_history[CMD_HISTORY_SIZE];
+extern __xdata uint16_t cmd_history_ptr;
+
 /* Reads config.txt into [UA_OLD, ua_old_end) */
 static void ua_read_config(void)
 {
@@ -895,13 +898,20 @@ static uint8_t ua_plan(void)
 			continue;
 		ua_upvid = 1;
 		for (ua_x = UA_OLD; ua_x < ua_old_end; ua_x = ua_eolat(ua_x) + 1) {
-			if (!ua_at(ua_x, "pvid"))
+			ua_y = ua_lead(ua_x);
+			if (!ua_at(ua_y, "pvid"))
 				continue;
-			ua_y = ua_skip(ua_x);
+			ua_y = ua_skip(ua_y);
 			if (ua_numat(ua_y) == ua_k)
 				ua_upvid = ua_numat(ua_skip(ua_y));
 		}
 	}
+	if (!ua_upvid && (ua_eff & UA_VLANS)) {
+		/* No uplink on a front port: its VLAN cannot be kept, so wait */
+		print_string("UniFi: no uplink known, VLANs not applied\n");
+		ua_eff &= ~UA_VLANS;
+	}
+	ua_hend = cmd_history_ptr;
 
 	/* The new config.txt: the old lines of the areas not applied, the
 	 * selection, then the controller's lines of the areas applied */
@@ -948,8 +958,7 @@ static uint8_t ua_plan(void)
 		ua_undo(ua_x);
 	}
 	for (ua_x = ua_gen; ua_x < ua_new_end; ua_x = ua_eolat(ua_x) + 1) {
-		/* After a stopped apply every line runs: the switch may differ */
-		if (!ua_dirty && ua_has(ua_x, UA_OLD, ua_old_end))
+		if (ua_has(ua_x, UA_OLD, ua_old_end))
 			continue;
 		ua_changed = 1;
 		if (!ua_room())
@@ -969,15 +978,13 @@ static uint8_t ua_plan(void)
 
 /* Lines of the applied areas in the command history would win over the
  * new config.txt at the next Save to flash: they are blanked */
-extern __xdata uint8_t cmd_history[CMD_HISTORY_SIZE];
-extern __xdata uint16_t cmd_history_ptr;
-
 static void ua_purge(void)
 {
-	ua_x = (cmd_history_ptr + 1) & CMD_HISTORY_MASK;	/* the oldest byte */
-	for (ua_z = 0; ua_z < CMD_HISTORY_SIZE; ua_z++) {
+	/* From the oldest byte to the end as the plan saw it: later edits stay */
+	ua_x = (cmd_history_ptr + 1) & CMD_HISTORY_MASK;
+	for (ua_z = 0; ua_z < CMD_HISTORY_SIZE && ua_x != ua_hend; ua_z++) {
 		ua_pb = ua_x;	/* the line's start */
-		for (ua_y = 0; ua_z < CMD_HISTORY_SIZE && ua_y < CMD_BUF_SIZE
+		for (ua_y = 0; ua_z < CMD_HISTORY_SIZE && ua_y < CMD_BUF_SIZE && ua_x != ua_hend
 		     && cmd_history[ua_x] && cmd_history[ua_x] != '\n'; ua_y++, ua_z++) {
 			u_buf[UA_OLD + ua_y] = cmd_history[ua_x];
 			ua_x = (ua_x + 1) & CMD_HISTORY_MASK;
@@ -1036,7 +1043,6 @@ static uint8_t ua_run(void)
 	}
 	print_string("UniFi: config.txt written\n");
 	ua_purge();
-	ua_dirty = 0;
 	memcpy(unifi.cfgver, ua_cfgver, UNIFI_CFGVER_LEN);
 	u_save();
 	return 1;
@@ -1049,8 +1055,11 @@ static void ua_start(void)
 {
 	ua_parse();
 	ua_busy = 0;
-	if (ua_mask & ua_seen)
+	if (ua_mask & ua_seen) {
 		ua_busy = ua_plan();
+		if (!ua_busy && !ua_over)
+			ua_purge();	/* config.txt already holds it */
+	}
 	if (ua_busy) {
 		memcpy(ua_cfgver, unifi.cfgver, UNIFI_CFGVER_LEN);
 		unifi.cfgver[0] = 0;

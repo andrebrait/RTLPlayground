@@ -67,6 +67,7 @@
 #define UA_AREAS	7
 static __xdata uint8_t ua_mask;
 static __xdata uint8_t ua_imask;	/* ua_mask as the inform being built started */
+static __xdata char ua_cfgver[UNIFI_CFGVER_LEN];	/* reported once an apply is done */
 static void ua_caps(void);
 
 #define UE_DNS		1
@@ -1028,6 +1029,7 @@ static void u_forget(void)
 	unifi.adopted = 0;
 	unifi.keyed = 0;
 	unifi.cfgver[0] = 0;
+	ua_cfgver[0] = 0;	/* nor once a running apply is done */
 	/* A version a controller offered was for that controller */
 	memcpyc(unifi.version, u_default_version, sizeof(u_default_version));
 	if (!u_save())
@@ -1323,7 +1325,7 @@ static uint8_t u_crypt(void)
 
 void unifi_tick(void) __banked
 {
-	if (!unifi.enabled || unifi.abort)
+	if (unifi.phase != U_APPLY && (!unifi.enabled || unifi.abort))
 		return;
 	switch (unifi.phase) {
 	case U_IDLE:
@@ -1431,13 +1433,13 @@ void unifi_tick(void) __banked
  * its timeout; the next inform waits for that. */
 static void u_stop(void)
 {
-	if (ua_busy)
-		ua_dirty = 1;	/* what ran stays: the next apply runs every line */
-	ua_busy = 0;	/* an apply stops too; its cfgversion is not saved */
 	if (unifi.conn)
 		unifi.abort = 1;
-	unifi.phase = U_IDLE;
 	unifi.next = 0;
+	/* An apply runs to its end, even with UniFi off, so the switch and
+	 * config.txt agree; a reboot replays config.txt */
+	if (!ua_busy)
+		unifi.phase = U_IDLE;
 }
 
 

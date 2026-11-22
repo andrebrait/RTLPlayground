@@ -1344,8 +1344,8 @@ static void test_apply(void)
 	check(!strcmp(unifi.cfgver, "00000000000000aa") && !strcmp((char *)last_rec() + 28, "00000000000000aa"),
 	      "apply: the cfgversion is reported and saved once all ran");
 
-	/* "unifi off" during an apply stops it; the cfgversion stays unsaved,
-	 * so the controller sends the settings again */
+	/* "unifi off" during an apply: the apply runs to its end, so the switch
+	 * and config.txt agree; no cfgversion is saved before that */
 	memset(config_sector, 0xff, sizeof(config_sector));
 	memcpy(config_sector, old, sizeof(old));
 	strcpy(unifi.cfgver, "1111");
@@ -1362,22 +1362,13 @@ static void test_apply(void)
 	}
 	check(ua_busy && ran[0] && !unifi.cfgver[0] && !last_rec()[28], "apply: while it runs, no cfgversion is saved");
 	cmd("unifi off");
-	cmd("unifi on");
-	for (int i = 0; i < 50; i++)
+	for (int i = 0; i < 100 && ua_busy; i++)
 		unifi_tick();
-	check(!ua_busy && unifi.phase != U_APPLY && !config_writes && !unifi.cfgver[0], "apply: unifi off stops it, nothing written");
-	inform();
-	ran[0] = 0;
-	answer(cfg);
-	int all = 1;
-	for (const char *l = want_ran; *l; l = strchr(l, '\n') + 1) {
-		char one[64];
-		snprintf(one, sizeof one, "%.*s", (int)(strchr(l, '\n') - l + 1), l);
-		all &= strstr(ran, one) != NULL;
-	}
-	check(all && strstr(ran, "stp on\n") && !strcmp((char *)config_sector, want_cfg)
+	check(!ua_busy && unifi.phase == U_IDLE && !strcmp(ran, want_ran) && !strcmp((char *)config_sector, want_cfg)
 	      && !strcmp(unifi.cfgver, "00000000000000aa"),
-	      "apply: the settings sent again apply in full, every line, as the stopped apply changed the switch");
+	      "apply: unifi off lets a running apply finish");
+	cmd("unifi on");
+	answer("{\"_type\":\"noop\",\"interval\":10}");
 
 	/* More VLANs than it holds: nothing is applied, rather than some deleted */
 	strcpy(unifi.cfgver, "1111");
@@ -1507,9 +1498,39 @@ static void test_apply(void)
 	inform();
 	ran[0] = 0;
 	answer("{\"_type\":\"setparam\",\"cfgversion\":\"0000000000000014\",\"system_cfg\":\""
-	       "switch.port.6.status=disabled\\nswitch.port.1.status=disabled\\nswitch.vlan.33.igmp_snooping=true\\n\"}");
+	       "switch.port.6.status=disabled\\nswitch.port.1.status=disabled\\nswitch.vlan.1.id=1\\n"
+	       "switch.vlan.1.igmp_snooping=false\\nswitch.vlan.33.igmp_snooping=true\\n\"}");
 	check(strstr(ran, "port 1 off\n") && !strstr(ran, "port 6") && !strstr(ran, "igmp"),
 	      "apply: no link settings on SFP ports; no IGMP while VLANs are missing");
+
+	/* An indented uplink pvid keeps its VLAN; an unchanged indented line
+	 * does not run again */
+	cmd("unifi apply vlans ports");
+	memset(config_sector, 0xff, sizeof(config_sector));
+	strcpy((char *)config_sector, "vlan 40 6 1\n  pvid 6 40\n  port 1 off\n");
+	strcpy(unifi.cfgver, "1111");
+	inform();
+	ran[0] = 0;
+	answer("{\"_type\":\"setparam\",\"cfgversion\":\"0000000000000015\",\"system_cfg\":\""
+	       "switch.vlan.1.id=1\\nswitch.vlan.1.mode=untagged\\nswitch.port.1.status=disabled\\n\"}");
+	check(!strstr(ran, "vlan 40") && !strstr(ran, "port 1 off") && strstr((char *)config_sector, "vlan 40 6 1\n"),
+	      "apply: indented lines are compared from their first word");
+
+	/* config.txt already holds the settings: the history is still cleared */
+	cmd("unifi apply jumbo");
+	memset(config_sector, 0xff, sizeof(config_sector));
+	strcpy((char *)config_sector, "unifi apply jumbo\nmtu 1 9216\nmtu 2 9216\nmtu 3 9216\nmtu 4 9216\nmtu 5 9216\nmtu 6 9216\n");
+	memset(cmd_history, 0, sizeof(cmd_history));
+	strcpy((char *)cmd_history + 1, "mtu 1 1522\n");
+	cmd_history_ptr = 1 + strlen("mtu 1 1522\n");
+	strcpy(unifi.cfgver, "1111");
+	inform();
+	ran[0] = 0;
+	config_writes = 0;
+	answer("{\"_type\":\"setparam\",\"cfgversion\":\"0000000000000016\",\"system_cfg\":\""
+	       "switch.jumboframes=enabled\\n\"}");
+	check(!ran[0] && !config_writes && !memcmp(cmd_history + 1, "          \n", 11),
+	      "apply: settings already in config.txt still clear the history's lines");
 
 	/* A selection change during an apply: its cfgversion is not reported */
 	ua_busy = 1;
