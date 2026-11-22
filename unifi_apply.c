@@ -76,6 +76,7 @@ static __code const uint16_t ua_mbps[] = { 0, 10, 100, 1000, 2500, 5000, 10000 }
 static __xdata uint16_t ua_i, ua_le, ua_n, ua_vs;
 static __xdata uint8_t ua_k, ua_q;
 static __xdata uint8_t ua_over;		/* too much to hold: nothing is applied */
+static __xdata uint8_t ua_vover;	/* more VLAN slots than UA_NV */
 
 static uint8_t ua_lit(__code const char *s)
 {
@@ -189,7 +190,7 @@ static void ua_vlan_line(void)
 	if (!ua_num() || !ua_lit("."))
 		return;	/* switch.vlan.status and the like */
 	if (ua_n == 0 || ua_n > UA_NV) {
-		ua_over = 1;	/* VLANs it cannot hold: the ones it can are not all */
+		ua_vover = 1;	/* VLANs it cannot hold: the ones it can are not all */
 		return;
 	}
 	ua_k = ua_n - 1;
@@ -269,7 +270,7 @@ static void ua_parse(void)
 	memset(ua_vun, 0, sizeof(ua_vun));
 	memset(ua_vtag, 0, sizeof(ua_vtag));
 	memset(ua_asic, 0, sizeof(ua_asic));
-	ua_seen = ua_stp = ua_stpver = ua_jumbo = ua_over = 0;
+	ua_seen = ua_stp = ua_stpver = ua_jumbo = ua_vover = 0;
 	ua_prio = 0xffff;
 	for (ua_k = MACHINE_MIN_PORT; ua_k <= MACHINE_MAX_PORT; ua_k++)
 		if (machine.log_to_phys_port[ua_k] && machine.log_to_phys_port[ua_k] < UA_NP)
@@ -297,7 +298,7 @@ static void ua_parse(void)
 #define UA_NEW		CONFIG_LEN
 #define UA_EXE		(2 * CONFIG_LEN)
 #define UA_SAVE		(UNIFI_BUF_SIZE - CMD_BUF_SIZE)
-#define UA_LINE_MAX	100	/* room kept for the line being written */
+#define UA_LINE_MAX	(CMD_BUF_SIZE + 64)	/* room kept for the line being written */
 
 static __xdata uint16_t ua_old_end, ua_new_end, ua_gen, ua_x, ua_y, ua_z, ua_lim, ua_a, ua_b, ua_u, ua_nv;
 static __xdata uint16_t ua_ha, ua_hb, ua_hy, ua_hz, ua_sa, ua_sb;
@@ -306,6 +307,8 @@ static __xdata uint16_t ua_bit;
 static __xdata uint8_t ua_changed;	/* the new config.txt differs */
 static __xdata uint8_t ua_busy;		/* commands are running */
 static __xdata char ua_cfgver[UNIFI_CFGVER_LEN];	/* reported once applied */
+static __xdata uint16_t ua_upvid, ua_nm, ua_sel;	/* the uplink's native VLAN, 0 none */
+static __xdata uint8_t ua_lg, ua_vm;
 
 /* Writing at unifi.pos, below ua_lim */
 static uint8_t ua_room(void)
@@ -411,8 +414,7 @@ static uint8_t ua_link_word(__xdata uint16_t o)
 	return 0;
 }
 
-/* Front port p: copper, or the uplink (the port towards the gateway, else
- * the controller) */
+/* Front port p: copper? */
 static uint8_t ua_copper(__xdata uint8_t p)
 {
 	if (p >= UA_NP || !ua_asic[p])
@@ -422,12 +424,27 @@ static uint8_t ua_copper(__xdata uint8_t p)
 	return 1;
 }
 
+/* Front port p: the uplink (the port towards the gateway, else the
+ * controller, as the last inform reported it), or in its LAG? */
 static uint8_t ua_uplink(__xdata uint8_t p)
 {
-	ua_t = u_upk;	/* as the last inform reported it */
-	if (p >= UA_NP || !ua_t || ua_asic[p] != ua_t)
+	ua_t = u_upk;
+	if (p >= UA_NP || !ua_t || !ua_asic[p])
+		return 0;
+	if (ua_asic[p] == ua_t)
+		return 1;
+	ua_lg = port_lag_of(ua_t - 1);
+	if (ua_lg == PORT_LAG_NONE || port_lag_of(ua_asic[p] - 1) != ua_lg)
 		return 0;
 	return 1;
+}
+
+/* Is VLAN v left alone: the management VLAN or the uplink's native one? */
+static uint8_t ua_kept_vlan(__xdata uint16_t v)
+{
+	if (v == management_vlan || v == ua_upvid)
+		return 1;
+	return 0;
 }
 
 /* The area a config.txt line belongs to, 0 for none of them */
@@ -435,7 +452,7 @@ static uint8_t ua_owner(__xdata uint16_t o)
 {
 	ua_b = ua_skip(o);	/* the second word */
 	if (ua_at(o, "vlan")) {
-		if (ua_numat(ua_b) == management_vlan || ua_at(ua_skip(ua_b), "mgmt"))
+		if (ua_kept_vlan(ua_numat(ua_b)) || ua_at(ua_skip(ua_b), "mgmt"))
 			return 0;
 		return UA_VLANS;
 	}
@@ -543,9 +560,10 @@ static uint8_t ua_mode(void)
 	return UA_V_EXCLUDE;
 }
 
-/* The name config.txt gives VLAN ua_vid[ua_k], copied after a space */
+/* The name config.txt gives VLAN ua_vid[ua_k] last, copied after a space */
 static void ua_vlan_name(void)
 {
+	ua_nm = 0;
 	for (ua_y = UA_OLD; ua_y < ua_old_end; ua_y = ua_eolat(ua_y) + 1) {
 		if (!ua_at(ua_y, "vlan"))
 			continue;
@@ -556,10 +574,12 @@ static void ua_vlan_name(void)
 		ua_c8 = u_buf[ua_z] | 0x20;
 		if (ua_c8 < 'a' || ua_c8 > 'z' || ua_at(ua_z, "mgmt") || ua_at(ua_z, "d"))
 			continue;
-		u_c(' ');
-		ua_put(ua_z, ua_wend(ua_z));
-		return;
+		ua_nm = ua_z;
 	}
+	if (!ua_nm)
+		return;
+	u_c(' ');
+	ua_put(ua_nm, ua_wend(ua_nm));
 }
 
 /* The lines of one area, as the controller wants it */
@@ -608,11 +628,22 @@ static void ua_gen_area(__xdata uint8_t area)
 	}
 	if (area == UA_VLANS) {
 		for (ua_k = 0; ua_k < UA_NV; ua_k++) {
-			if (!ua_vid[ua_k] || ua_vid[ua_k] == management_vlan || !ua_room())
+			if (!ua_vid[ua_k] || ua_kept_vlan(ua_vid[ua_k]) || !ua_room())
 				continue;
 			u_s("vlan ");
 			u_dec(ua_vid[ua_k]);
-			ua_vlan_name();
+			/* Without members, "vlan <vid> <name>" with a name starting
+			 * with d would delete the VLAN: no name then */
+			ua_vm = 0;
+			ua_s = ua_k;
+			for (ua_q = 1; ua_q < UA_NP; ua_q++) {
+				ua_bit = (uint16_t)1 << ua_q;
+				ua_m = ua_mode();
+				if (ua_asic[ua_q] && (ua_m == UA_V_UNTAGGED || ua_m == UA_V_TAGGED))
+					ua_vm = 1;
+			}
+			if (ua_vm)
+				ua_vlan_name();
 			for (ua_q = 1; ua_q < UA_NP; ua_q++) {
 				if (!ua_asic[ua_q])
 					continue;
@@ -662,6 +693,14 @@ static void ua_gen_area(__xdata uint8_t area)
 #if SOC_FAMILY == RTL836X
 			ua_g = (ua_asic[ua_k] - 1) >> 2;
 			ua_m = ua_g + 1;	/* the group's bit */
+			for (ua_q = ua_k; ua_q < UA_NP; ua_q++)
+				if ((ua_pf[ua_q] & UA_P_AGG) && ua_lag[ua_q] == ua_lag[ua_k] && ua_asic[ua_q]
+				    && ((ua_asic[ua_q] - 1) >> 2) != ua_g)
+					break;
+			if (ua_q < UA_NP) {
+				print_string("UniFi: a LAG across both port groups is not applied\n");
+				continue;
+			}
 #else
 			for (ua_g = 0, ua_m = 1; ua_gu & ua_m; ua_g++)
 				ua_m <<= 1;
@@ -809,7 +848,25 @@ static void ua_read_config(void)
 static uint8_t ua_plan(void)
 {
 	ua_changed = 0;
+	ua_over = 0;
+	if (ua_mask & UA_VLANS)
+		ua_over = ua_vover;
 	ua_read_config();
+
+	/* The uplink's native VLAN: its last pvid line, else 1 */
+	ua_upvid = 0;
+	for (ua_k = 1; ua_k < UA_NP && !ua_upvid; ua_k++) {
+		if (!ua_uplink(ua_k))
+			continue;
+		ua_upvid = 1;
+		for (ua_x = UA_OLD; ua_x < ua_old_end; ua_x = ua_eolat(ua_x) + 1) {
+			if (!ua_at(ua_x, "pvid"))
+				continue;
+			ua_y = ua_skip(ua_x);
+			if (ua_numat(ua_y) == ua_k)
+				ua_upvid = ua_numat(ua_skip(ua_y));
+		}
+	}
 
 	/* The new config.txt: the old lines of the areas not applied, the
 	 * selection, then the controller's lines of the areas applied */
@@ -822,19 +879,27 @@ static uint8_t ua_plan(void)
 			break;
 		ua_copy(ua_x);
 	}
-	u_s("unifi apply");
-	for (ua_k = 0; ua_k < UA_AREAS; ua_k++) {
-		if (ua_mask >> ua_k & 1) {
-			u_c(' ');
-			u_s(ua_names[ua_k]);
+	ua_sel = unifi.pos;
+	if (ua_room()) {
+		u_s("unifi apply");
+		for (ua_k = 0; ua_k < UA_AREAS; ua_k++) {
+			if (ua_mask >> ua_k & 1) {
+				u_c(' ');
+				u_s(ua_names[ua_k]);
+			}
 		}
+		ua_eol();
+		u_buf[unifi.pos] = 0;
+		if (!ua_has(ua_sel, UA_OLD, ua_old_end))
+			ua_changed = 1;	/* config.txt gets the new selection */
 	}
-	ua_eol();
 	ua_gen = unifi.pos;
 	for (ua_area = 1; ua_area <= UA_MIRROR; ua_area <<= 1)
 		if (ua_area & ua_mask & ua_seen)
 			ua_gen_area(ua_area);
 	ua_new_end = unifi.pos;
+	if (ua_new_end > UA_NEW + CONFIG_LEN - 1)
+		ua_over = 1;	/* never past the config.txt sector */
 	u_buf[ua_new_end] = 0;
 
 	/* The commands: undo the old lines that went, then the new lines that
@@ -855,6 +920,8 @@ static uint8_t ua_plan(void)
 			break;
 		ua_copy(ua_x);
 	}
+	if (unifi.pos >= UA_SAVE)
+		ua_over = 1;
 	u_buf[unifi.pos] = 0;
 	if (ua_over) {
 		print_string("UniFi: the controller's settings do not fit, nothing applied\n");
@@ -941,6 +1008,8 @@ static void ua_set(void)
 	if (ua_g == ua_mask)
 		return;
 	ua_mask = ua_g;
+	/* An apply running now reports no cfgversion when it is done */
+	ua_cfgver[0] = 0;
 	/* At run time, not while config.txt replays: forget the cfgversion, so
 	 * the controller sends its settings again for the new areas */
 	if (save_cmd && unifi.adopted) {

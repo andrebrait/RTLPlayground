@@ -1412,6 +1412,57 @@ static void test_apply(void)
 	      "apply vlans: only the VLAN lines change");
 	cmd("unifi");
 	check(strstr(out, "Applies: vlans") != NULL, "show: the areas applied");
+
+	/* VLANs past 32 block only the VLANs: STP alone still applies */
+	cmd("unifi apply stp");
+	strcpy(unifi.cfgver, "1111");
+	inform();
+	ran[0] = 0;
+	answer("{\"_type\":\"setparam\",\"cfgversion\":\"00000000000000cc\",\"system_cfg\":\""
+	       "switch.vlan.33.id=33\\nswitch.stp.priority=8192\\n\"}");
+	check(strstr(ran, "stp prio 2\n") != NULL, "apply stp: VLAN slots past 32 do not block it");
+
+	/* A member-less VLAN gets no name: "vlan 30 dmz" would delete it */
+	memset(config_sector, 0xff, sizeof(config_sector));
+	strcpy((char *)config_sector, "vlan 30 dmz 3t\n");
+	cmd("unifi apply vlans");
+	strcpy(unifi.cfgver, "1111");
+	inform();
+	ran[0] = 0;
+	answer("{\"_type\":\"setparam\",\"cfgversion\":\"00000000000000dd\",\"system_cfg\":\""
+	       "switch.vlan.1.id=30\\nswitch.vlan.1.mode=exclude\\n\"}");
+	check(strstr(ran, "vlan 30\n") && !strstr(ran, "dmz"), "apply vlans: no name on a VLAN without members");
+
+	/* The uplink's native VLAN is left alone like the management VLAN:
+	 * port 6 (the uplink) has pvid 40, which the controller does not know */
+	memset(config_sector, 0xff, sizeof(config_sector));
+	strcpy((char *)config_sector, "vlan 40 6 1\npvid 6 40\nvlan 50 2\n");
+	strcpy(unifi.cfgver, "1111");
+	inform();
+	ran[0] = 0;
+	answer("{\"_type\":\"setparam\",\"cfgversion\":\"00000000000000ee\",\"system_cfg\":\""
+	       "switch.vlan.1.id=1\\nswitch.vlan.1.mode=untagged\\n\"}");
+	check(strstr(ran, "vlan 50 d\n") && !strstr(ran, "vlan 40") && strstr((char *)config_sector, "vlan 40 6 1\npvid 6 40\n"),
+	      "apply vlans: the uplink's native VLAN stays");
+
+	/* Only the selection changed: config.txt still gets it */
+	memset(config_sector, 0xff, sizeof(config_sector));
+	strcpy((char *)config_sector, "vlan 30 3t\npvid 1 1\npvid 2 1\npvid 3 1\npvid 4 1\npvid 5 1\n");
+	strcpy(unifi.cfgver, "1111");
+	inform();
+	ran[0] = 0;
+	config_writes = 0;
+	answer("{\"_type\":\"setparam\",\"cfgversion\":\"00000000000000ff\",\"system_cfg\":\""
+	       "switch.vlan.1.id=30\\nswitch.vlan.1.port.3.mode=tagged\\n\"}");
+	check(!ran[0] && config_writes == 1 && !strcmp((char *)config_sector, "unifi apply vlans\nvlan 30 3t\npvid 1 1\npvid 2 1\npvid 3 1\npvid 4 1\npvid 5 1\n"),
+	      "apply: a new selection alone is written to config.txt");
+
+	/* A selection change during an apply: its cfgversion is not reported */
+	ua_busy = 1;
+	strcpy(ua_cfgver, "abc");
+	cmd("unifi apply ports");
+	check(!ua_cfgver[0], "apply: a selection change during an apply drops its cfgversion");
+	ua_busy = 0;
 	cmd("unifi apply none");
 }
 
