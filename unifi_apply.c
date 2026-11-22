@@ -313,9 +313,10 @@ static __xdata uint8_t ua_changed;	/* the new config.txt differs */
 static __xdata uint8_t ua_busy;		/* commands are running */
 static __xdata uint16_t ua_upvid, ua_nm, ua_sel;	/* the uplink's native VLAN, 0 none */
 static __xdata uint8_t ua_lg, ua_vm;
-static __xdata uint16_t ua_pb;
+static __xdata uint16_t ua_pb, ua_px;
 static __xdata uint8_t ua_eff;		/* the areas this plan applies */
-static __xdata uint16_t ua_hend;	/* the command history's end when the plan was made */
+static __xdata uint8_t ua_upsrc;	/* 1 + the uplink's ASIC port, as ua_uplink() takes it */
+static __xdata uint8_t ua_defer;	/* VLANs wait for an uplink: report no cfgversion */
 
 /* Writing at unifi.pos, below ua_lim */
 static uint8_t ua_room(void)
@@ -435,9 +436,7 @@ static uint8_t ua_copper(__xdata uint8_t p)
  * controller, as the last inform reported it), or in its LAG? */
 static uint8_t ua_uplink(__xdata uint8_t p)
 {
-	ua_t = u_gw;	/* the gateway's port, else the one this reply came in on */
-	if (!ua_t)
-		ua_t = u_uplink;
+	ua_t = ua_upsrc;
 	if (p >= UA_NP || !ua_t || !ua_asic[p])
 		return 0;
 	if (ua_asic[p] == ua_t)
@@ -891,8 +890,14 @@ static uint8_t ua_plan(void)
 		ua_eff &= ~UA_LAG;
 	ua_read_config();
 
-	/* The uplink's native VLAN: its last pvid line, else 1 */
+	/* The uplink: the gateway's port, else the one this reply came in on,
+	 * whichever is a front port. Its native VLAN: its last pvid line,
+	 * else 1. */
 	ua_upvid = 0;
+	ua_upsrc = u_gw;
+	if (!ua_upsrc)
+		ua_upsrc = u_uplink;
+again:
 	for (ua_k = 1; ua_k < UA_NP && !ua_upvid; ua_k++) {
 		if (!ua_uplink(ua_k))
 			continue;
@@ -906,12 +911,18 @@ static uint8_t ua_plan(void)
 				ua_upvid = ua_numat(ua_skip(ua_y));
 		}
 	}
+	if (!ua_upvid && ua_upsrc != u_uplink) {
+		ua_upsrc = u_uplink;
+		goto again;
+	}
+	ua_defer = 0;
 	if (!ua_upvid && (ua_eff & UA_VLANS)) {
-		/* No uplink on a front port: its VLAN cannot be kept, so wait */
+		/* No uplink on a front port: its VLAN cannot be kept, so the
+		 * VLANs wait, and the controller sends them again */
 		print_string("UniFi: no uplink known, VLANs not applied\n");
 		ua_eff &= ~UA_VLANS;
+		ua_defer = 1;
 	}
-	ua_hend = cmd_history_ptr;
 
 	/* The new config.txt: the old lines of the areas not applied, the
 	 * selection, then the controller's lines of the areas applied */
@@ -980,14 +991,13 @@ static uint8_t ua_plan(void)
  * new config.txt at the next Save to flash: they are blanked */
 static void ua_purge(void)
 {
-	/* From the oldest byte to the end as the plan saw it: later edits stay */
-	ua_x = (cmd_history_ptr + 1) & CMD_HISTORY_MASK;
-	for (ua_z = 0; ua_z < CMD_HISTORY_SIZE && ua_x != ua_hend; ua_z++) {
-		ua_pb = ua_x;	/* the line's start */
-		for (ua_y = 0; ua_z < CMD_HISTORY_SIZE && ua_y < CMD_BUF_SIZE && ua_x != ua_hend
-		     && cmd_history[ua_x] && cmd_history[ua_x] != '\n'; ua_y++, ua_z++) {
-			u_buf[UA_OLD + ua_y] = cmd_history[ua_x];
-			ua_x = (ua_x + 1) & CMD_HISTORY_MASK;
+	ua_px = (cmd_history_ptr + 1) & CMD_HISTORY_MASK;	/* the oldest byte */
+	for (ua_z = 0; ua_z < CMD_HISTORY_SIZE; ua_z++) {
+		ua_pb = ua_px;	/* the line's start */
+		for (ua_y = 0; ua_z < CMD_HISTORY_SIZE && ua_y < CMD_BUF_SIZE
+		     && cmd_history[ua_px] && cmd_history[ua_px] != '\n'; ua_y++, ua_z++) {
+			u_buf[UA_OLD + ua_y] = cmd_history[ua_px];
+			ua_px = (ua_px + 1) & CMD_HISTORY_MASK;
 		}
 		u_buf[UA_OLD + ua_y] = 0;
 		if (ua_y && (ua_owner(UA_OLD) & ua_eff)) {
@@ -996,7 +1006,7 @@ static void ua_purge(void)
 				ua_pb = (ua_pb + 1) & CMD_HISTORY_MASK;
 			}
 		}
-		ua_x = (ua_x + 1) & CMD_HISTORY_MASK;
+		ua_px = (ua_px + 1) & CMD_HISTORY_MASK;
 	}
 }
 
@@ -1042,7 +1052,6 @@ static uint8_t ua_run(void)
 		return 1;
 	}
 	print_string("UniFi: config.txt written\n");
-	ua_purge();
 	memcpy(unifi.cfgver, ua_cfgver, UNIFI_CFGVER_LEN);
 	u_save();
 	return 1;
@@ -1055,15 +1064,19 @@ static void ua_start(void)
 {
 	ua_parse();
 	ua_busy = 0;
+	ua_defer = 0;
 	if (ua_mask & ua_seen) {
 		ua_busy = ua_plan();
-		if (!ua_busy && !ua_over)
-			ua_purge();	/* config.txt already holds it */
+		/* Now, while the plan is made: edits made later stay */
+		if (!ua_over)
+			ua_purge();
 	}
 	if (ua_busy) {
 		memcpy(ua_cfgver, unifi.cfgver, UNIFI_CFGVER_LEN);
 		unifi.cfgver[0] = 0;
 	}
+	if (ua_defer)
+		ua_cfgver[0] = unifi.cfgver[0] = 0;	/* the VLANs come again */
 }
 
 /* "unifi apply <area>..." | all | none */

@@ -802,11 +802,13 @@ Network 11.1.50), not by `lldp_table`: a device sits behind the port whose
   `config.txt`, for example after a reboot, run nothing.
 - **The cfgversion.** It is reported, and saved, once every command ran and
   `config.txt` is written and reads back the same. The command history's
-  lines of the applied areas are then blanked, so a later Save to flash
-  does not undo the apply; edits made while it runs stay. A running apply
+  lines of the applied areas are blanked when the plan is made, so a later
+  Save to flash does not undo the apply; edits made while it runs stay. A running apply
   finishes even when UniFi is turned off, so the switch and `config.txt`
-  agree; a reboot replays `config.txt`. While no uplink maps to a front
-  port, VLANs are not applied. An apply that a reboot interrupts leaves no
+  agree; a reboot replays `config.txt`. The uplink is the gateway's port, else the
+  one the controller's reply came in on, whichever is a front port; while
+  neither is, VLANs wait and no cfgversion is reported, so the controller
+  sends them again. An apply that a reboot interrupts leaves no
   cfgversion, so the controller sends the settings again, as does a
   selection change or `unifi forget` while an apply runs. Settings that do not fit apply nothing and are not
   retried until the controller's next cfgversion; more than 32 VLAN slots

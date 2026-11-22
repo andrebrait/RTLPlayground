@@ -1532,6 +1532,42 @@ static void test_apply(void)
 	check(!ran[0] && !config_writes && !memcmp(cmd_history + 1, "          \n", 11),
 	      "apply: settings already in config.txt still clear the history's lines");
 
+	/* An edit made while an apply runs stays in the history */
+	cmd("unifi apply jumbo");
+	memset(config_sector, 0xff, sizeof(config_sector));
+	memset(cmd_history, 0, sizeof(cmd_history));
+	strcpy((char *)cmd_history + 1, "mtu 1 1522\n");
+	cmd_history_ptr = 1 + strlen("mtu 1 1522\n");
+	strcpy(unifi.cfgver, "1111");
+	inform();
+	{
+		static uint8_t r[2048];
+		uint16_t n = reply(r, "{\"_type\":\"setparam\",\"cfgversion\":\"0000000000000017\",\"system_cfg\":\""
+				   "switch.jumboframes=enabled\\n\"}", 1, 0);
+		deliver(r, n);
+		for (int i = 0; i < 1000 && unifi.phase != U_APPLY; i++)
+			unifi_tick();
+		strcpy((char *)cmd_history + cmd_history_ptr, "mtu 2 1522\n");
+		cmd_history_ptr += strlen("mtu 2 1522\n");
+		for (int i = 0; i < 100 && ua_busy; i++)
+			unifi_tick();
+	}
+	check(!memcmp(cmd_history + 1, "          \nmtu 2 1522\n", 22) && !ua_busy,
+	      "apply: an edit made while it runs stays in the history");
+
+	/* No uplink on a front port: the VLANs wait and are asked for again */
+	cmd("unifi apply vlans");
+	u_uplink = 0;
+	rx_gateway = 0;
+	strcpy(unifi.cfgver, "1111");
+	inform();
+	rx_ingress = 0;	/* the reply comes in on ASIC port 0, no front port here */
+	ran[0] = 0;
+	answer("{\"_type\":\"setparam\",\"cfgversion\":\"0000000000000018\",\"system_cfg\":\""
+	       "switch.vlan.1.id=1\\nswitch.vlan.1.mode=untagged\\n\"}");
+	check(!ran[0] && !unifi.cfgver[0], "apply: without an uplink the VLANs wait, and no cfgversion is reported");
+	rx_ingress = 8;
+
 	/* A selection change during an apply: its cfgversion is not reported */
 	ua_busy = 1;
 	strcpy(ua_cfgver, "abc");
