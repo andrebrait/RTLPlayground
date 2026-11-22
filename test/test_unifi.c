@@ -1277,11 +1277,14 @@ static void test_apply(void)
 		0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
 		0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff
 	};
-	static const char old[] = "hostname sw\nvlan 10 mgmt\nvlan 1 1 2 3 4 5 6\nvlan 30 3t\npvid 1 1\n"
-		"port 2 off\nport 5 name up\nmtu 1 9216\nlag 2 3 4\nlaghash 2 sip\nmirror 5 6\nstp on\n"
-		"stp prio 8\nigmp off\nunifi on";
-	/* Front ports 5, 1, 2, 3, 4, 6 on ASIC 3..8; 6 is the SFP+. VLAN 10 is
-	 * the management VLAN: never touched. Port 10 is not on this board. */
+	/* VLAN 1 has a name; port 2 is forced and then turned off locally;
+	 * port 6 is the SFP+ and the uplink (the controller's replies arrive
+	 * on ASIC 8); EEE is off on port 3, which the controller leaves
+	 * alone. VLAN 10 is the management VLAN: never touched. */
+	static const char old[] = "hostname sw\nvlan 10 mgmt\nvlan 10 4 6t\nvlan 1 lan 1 2 3 4 5 6\nvlan 30 3t\npvid 1 1\n"
+		"pvid 6 10\nport 2 100m full\nport 2 off\nport 5 name up\nport 6 fc off\neee off 6\neee off 3\n"
+		"mtu 1 9216\nlag 2 3 4\nlaghash 2 sip\nmirror 5 6\nstp on\nstp prio 8\nigmp off\nunifi on";
+	/* Front ports 5, 1, 2, 3, 4, 6 on ASIC 3..8. Port 10 is not on this board. */
 	static const char cfg[] = "{\"_type\":\"setparam\",\"cfgversion\":\"00000000000000aa\",\"system_cfg\":\""
 		"# switch\\nswitch.managementvlan=1\\nswitch.jumboframes=disabled\\nswitch.stp.version=rstp\\n"
 		"switch.stp.priority=4096\\nswitch.stp.status=enabled\\n"
@@ -1314,26 +1317,68 @@ static void test_apply(void)
 	j = req_json();
 	check(j && strstr(j, ",\"switch_caps\":{\"feature_caps\":532800,\"max_aggregate_sessions\":4,\"max_mirror_sessions\":1}}")
 	      && strstr(j, "{\"port_idx\":5,\"media\":\"GE\",\"speed_caps\":1049064,\"port_caps\":1,")
-	      && strstr(j, "{\"port_idx\":6,\"media\":\"SFP+\",\"speed_caps\":288,\"up\""),
+	      && strstr(j, "{\"port_idx\":6,\"media\":\"SFP+\",\"speed_caps\":288,\"is_uplink\":true,\"up\""),
 	      "apply: the inform claims STP, IGMP, LACP and jumbo, and EEE on copper ports only");
 
 	ran[0] = 0;
 	config_writes = 0;
 	answer(cfg);
 	check(unifi.phase == U_IDLE && !ua_busy && config_writes == 1, "apply: the commands ran and config.txt was written once");
+	/* port 2 off went: its forced speed, an old line too, runs again */
 	static const char want_ran[] =
-		"vlan 30 d\nport 2 on\nmtu 1 1522\nlag 2 d\n"
-		"vlan 1 1 2 4 5 6\nvlan 20 1t 2t 3 4t 5t 6t\npvid 2 1\npvid 3 20\npvid 4 1\npvid 5 1\npvid 6 1\n"
-		"port 1 off\neee on 1\nport 2 100m full\nlag 1 lacp 4 5\nstp version rstp\nstp prio 1\nigmp on\nmirror 3 2\n";
+		"vlan 30 d\nport 2 100m full\neee on 3\nmtu 1 1522\nlag 2 d\n"
+		"vlan 1 lan 1 2 4 5 6\nvlan 20 1t 2t 3 4t 5t 6t\npvid 2 1\npvid 3 20\npvid 4 1\npvid 5 1\n"
+		"port 1 off\neee on 1\nlag 1 lacp 4 5\nstp version rstp\nstp prio 1\nigmp on\nmirror 3 2\n";
 	check(!strcmp(ran, want_ran), "apply: undo what went, then run only the new lines");
 	if (strcmp(ran, want_ran))
 		printf("  ran:\n%s", ran);
-	static const char want_cfg[] = "hostname sw\nvlan 10 mgmt\nport 5 name up\nlaghash 2 sip\nunifi on\n"
-		"vlan 1 1 2 4 5 6\nvlan 20 1t 2t 3 4t 5t 6t\npvid 1 1\npvid 2 1\npvid 3 20\npvid 4 1\npvid 5 1\npvid 6 1\n"
+	static const char want_cfg[] = "hostname sw\nvlan 10 mgmt\nvlan 10 4 6t\npvid 6 10\nport 5 name up\n"
+		"port 6 fc off\neee off 6\nlaghash 2 sip\nunifi on\nunifi apply vlans ports lag stp igmp jumbo mirror\n"
+		"vlan 1 lan 1 2 4 5 6\nvlan 20 1t 2t 3 4t 5t 6t\npvid 1 1\npvid 2 1\npvid 3 20\npvid 4 1\npvid 5 1\n"
 		"port 1 off\neee on 1\nport 2 100m full\nlag 1 lacp 4 5\nstp on\nstp version rstp\nstp prio 1\nigmp on\nmirror 3 2\n";
 	check(!strcmp((char *)config_sector, want_cfg), "apply: config.txt keeps the other lines and holds the controller's");
 	if (strcmp((char *)config_sector, want_cfg))
 		printf("  config.txt:\n%s", (char *)config_sector);
+	check(!strcmp(unifi.cfgver, "00000000000000aa") && !strcmp((char *)last_rec() + 28, "00000000000000aa"),
+	      "apply: the cfgversion is reported and saved once all ran");
+
+	/* "unifi off" during an apply stops it; the cfgversion stays unsaved,
+	 * so the controller sends the settings again */
+	memset(config_sector, 0xff, sizeof(config_sector));
+	memcpy(config_sector, old, sizeof(old));
+	strcpy(unifi.cfgver, "1111");
+	inform();
+	ran[0] = 0;
+	config_writes = 0;
+	{
+		static uint8_t r[2048];
+		uint16_t n = reply(r, cfg, 1, 0);
+		deliver(r, n);
+		for (int i = 0; i < 1000 && unifi.phase != U_APPLY; i++)
+			unifi_tick();
+		unifi_tick();
+	}
+	check(ua_busy && ran[0] && !unifi.cfgver[0] && !last_rec()[28], "apply: while it runs, no cfgversion is saved");
+	cmd("unifi off");
+	cmd("unifi on");
+	for (int i = 0; i < 50; i++)
+		unifi_tick();
+	check(!ua_busy && unifi.phase != U_APPLY && !config_writes && !unifi.cfgver[0], "apply: unifi off stops it, nothing written");
+	inform();
+	ran[0] = 0;
+	answer(cfg);
+	check(!strcmp(ran, want_ran) && !strcmp((char *)config_sector, want_cfg) && !strcmp(unifi.cfgver, "00000000000000aa"),
+	      "apply: the settings sent again apply in full");
+
+	/* More VLANs than it holds: nothing is applied, rather than some deleted */
+	strcpy(unifi.cfgver, "1111");
+	inform();
+	ran[0] = 0;
+	config_writes = 0;
+	out_len = 0;
+	answer("{\"_type\":\"setparam\",\"cfgversion\":\"00000000000000bb\",\"system_cfg\":\""
+	       "switch.vlan.1.id=1\\nswitch.vlan.33.id=33\\n\"}");
+	check(!ran[0] && !config_writes && strstr(out, "do not fit, nothing applied"), "apply: VLAN slots past 32 apply nothing");
 
 	/* The same settings again, as after a reboot: nothing runs */
 	strcpy(unifi.cfgver, "1111");
@@ -1353,8 +1398,7 @@ static void test_apply(void)
 	config_writes = 0;
 	out_len = 0;
 	answer(cfg);
-	check(!ran[0] && !config_writes && strstr(out, "UniFi: not applied: vlans") && strstr(out, "not applied: mirror"),
-	      "apply none: nothing runs, the areas the controller set are logged as not applied");
+	check(!ran[0] && !config_writes, "apply none: nothing runs");
 
 	/* Only VLANs: the port, LAG and mirror lines stay */
 	memset(config_sector, 0xff, sizeof(config_sector));

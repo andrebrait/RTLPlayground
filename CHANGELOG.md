@@ -226,9 +226,10 @@
     In an applied area the controller's settings replace that area's lines in
     `config.txt`, which the switch writes itself, and only the commands that change
     something run. The switch claims the matching capabilities, so the controller offers
-    only those settings. The management VLAN, port names, per-port STP and EEE and flow
-    control on SFP ports are left alone. A selection change makes the controller send its
-    settings again.
+    only those settings. The management VLAN's lines, the uplink's native VLAN, port and
+    VLAN names, per-port STP and EEE and flow control on SFP ports are left alone. The
+    cfgversion is reported once the settings are applied and written, so an interrupted
+    apply gets them again. A selection change makes the controller send its settings again.
 
 ## Changed
 

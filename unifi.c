@@ -1429,6 +1429,7 @@ void unifi_tick(void) __banked
  * its timeout; the next inform waits for that. */
 static void u_stop(void)
 {
+	ua_busy = 0;	/* an apply stops too; its cfgversion is not saved */
 	if (unifi.conn)
 		unifi.abort = 1;
 	unifi.phase = U_IDLE;

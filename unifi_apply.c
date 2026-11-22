@@ -11,7 +11,8 @@
  * the controller, as on a UniFi switch, and the controller wins over local
  * edits in the areas it applies.
  *
- * Left alone: the management VLAN (the switch must stay reachable), port
+ * Left alone, so the switch stays reachable: the management VLAN's lines
+ * and the native VLAN of the uplink. Also left alone: port names, VLAN
  * names, per-port STP, and EEE and flow control on SFP ports.
  *
  * Everything is static: the 8051's internal RAM holds the stack.
@@ -39,6 +40,15 @@ extern __xdata char save_cmd;
 #define UA_P_FC_ON	0x40
 #define UA_P_AGG	0x80	/* opmode=aggregate */
 
+/* "unifi apply" lines: config.txt gets the current selection */
+#define UA_SELF		0x80
+
+#if SOC_FAMILY == RTL836X
+#define UA_LAGS		2	/* fixed groups: ports 0-3 and 4-7 */
+#else
+#define UA_LAGS		4
+#endif
+
 #define UA_V_UNTAGGED	1
 #define UA_V_TAGGED	2
 #define UA_V_EXCLUDE	3
@@ -49,7 +59,7 @@ static __xdata uint8_t ua_speed[UA_NP];	/* index into ua_speeds, 0 = none */
 static __xdata uint8_t ua_lag[UA_NP];	/* the controller's LAG id */
 static __xdata uint8_t ua_mir[UA_NP];	/* opmode=mirror: the port it mirrors, 0xff unknown */
 static __xdata uint16_t ua_pvid[UA_NP];	/* 0 = not given */
-static __xdata uint8_t ua_asic[UA_NP];	/* front port to ASIC port, 0 = none */
+static __xdata uint8_t ua_asic[UA_NP];	/* front port to 1 + ASIC port, 0 = none */
 static __xdata uint16_t ua_vid[UA_NV];	/* 0 = no such slot */
 static __xdata uint8_t ua_vdef[UA_NV];	/* the slot's mode, UA_V_* */
 static __xdata uint8_t ua_vigmp[UA_NV];
@@ -60,10 +70,12 @@ static __xdata uint16_t ua_prio;	/* 0xffff = not given */
 static __code const char *const __code ua_speeds[] = {
 	"", "10m", "100m", "1g", "2g5", "5g", "10g"
 };
+static __code const uint16_t ua_mbps[] = { 0, 10, 100, 1000, 2500, 5000, 10000 };
 
 /* The parser: a line of system_cfg is [ua_i, ua_le) */
-static __xdata uint16_t ua_i, ua_le, ua_n;
+static __xdata uint16_t ua_i, ua_le, ua_n, ua_vs;
 static __xdata uint8_t ua_k, ua_q;
+static __xdata uint8_t ua_over;		/* too much to hold: nothing is applied */
 
 static uint8_t ua_lit(__code const char *s)
 {
@@ -77,20 +89,21 @@ static uint8_t ua_lit(__code const char *s)
 /* A value that ends the line */
 static uint8_t ua_val(__code const char *s)
 {
-	if (!ua_lit(s))
-		return 0;
-	if (ua_i != ua_le)
-		return 0;
-	return 1;
+	ua_vs = ua_i;
+	if (ua_lit(s) && ua_i == ua_le)
+		return 1;
+	ua_i = ua_vs;
+	return 0;
 }
 
-/* Decimal digits into ua_n; 0 when there are none or too many */
+/* Decimal digits into ua_n; 0 when there are none or they pass 65535 */
 static uint8_t ua_num(void)
 {
 	ua_n = 0;
 	for (ua_q = 0; ua_i < ua_le && u_p[ua_i] >= '0' && u_p[ua_i] <= '9'; ua_i++) {
-		if (++ua_q > 5)
+		if (ua_n >= 6553)
 			return 0;
+		ua_q = 1;
 		ua_n = ua_n * 10 + u_p[ua_i] - '0';
 	}
 	if (!ua_q)
@@ -116,22 +129,18 @@ static void ua_port_line(void)
 		return;
 	ua_k = ua_n;
 	ua_seen |= UA_PORTS | UA_LAG | UA_MIRROR;
-	u_ls = ua_i;
 	if (ua_val("status=disabled")) {
 		ua_pf[ua_k] |= UA_P_OFF;
 		return;
 	}
-	ua_i = u_ls;
 	if (ua_val("autoneg=disabled")) {
 		ua_pf[ua_k] |= UA_P_FORCED;
 		return;
 	}
-	ua_i = u_ls;
 	if (ua_val("duplex=enabled")) {
 		ua_pf[ua_k] |= UA_P_FULL;
 		return;
 	}
-	ua_i = u_ls;
 	if (ua_lit("eee=")) {
 		ua_pf[ua_k] |= UA_P_EEE;
 		if (ua_val("enabled"))
@@ -147,18 +156,9 @@ static void ua_port_line(void)
 	if (ua_lit("speed=")) {
 		if (!ua_num() || ua_i != ua_le)
 			return;
-		if (ua_n == 10)
-			ua_speed[ua_k] = 1;
-		else if (ua_n == 100)
-			ua_speed[ua_k] = 2;
-		else if (ua_n == 1000)
-			ua_speed[ua_k] = 3;
-		else if (ua_n == 2500)
-			ua_speed[ua_k] = 4;
-		else if (ua_n == 5000)
-			ua_speed[ua_k] = 5;
-		else if (ua_n == 10000)
-			ua_speed[ua_k] = 6;
+		for (ua_q = 1; ua_q < 7; ua_q++)
+			if (ua_mbps[ua_q] == ua_n)
+				ua_speed[ua_k] = ua_q;
 		return;
 	}
 	if (ua_lit("opmode=")) {
@@ -186,8 +186,12 @@ static void ua_port_line(void)
 
 static void ua_vlan_line(void)
 {
-	if (!ua_num() || ua_n == 0 || ua_n > UA_NV || !ua_lit("."))
+	if (!ua_num() || !ua_lit("."))
 		return;	/* switch.vlan.status and the like */
+	if (ua_n == 0 || ua_n > UA_NV) {
+		ua_over = 1;	/* VLANs it cannot hold: the ones it can are not all */
+		return;
+	}
 	ua_k = ua_n - 1;
 	ua_seen |= UA_VLANS | UA_IGMP;
 	u_ls = ua_i;
@@ -265,11 +269,11 @@ static void ua_parse(void)
 	memset(ua_vun, 0, sizeof(ua_vun));
 	memset(ua_vtag, 0, sizeof(ua_vtag));
 	memset(ua_asic, 0, sizeof(ua_asic));
-	ua_seen = ua_stp = ua_stpver = ua_jumbo = 0;
+	ua_seen = ua_stp = ua_stpver = ua_jumbo = ua_over = 0;
 	ua_prio = 0xffff;
 	for (ua_k = MACHINE_MIN_PORT; ua_k <= MACHINE_MAX_PORT; ua_k++)
 		if (machine.log_to_phys_port[ua_k] && machine.log_to_phys_port[ua_k] < UA_NP)
-			ua_asic[machine.log_to_phys_port[ua_k]] = ua_k;
+			ua_asic[machine.log_to_phys_port[ua_k]] = ua_k + 1;
 	for (u_b = u_ms; u_b < u_me; u_b = ua_le + 2) {
 		for (ua_le = u_b; ua_le < u_me; ua_le++) {
 			if (u_p[ua_le] != '\\')
@@ -295,12 +299,13 @@ static void ua_parse(void)
 #define UA_SAVE		(UNIFI_BUF_SIZE - CMD_BUF_SIZE)
 #define UA_LINE_MAX	100	/* room kept for the line being written */
 
-static __xdata uint16_t ua_old_end, ua_new_end, ua_gen, ua_x, ua_y, ua_z, ua_lim, ua_a, ua_b;
-static __xdata uint8_t ua_c8, ua_w, ua_m, ua_g, ua_area;
+static __xdata uint16_t ua_old_end, ua_new_end, ua_gen, ua_x, ua_y, ua_z, ua_lim, ua_a, ua_b, ua_u, ua_nv;
+static __xdata uint16_t ua_ha, ua_hb, ua_hy, ua_hz, ua_sa, ua_sb;
+static __xdata uint8_t ua_c8, ua_w, ua_m, ua_g, ua_gu, ua_area, ua_t, ua_p;
 static __xdata uint16_t ua_bit;
-static __xdata uint8_t ua_over;		/* a region overflowed: nothing is applied */
 static __xdata uint8_t ua_changed;	/* the new config.txt differs */
 static __xdata uint8_t ua_busy;		/* commands are running */
+static __xdata char ua_cfgver[UNIFI_CFGVER_LEN];	/* reported once applied */
 
 /* Writing at unifi.pos, below ua_lim */
 static uint8_t ua_room(void)
@@ -317,16 +322,22 @@ static void ua_eol(void)
 	u_c('\n');
 }
 
-/* The line at u_buf + o: is it s, then a space or its end? */
-static uint8_t ua_at(__xdata uint16_t o, __code const char *s)
+/* Does a word end at o? */
+static uint8_t ua_ended(__xdata uint16_t o)
+{
+	ua_c8 = u_buf[o];
+	if (ua_c8 == ' ' || ua_c8 == '\n' || !ua_c8)
+		return 1;
+	return 0;
+}
+
+/* The word at u_buf + o: is it s? */
+static uint8_t ua_at(__xdata uint16_t o, __code const char *__xdata s)
 {
 	for (u_j = 0; s[u_j]; u_j++)
 		if (u_buf[o + u_j] != s[u_j])
 			return 0;
-	ua_c8 = u_buf[o + u_j];
-	if (ua_c8 == ' ' || ua_c8 == '\n' || !ua_c8)
-		return 1;
-	return 0;
+	return ua_ended(o + u_j);
 }
 
 /* The end of the line at o: its newline or the end of its region */
@@ -337,17 +348,59 @@ static uint16_t ua_eolat(__xdata uint16_t o)
 	return o;
 }
 
+/* The end of the word at o */
+static uint16_t ua_wend(__xdata uint16_t o)
+{
+	while (!ua_ended(o))
+		o++;
+	return o;
+}
+
 /* Past the word at o and the spaces after it */
 static uint16_t ua_skip(__xdata uint16_t o)
 {
-	while (u_buf[o] != ' ' && u_buf[o] != '\n' && u_buf[o])
-		o++;
+	o = ua_wend(o);
 	while (u_buf[o] == ' ')
 		o++;
 	return o;
 }
 
-/* Is o a speed word: a port line that sets the link, not its name or LLDP? */
+/* Are the words at a and b the same? */
+static uint8_t ua_weq(__xdata uint16_t a, __xdata uint16_t b)
+{
+	while (u_buf[a] == u_buf[b] && !ua_ended(a)) {
+		a++;
+		b++;
+	}
+	if (!ua_ended(a))
+		return 0;
+	return ua_ended(b);
+}
+
+/* The number at o, 0 when there is none */
+static uint16_t ua_numat(__xdata uint16_t o)
+{
+	for (ua_nv = 0; u_buf[o] >= '0' && u_buf[o] <= '9' && ua_nv < 6553; o++)
+		ua_nv = ua_nv * 10 + u_buf[o] - '0';
+	return ua_nv;
+}
+
+/* Copies [from, to) to unifi.pos */
+static void ua_put(__xdata uint16_t from, __xdata uint16_t to)
+{
+	for (; from < to; from++)
+		u_c(u_buf[from]);
+}
+
+/* Copies the line at o with its newline */
+static void ua_copy(__xdata uint16_t o)
+{
+	ua_put(o, ua_eolat(o));
+	ua_eol();
+}
+
+/* Is o a word that sets the link: on, off, auto, a speed or duplex? A
+ * port has one such setting, the last line's. */
 static uint8_t ua_link_word(__xdata uint16_t o)
 {
 	if (ua_at(o, "on") || ua_at(o, "off") || ua_at(o, "auto") || ua_at(o, "duplex"))
@@ -358,29 +411,48 @@ static uint8_t ua_link_word(__xdata uint16_t o)
 	return 0;
 }
 
+/* Front port p: copper, or the uplink (the port towards the gateway, else
+ * the controller) */
+static uint8_t ua_copper(__xdata uint8_t p)
+{
+	if (p >= UA_NP || !ua_asic[p])
+		return 0;
+	if (machine.is_sfp[ua_asic[p] - 1])
+		return 0;
+	return 1;
+}
+
+static uint8_t ua_uplink(__xdata uint8_t p)
+{
+	ua_t = u_upk;	/* as the last inform reported it */
+	if (p >= UA_NP || !ua_t || ua_asic[p] != ua_t)
+		return 0;
+	return 1;
+}
+
 /* The area a config.txt line belongs to, 0 for none of them */
 static uint8_t ua_owner(__xdata uint16_t o)
 {
+	ua_b = ua_skip(o);	/* the second word */
 	if (ua_at(o, "vlan")) {
-		ua_b = ua_skip(ua_skip(o));
-		if (ua_at(ua_b, "mgmt"))
+		if (ua_numat(ua_b) == management_vlan || ua_at(ua_skip(ua_b), "mgmt"))
 			return 0;
 		return UA_VLANS;
 	}
 	if (ua_at(o, "pvid"))
-		return UA_VLANS;
-	if (ua_at(o, "eee"))
-		return UA_PORTS;
+		return ua_uplink(ua_numat(ua_b)) ? 0 : UA_VLANS;
+	if (ua_at(o, "eee"))	/* eee on|off <port> */
+		return ua_copper(ua_numat(ua_skip(ua_b))) ? UA_PORTS : 0;
 	if (ua_at(o, "port")) {
-		ua_b = ua_skip(ua_skip(o));
-		if (ua_link_word(ua_b) || ua_at(ua_b, "fc"))
+		ua_p = ua_numat(ua_b);
+		ua_b = ua_skip(ua_b);
+		if (ua_link_word(ua_b) || (ua_at(ua_b, "fc") && ua_copper(ua_p)))
 			return UA_PORTS;
 		return 0;
 	}
 	if (ua_at(o, "lag"))
 		return UA_LAG;
 	if (ua_at(o, "stp")) {
-		ua_b = ua_skip(o);
 		if (ua_at(ua_b, "on") || ua_at(ua_b, "off") || ua_at(ua_b, "prio") || ua_at(ua_b, "version"))
 			return UA_STP;
 		return 0;
@@ -391,38 +463,59 @@ static uint8_t ua_owner(__xdata uint16_t o)
 		return UA_JUMBO;
 	if (ua_at(o, "mirror"))
 		return UA_MIRROR;
+	if (ua_at(o, "unifi") && ua_at(ua_b, "apply"))
+		return UA_SELF;
+	return 0;
+}
+
+/* Do the lines at o and y set the same thing? */
+static uint8_t ua_same(__xdata uint16_t o, __xdata uint16_t y)
+{
+	if (!ua_weq(o, y))
+		return 0;
+	if (ua_at(o, "igmp") || ua_at(o, "mirror"))
+		return 1;
+	ua_sa = ua_skip(o);
+	ua_sb = ua_skip(y);
+	if (ua_at(o, "eee"))	/* the port */
+		return ua_weq(ua_skip(ua_sa), ua_skip(ua_sb));
+	if (ua_at(o, "stp") && (ua_at(ua_sa, "on") || ua_at(ua_sa, "off")))
+		return ua_at(ua_sb, "on") | ua_at(ua_sb, "off");
+	if (!ua_weq(ua_sa, ua_sb))
+		return 0;	/* the VLAN, port, group, or stp setting */
+	if (!ua_at(o, "port"))
+		return 1;
+	ua_t = ua_link_word(ua_skip(ua_sa));	/* a link setting, or fc */
+	if (ua_t != ua_link_word(ua_skip(ua_sb)))
+		return 0;
+	return 1;
+}
+
+/* The controller's line in the new config.txt that sets what the line at o
+ * does, or 0 */
+static uint16_t ua_find(__xdata uint16_t o)
+{
+	for (ua_u = ua_gen; ua_u < ua_new_end; ua_u = ua_eolat(ua_u) + 1)
+		if (ua_same(o, ua_u))
+			return ua_u;
 	return 0;
 }
 
 /* Is the line at o, up to its end, one of the lines in [from, to)? */
 static uint8_t ua_has(__xdata uint16_t o, __xdata uint16_t from, __xdata uint16_t to)
 {
-	ua_b = ua_eolat(o);
-	for (ua_a = from; ua_a < to; ua_a = ua_eolat(ua_a) + 1) {
-		ua_y = o;
-		ua_z = ua_a;
-		while (ua_y < ua_b && u_buf[ua_z] == u_buf[ua_y]) {
-			ua_y++;
-			ua_z++;
+	ua_hb = ua_eolat(o);
+	for (ua_ha = from; ua_ha < to; ua_ha = ua_eolat(ua_ha) + 1) {
+		ua_hy = o;
+		ua_hz = ua_ha;
+		while (ua_hy < ua_hb && u_buf[ua_hz] == u_buf[ua_hy]) {
+			ua_hy++;
+			ua_hz++;
 		}
-		if (ua_y != ua_b)
+		if (ua_hy != ua_hb)
 			continue;
-		ua_c8 = u_buf[ua_z];
+		ua_c8 = u_buf[ua_hz];
 		if (ua_c8 == '\n' || !ua_c8)
-			return 1;
-	}
-	return 0;
-}
-
-/* Does a line in [from, to) start with the first n bytes at o, then end or
- * go on with a space? */
-static uint8_t ua_has_key(__xdata uint16_t o, __xdata uint16_t n, __xdata uint16_t from, __xdata uint16_t to)
-{
-	for (ua_z = from; ua_z < to; ua_z = ua_eolat(ua_z) + 1) {
-		if (memcmp(u_buf + ua_z, u_buf + o, n))
-			continue;
-		ua_c8 = u_buf[ua_z + n];
-		if (ua_c8 == ' ' || ua_c8 == '\n' || !ua_c8)
 			return 1;
 	}
 	return 0;
@@ -450,6 +543,25 @@ static uint8_t ua_mode(void)
 	return UA_V_EXCLUDE;
 }
 
+/* The name config.txt gives VLAN ua_vid[ua_k], copied after a space */
+static void ua_vlan_name(void)
+{
+	for (ua_y = UA_OLD; ua_y < ua_old_end; ua_y = ua_eolat(ua_y) + 1) {
+		if (!ua_at(ua_y, "vlan"))
+			continue;
+		ua_z = ua_skip(ua_y);
+		if (ua_numat(ua_z) != ua_vid[ua_k])
+			continue;
+		ua_z = ua_skip(ua_z);
+		ua_c8 = u_buf[ua_z] | 0x20;
+		if (ua_c8 < 'a' || ua_c8 > 'z' || ua_at(ua_z, "mgmt") || ua_at(ua_z, "d"))
+			continue;
+		u_c(' ');
+		ua_put(ua_z, ua_wend(ua_z));
+		return;
+	}
+}
+
 /* The lines of one area, as the controller wants it */
 static void ua_gen_area(__xdata uint8_t area)
 {
@@ -457,7 +569,12 @@ static void ua_gen_area(__xdata uint8_t area)
 		for (ua_k = 1; ua_k < UA_NP; ua_k++) {
 			if (!ua_asic[ua_k] || !ua_room())
 				continue;
-			if ((ua_pf[ua_k] & UA_P_FORCED) && ua_speed[ua_k]) {
+			/* One link setting: off wins over a forced speed */
+			if (ua_pf[ua_k] & UA_P_OFF) {
+				ua_port_word(ua_k);
+				u_s("off");
+				ua_eol();
+			} else if ((ua_pf[ua_k] & UA_P_FORCED) && ua_speed[ua_k]) {
 				ua_port_word(ua_k);
 				u_s(ua_speeds[ua_speed[ua_k]]);
 				if (ua_speed[ua_k] <= 2) {	/* only 10M and 100M have half duplex */
@@ -468,12 +585,7 @@ static void ua_gen_area(__xdata uint8_t area)
 				}
 				ua_eol();
 			}
-			if (ua_pf[ua_k] & UA_P_OFF) {
-				ua_port_word(ua_k);
-				u_s("off");
-				ua_eol();
-			}
-			if (machine.is_sfp[ua_asic[ua_k]])
+			if (!ua_copper(ua_k))
 				continue;	/* no EEE or flow control on SFP ports */
 			if (ua_pf[ua_k] & UA_P_EEE) {
 				if (ua_pf[ua_k] & UA_P_EEE_ON)
@@ -500,6 +612,7 @@ static void ua_gen_area(__xdata uint8_t area)
 				continue;
 			u_s("vlan ");
 			u_dec(ua_vid[ua_k]);
+			ua_vlan_name();
 			for (ua_q = 1; ua_q < UA_NP; ua_q++) {
 				if (!ua_asic[ua_q])
 					continue;
@@ -517,7 +630,7 @@ static void ua_gen_area(__xdata uint8_t area)
 		}
 		/* The native VLAN: as given, else the slot the port is untagged in */
 		for (ua_k = 1; ua_k < UA_NP; ua_k++) {
-			if (!ua_asic[ua_k] || !ua_room())
+			if (!ua_asic[ua_k] || ua_uplink(ua_k) || !ua_room())
 				continue;
 			ua_n = ua_pvid[ua_k];
 			ua_bit = (uint16_t)1 << ua_k;
@@ -535,18 +648,29 @@ static void ua_gen_area(__xdata uint8_t area)
 		return;
 	}
 	if (area == UA_LAG) {
-		/* The controller's LAG ids become groups 1..4 in order */
-		ua_g = 0;	/* groups written */
+		/* A group per controller LAG id, written with its first member.
+		 * The RTL836x's groups are fixed: the members' half of the ports. */
+		ua_gu = 0;	/* groups used, a bit each */
 		for (ua_k = 1; ua_k < UA_NP; ua_k++) {
 			if (!(ua_pf[ua_k] & UA_P_AGG) || !ua_lag[ua_k] || !ua_asic[ua_k])
 				continue;
 			for (ua_q = 1; ua_q < ua_k; ua_q++)
 				if ((ua_pf[ua_q] & UA_P_AGG) && ua_lag[ua_q] == ua_lag[ua_k] && ua_asic[ua_q])
 					break;
-			if (ua_q < ua_k || ua_g >= 4 || !ua_room())
-				continue;	/* written with its first member */
+			if (ua_q < ua_k || !ua_room())
+				continue;
+#if SOC_FAMILY == RTL836X
+			ua_g = (ua_asic[ua_k] - 1) >> 2;
+			ua_m = ua_g + 1;	/* the group's bit */
+#else
+			for (ua_g = 0, ua_m = 1; ua_gu & ua_m; ua_g++)
+				ua_m <<= 1;
+#endif
+			if (ua_g >= UA_LAGS || (ua_gu & ua_m))
+				continue;
+			ua_gu |= ua_m;
 			u_s("lag ");
-			u_dec(++ua_g);
+			u_dec(ua_g + 1);
 			u_s(" lacp");
 			for (ua_q = ua_k; ua_q < UA_NP; ua_q++) {
 				if ((ua_pf[ua_q] & UA_P_AGG) && ua_lag[ua_q] == ua_lag[ua_k] && ua_asic[ua_q]) {
@@ -615,90 +739,50 @@ static void ua_gen_area(__xdata uint8_t area)
 	}
 }
 
-/* The command that undoes the old line at o, now that the new config.txt,
- * [UA_NEW, ua_new_end), no longer has it; nothing when a new line takes
- * its place anyway */
-static void ua_undo(__xdata uint16_t o, __xdata uint8_t area)
+/* The commands for an old line at o that the new config.txt no longer has:
+ * the controller's line that sets the same, run again when it is an old
+ * line too (a later old line changed it), else back to the default */
+static void ua_undo(__xdata uint16_t o)
 {
 	if (!ua_room())
 		return;
+	ua_y = ua_find(o);
+	if (ua_y) {
+		if (ua_has(ua_y, UA_OLD, ua_old_end))
+			ua_copy(ua_y);
+		return;	/* else it runs with the new lines */
+	}
 	ua_b = ua_skip(o);	/* the second word */
-	if (area == UA_VLANS && ua_at(o, "vlan")) {
-		ua_a = ua_skip(ua_b);	/* the key is "vlan <id>" */
-		while (ua_a > o && u_buf[ua_a - 1] == ' ')
-			ua_a--;
-		if (ua_has_key(o, ua_a - o, UA_NEW, ua_new_end))
-			return;
-		ua_n = 0;
-		for (ua_a = ua_b; u_buf[ua_a] >= '0' && u_buf[ua_a] <= '9'; ua_a++)
-			ua_n = ua_n * 10 + u_buf[ua_a] - '0';
-		if (!ua_n || ua_n == management_vlan)
-			return;
-		u_s("vlan ");
-		u_dec(ua_n);
-		u_s(" d\n");
-		return;
+	ua_a = ua_wend(ua_b);	/* "vlan 10", "port 3" and the like end here */
+	if (ua_at(o, "eee")) {
+		u_s(MACHINE_DEFAULT_EEE ? "eee on " : "eee off ");
+		ua_b = ua_skip(ua_b);
+		ua_put(ua_b, ua_wend(ua_b));
+	} else if (ua_at(o, "stp")) {
+		if (ua_at(ua_b, "prio"))
+			u_s("stp prio 8");
+		else if (ua_at(ua_b, "version"))
+			u_s("stp version rstp");
+		else
+			return;	/* on or off is always given with the others */
+	} else if (ua_at(o, "mirror")) {
+		u_s("mirror off");
+	} else if (ua_at(o, "igmp")) {
+		return;	/* always given */
+	} else {
+		ua_put(o, ua_a);
+		if (ua_at(o, "vlan") || ua_at(o, "lag"))
+			u_s(" d");
+		else if (ua_at(o, "mtu"))
+			u_s(" 1522");
+		else if (ua_at(o, "pvid"))
+			u_s(" 1");
+		else if (ua_at(ua_skip(ua_b), "fc"))
+			u_s(" fc on");
+		else
+			u_s(" auto");
 	}
-	if (area == UA_PORTS && ua_at(o, "port")) {
-		ua_a = ua_skip(ua_b);	/* the third word */
-		ua_n = 0;	/* the port */
-		for (ua_y = ua_b; u_buf[ua_y] >= '0' && u_buf[ua_y] <= '9'; ua_y++)
-			ua_n = ua_n * 10 + u_buf[ua_y] - '0';
-		if (ua_at(ua_a, "off")) {
-			ua_port_word(ua_n);
-			u_s("on\n");
-			return;
-		}
-		if (ua_at(ua_a, "fc"))
-			return;
-		/* A link setting: back to auto, unless a new one replaces it */
-		for (ua_y = UA_NEW; ua_y < ua_new_end; ua_y = ua_eolat(ua_y) + 1) {
-			if (!ua_at(ua_y, "port"))
-				continue;
-			ua_z = ua_skip(ua_y);
-			ua_m = 0;
-			for (; u_buf[ua_z] >= '0' && u_buf[ua_z] <= '9'; ua_z++)
-				ua_m = ua_m * 10 + u_buf[ua_z] - '0';
-			if (ua_m != ua_n)
-				continue;
-			ua_z = ua_skip(ua_z);
-			if (ua_link_word(ua_z) && !ua_at(ua_z, "off"))
-				return;
-		}
-		ua_port_word(ua_n);
-		u_s("auto\n");
-		return;
-	}
-	if (area == UA_LAG) {
-		ua_a = ua_skip(ua_b);
-		while (ua_a > o && u_buf[ua_a - 1] == ' ')
-			ua_a--;
-		if (ua_has_key(o, ua_a - o, UA_NEW, ua_new_end))
-			return;
-		u_s("lag ");
-		u_c(u_buf[ua_b]);
-		u_s(" d\n");
-		return;
-	}
-	if (area == UA_JUMBO) {
-		ua_a = ua_skip(ua_b);
-		while (ua_a > o && u_buf[ua_a - 1] == ' ')
-			ua_a--;
-		if (ua_has_key(o, ua_a - o, UA_NEW, ua_new_end))
-			return;
-		for (; o < ua_a; o++)
-			u_c(u_buf[o]);
-		u_s(" 1522\n");
-		return;
-	}
-	if (area == UA_MIRROR) {
-		if (ua_has_key(o, 6, UA_NEW, ua_new_end))
-			return;
-		u_s("mirror off\n");
-		return;
-	}
-	if (area == UA_IGMP || area == UA_STP)
-		return;	/* their new lines are explicit */
+	ua_eol();
 }
 
 /* Reads config.txt into [UA_OLD, ua_old_end) */
@@ -724,24 +808,28 @@ static void ua_read_config(void)
  * there is something to run or to write. */
 static uint8_t ua_plan(void)
 {
-	ua_over = 0;
 	ua_changed = 0;
 	ua_read_config();
 
-	/* The new config.txt: the old lines of the areas not applied, then the
-	 * controller's lines of those that are */
+	/* The new config.txt: the old lines of the areas not applied, the
+	 * selection, then the controller's lines of the areas applied */
 	unifi.pos = UA_NEW;
 	ua_lim = UA_NEW + CONFIG_LEN - 1;
 	for (ua_x = UA_OLD; ua_x < ua_old_end; ua_x = ua_eolat(ua_x) + 1) {
-		ua_k = ua_owner(ua_x);
-		if (ua_k & ua_mask & ua_seen)
+		if (ua_owner(ua_x) & ((ua_mask & ua_seen) | UA_SELF))
 			continue;
 		if (!ua_room())
 			break;
-		for (ua_a = ua_x; ua_a < ua_eolat(ua_x); ua_a++)
-			u_c(u_buf[ua_a]);
-		ua_eol();
+		ua_copy(ua_x);
 	}
+	u_s("unifi apply");
+	for (ua_k = 0; ua_k < UA_AREAS; ua_k++) {
+		if (ua_mask >> ua_k & 1) {
+			u_c(' ');
+			u_s(ua_names[ua_k]);
+		}
+	}
+	ua_eol();
 	ua_gen = unifi.pos;
 	for (ua_area = 1; ua_area <= UA_MIRROR; ua_area <<= 1)
 		if (ua_area & ua_mask & ua_seen)
@@ -754,11 +842,10 @@ static uint8_t ua_plan(void)
 	unifi.pos = UA_EXE;
 	ua_lim = UA_SAVE - 1;
 	for (ua_x = UA_OLD; ua_x < ua_old_end; ua_x = ua_eolat(ua_x) + 1) {
-		ua_k = ua_owner(ua_x) & ua_mask & ua_seen;
-		if (!ua_k || ua_has(ua_x, ua_gen, ua_new_end))
+		if (!(ua_owner(ua_x) & ua_mask & ua_seen) || ua_has(ua_x, ua_gen, ua_new_end))
 			continue;
 		ua_changed = 1;
-		ua_undo(ua_x, ua_k);
+		ua_undo(ua_x);
 	}
 	for (ua_x = ua_gen; ua_x < ua_new_end; ua_x = ua_eolat(ua_x) + 1) {
 		if (ua_has(ua_x, UA_OLD, ua_old_end))
@@ -766,9 +853,7 @@ static uint8_t ua_plan(void)
 		ua_changed = 1;
 		if (!ua_room())
 			break;
-		for (ua_a = ua_x; ua_a < ua_eolat(ua_x); ua_a++)
-			u_c(u_buf[ua_a]);
-		ua_eol();
+		ua_copy(ua_x);
 	}
 	u_buf[unifi.pos] = 0;
 	if (ua_over) {
@@ -779,7 +864,8 @@ static uint8_t ua_plan(void)
 	return ua_changed;
 }
 
-/* One command per tick. Returns 1 when all ran and config.txt is written. */
+/* One command per tick. Returns 1 when all ran, config.txt is written and
+ * the cfgversion is reported. */
 static uint8_t ua_run(void)
 {
 	if (u_buf[ua_x]) {
@@ -809,24 +895,24 @@ static uint8_t ua_run(void)
 	flash_region.len = ua_new_end - UA_NEW + 1;
 	flash_write_bytes(u_buf + UA_NEW);
 	print_string("UniFi: config.txt written\n");
+	memcpy(unifi.cfgver, ua_cfgver, UNIFI_CFGVER_LEN);
+	u_save();
 	return 1;
 }
 
 /* A system_cfg arrived with a new cfgversion: plan, and run from the next
- * tick on */
+ * tick on. Until all ran, the saved cfgversion is none: an apply that a
+ * reboot or "unifi off" interrupts gets the settings again. */
 static void ua_start(void)
 {
 	ua_parse();
-	for (ua_k = 0; ua_k < UA_AREAS; ua_k++) {
-		if ((ua_seen >> ua_k & 1) && !(ua_mask >> ua_k & 1)) {
-			print_string("UniFi: not applied: ");
-			print_string(ua_names[ua_k]);
-			write_char('\n');
-		}
-	}
 	ua_busy = 0;
 	if (ua_mask & ua_seen)
 		ua_busy = ua_plan();
+	if (ua_busy) {
+		memcpy(ua_cfgver, unifi.cfgver, UNIFI_CFGVER_LEN);
+		unifi.cfgver[0] = 0;
+	}
 }
 
 /* "unifi apply <area>..." | all | none */
@@ -899,7 +985,7 @@ static void ua_caps(void)
 		ua_cap |= 524288;
 	u_dec(ua_cap);
 	u_s(",\"max_aggregate_sessions\":");
-	u_c(ua_mask & UA_LAG ? '4' : '0');
+	u_c(ua_mask & UA_LAG ? '0' + UA_LAGS : '0');
 	u_s(",\"max_mirror_sessions\":");
 	u_c(ua_mask & UA_MIRROR ? '1' : '0');
 	u_c('}');

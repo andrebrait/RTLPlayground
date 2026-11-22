@@ -773,37 +773,51 @@ Network 11.1.50), not by `lldp_table`: a device sits behind the port whose
 - **Translation.** Each applied area becomes the commands `config.txt` uses:
   - VLAN slots become `vlan <vid> <port>[t]...`, with each port's mode taken
     from its `switch.vlan.K.port.N.mode` line, else the slot's mode;
-  - `pvid <port> <vid>` for every port: `switch.port.N.pvid`, else the slot
-    the port is untagged in, else 1;
-  - `port N off`, `port N <speed> [half|full]`, `eee on|off N` and
-    `port N fc on|off`;
-  - `lag G lacp <ports>`: the controller's LAG ids become groups 1..4 in
-    order;
+  - a VLAN keeps the name `config.txt` gave it;
+  - `pvid <port> <vid>` for every port but the uplink: `switch.port.N.pvid`,
+    else the slot the port is untagged in, else 1;
+  - one link setting per port, `port N off` or `port N <speed> [half|full]`
+    (off wins), then `eee on|off N` and `port N fc on|off`;
+  - `lag G lacp <ports>`: each controller LAG id gets the next free group
+    (1..4); on the RTL836x, whose two groups are fixed to ports 0–3 and
+    4–7, the group of its members;
   - `stp on|off`, `stp version`, `stp prio` (priority / 4096);
   - `igmp on` when any VLAN slot has `igmp_snooping=true`;
   - `mtu N 9216` for jumbo frames;
   - `mirror <dest> <source>`.
 - **`config.txt` is the reference.** The switch reads it, keeps the lines of
   the other areas, and writes the applied areas' lines as the controller
-  wants them. Lines the controller dropped are undone, for example
-  `vlan 30 d`, `lag 2 d`, `port N on`, `port N auto`, `mtu N 1522` and
+  wants them, with a `unifi apply` line for the current selection. A line
+  the controller dropped is undone: when the controller sets the same thing
+  (the same VLAN, port link, group and so on) with a line that was already
+  there, that line runs again; otherwise the default comes back, for example
+  `vlan 30 d`, `lag 2 d`, `port N auto`, `port N fc on`, `eee on N` (the
+  machine's default), `stp prio 8`, `stp version rstp`, `mtu N 1522` and
   `mirror off`. Only lines that are new run, one command per tick, and the
   sector is written once at the end. Settings that are already in
   `config.txt`, for example after a reboot, run nothing.
+- **The cfgversion.** It is reported, and saved, once every command ran and
+  `config.txt` is written. An apply that `unifi off`, `unifi inform`,
+  `unifi forget` or a reboot interrupts leaves no cfgversion, so the
+  controller sends the settings again. Settings that do not fit, including
+  more than 32 VLAN slots, apply nothing and are not retried until the
+  controller's next cfgversion.
 - **Left alone:**
-  - the management VLAN, which keeps the switch reachable;
+  - the management VLAN's lines (`vlan <mgmt> ...` and `vlan <vid> mgmt`)
+    and the uplink's native VLAN, which keep the switch reachable. The
+    uplink is the port towards the gateway, else the one the controller's
+    replies arrive on;
   - port names;
   - per-port STP;
   - EEE and flow control on SFP ports;
   - runtime changes that were never saved to `config.txt`.
 - **Capabilities.** While an area is applied, the inform claims it:
   `feature_caps` STP 64, IGMP snooping 256, LACP 8192 and jumbo 524288;
-  `max_aggregate_sessions` 4 and `max_mirror_sessions` 1; and `port_caps`
+  `max_aggregate_sessions` 4 (2 on the RTL836x) and `max_mirror_sessions` 1;
+  and `port_caps`
   EEE 1 on copper ports. With nothing applied, nothing is claimed, as before.
 - **Selection changes.** A change of selection at run time forgets the
   `cfgversion`, so the controller sends its settings again.
-- **Not applied.** An area the controller set but that is not selected is
-  logged as `not applied: <area>`.
 
 ### Port index translation
 
