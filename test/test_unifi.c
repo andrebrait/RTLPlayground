@@ -175,7 +175,9 @@ bool snmp_hw_stat(uint8_t port, uint8_t selector, bool high, bool low, struct sn
 struct flash_region_t flash_region;
 static uint8_t sector[8192];	/* both UniFi sectors */
 static uint8_t config_sector[CONFIG_LEN];
-static int config_erases, config_writes;
+static int config_erases, config_writes, config_write_fail;
+__xdata uint8_t cmd_history[CMD_HISTORY_SIZE];
+__xdata uint16_t cmd_history_ptr;
 static int erases, saves, cut, broken, no_commit, partial;	/* cut: the next write stops after that many bytes */
 static int in_config(void)
 {
@@ -217,7 +219,7 @@ void flash_write_bytes(uint8_t *p)
 {
 	uint8_t *d = at();
 	if (in_config()) {
-		for (int i = 0; i < flash_region.len; i++)
+		for (int i = 0; i < flash_region.len && !config_write_fail; i++)
 			d[i] &= p[i];
 		config_writes++;
 		return;
@@ -1367,8 +1369,15 @@ static void test_apply(void)
 	inform();
 	ran[0] = 0;
 	answer(cfg);
-	check(!strcmp(ran, want_ran) && !strcmp((char *)config_sector, want_cfg) && !strcmp(unifi.cfgver, "00000000000000aa"),
-	      "apply: the settings sent again apply in full");
+	int all = 1;
+	for (const char *l = want_ran; *l; l = strchr(l, '\n') + 1) {
+		char one[64];
+		snprintf(one, sizeof one, "%.*s", (int)(strchr(l, '\n') - l + 1), l);
+		all &= strstr(ran, one) != NULL;
+	}
+	check(all && strstr(ran, "stp on\n") && !strcmp((char *)config_sector, want_cfg)
+	      && !strcmp(unifi.cfgver, "00000000000000aa"),
+	      "apply: the settings sent again apply in full, every line, as the stopped apply changed the switch");
 
 	/* More VLANs than it holds: nothing is applied, rather than some deleted */
 	strcpy(unifi.cfgver, "1111");
@@ -1456,6 +1465,51 @@ static void test_apply(void)
 	       "switch.vlan.1.id=30\\nswitch.vlan.1.port.3.mode=tagged\\n\"}");
 	check(!ran[0] && config_writes == 1 && !strcmp((char *)config_sector, "unifi apply vlans\nvlan 30 3t\npvid 1 1\npvid 2 1\npvid 3 1\npvid 4 1\npvid 5 1\n"),
 	      "apply: a new selection alone is written to config.txt");
+
+	/* Leading spaces: still the jumbo area's line */
+	cmd("unifi apply jumbo");
+	memset(config_sector, 0xff, sizeof(config_sector));
+	strcpy((char *)config_sector, "  mtu 1 9216\n");
+	strcpy(unifi.cfgver, "1111");
+	inform();
+	ran[0] = 0;
+	answer("{\"_type\":\"setparam\",\"cfgversion\":\"0000000000000011\",\"system_cfg\":\""
+	       "switch.jumboframes=disabled\\n\"}");
+	check(!strcmp(ran, "mtu 1 1522\n") && !strcmp((char *)config_sector, "unifi apply jumbo\n"),
+	      "apply: a line with leading spaces is still owned");
+
+	/* The command history's lines of the applied areas are blanked, so
+	 * Save to flash does not undo the apply */
+	memset(cmd_history, 0, sizeof(cmd_history));
+	strcpy((char *)cmd_history + 1, "mtu 1 1522\nhostname x\n");
+	cmd_history_ptr = 1 + strlen("mtu 1 1522\nhostname x\n");
+	memset(config_sector, 0xff, sizeof(config_sector));
+	strcpy(unifi.cfgver, "1111");
+	inform();
+	answer("{\"_type\":\"setparam\",\"cfgversion\":\"0000000000000012\",\"system_cfg\":\""
+	       "switch.jumboframes=enabled\\n\"}");
+	check(!memcmp(cmd_history + 1, "          \nhostname x\n", 22), "apply: the history's lines of the applied areas are blanked");
+
+	/* A config.txt that does not read back reports no cfgversion */
+	memset(config_sector, 0xff, sizeof(config_sector));
+	config_write_fail = 1;
+	strcpy(unifi.cfgver, "1111");
+	inform();
+	answer("{\"_type\":\"setparam\",\"cfgversion\":\"0000000000000013\",\"system_cfg\":\""
+	       "switch.jumboframes=enabled\\n\"}");
+	config_write_fail = 0;
+	check(!unifi.cfgver[0] && !ua_busy, "apply: a config.txt that does not read back reports no cfgversion");
+
+	/* SFP ports: no link settings; IGMP waits while VLANs are missing */
+	cmd("unifi apply ports igmp");
+	memset(config_sector, 0xff, sizeof(config_sector));
+	strcpy(unifi.cfgver, "1111");
+	inform();
+	ran[0] = 0;
+	answer("{\"_type\":\"setparam\",\"cfgversion\":\"0000000000000014\",\"system_cfg\":\""
+	       "switch.port.6.status=disabled\\nswitch.port.1.status=disabled\\nswitch.vlan.33.igmp_snooping=true\\n\"}");
+	check(strstr(ran, "port 1 off\n") && !strstr(ran, "port 6") && !strstr(ran, "igmp"),
+	      "apply: no link settings on SFP ports; no IGMP while VLANs are missing");
 
 	/* A selection change during an apply: its cfgversion is not reported */
 	ua_busy = 1;

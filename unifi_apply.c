@@ -71,6 +71,11 @@ static __code const char *const __code ua_speeds[] = {
 	"", "10m", "100m", "1g", "2g5", "5g", "10g"
 };
 static __code const uint16_t ua_mbps[] = { 0, 10, 100, 1000, 2500, 5000, 10000 };
+#if SOC_FAMILY == RTL836X
+#define UA_SPEEDS	4	/* "port N" takes 10m, 100m and 1g only */
+#else
+#define UA_SPEEDS	7
+#endif
 
 /* The parser: a line of system_cfg is [ua_i, ua_le) */
 static __xdata uint16_t ua_i, ua_le, ua_n, ua_vs;
@@ -157,7 +162,7 @@ static void ua_port_line(void)
 	if (ua_lit("speed=")) {
 		if (!ua_num() || ua_i != ua_le)
 			return;
-		for (ua_q = 1; ua_q < 7; ua_q++)
+		for (ua_q = 1; ua_q < UA_SPEEDS; ua_q++)
 			if (ua_mbps[ua_q] == ua_n)
 				ua_speed[ua_k] = ua_q;
 		return;
@@ -309,6 +314,9 @@ static __xdata uint8_t ua_busy;		/* commands are running */
 static __xdata char ua_cfgver[UNIFI_CFGVER_LEN];	/* reported once applied */
 static __xdata uint16_t ua_upvid, ua_nm, ua_sel;	/* the uplink's native VLAN, 0 none */
 static __xdata uint8_t ua_lg, ua_vm;
+static __xdata uint16_t ua_pb;
+static __xdata uint8_t ua_eff;		/* the areas this plan applies */
+static __xdata uint8_t ua_dirty;	/* a stopped apply left the switch unlike config.txt */
 
 /* Writing at unifi.pos, below ua_lim */
 static uint8_t ua_room(void)
@@ -429,6 +437,8 @@ static uint8_t ua_copper(__xdata uint8_t p)
 static uint8_t ua_uplink(__xdata uint8_t p)
 {
 	ua_t = u_upk;
+	if (!ua_t)
+		ua_t = u_uplink;	/* the reply being handled, before any port table */
 	if (p >= UA_NP || !ua_t || !ua_asic[p])
 		return 0;
 	if (ua_asic[p] == ua_t)
@@ -448,8 +458,17 @@ static uint8_t ua_kept_vlan(__xdata uint16_t v)
 }
 
 /* The area a config.txt line belongs to, 0 for none of them */
+/* Past the spaces at o: the parser takes a line that starts with them */
+static uint16_t ua_lead(__xdata uint16_t o)
+{
+	while (u_buf[o] == ' ')
+		o++;
+	return o;
+}
+
 static uint8_t ua_owner(__xdata uint16_t o)
 {
+	o = ua_lead(o);
 	ua_b = ua_skip(o);	/* the second word */
 	if (ua_at(o, "vlan")) {
 		if (ua_kept_vlan(ua_numat(ua_b)) || ua_at(ua_skip(ua_b), "mgmt"))
@@ -463,7 +482,8 @@ static uint8_t ua_owner(__xdata uint16_t o)
 	if (ua_at(o, "port")) {
 		ua_p = ua_numat(ua_b);
 		ua_b = ua_skip(ua_b);
-		if (ua_link_word(ua_b) || (ua_at(ua_b, "fc") && ua_copper(ua_p)))
+		/* SFP ports: "port N" sets neither link nor flow control there */
+		if (ua_copper(ua_p) && (ua_link_word(ua_b) || ua_at(ua_b, "fc")))
 			return UA_PORTS;
 		return 0;
 	}
@@ -488,6 +508,7 @@ static uint8_t ua_owner(__xdata uint16_t o)
 /* Do the lines at o and y set the same thing? */
 static uint8_t ua_same(__xdata uint16_t o, __xdata uint16_t y)
 {
+	o = ua_lead(o);
 	if (!ua_weq(o, y))
 		return 0;
 	if (ua_at(o, "igmp") || ua_at(o, "mirror"))
@@ -576,8 +597,8 @@ static void ua_vlan_name(void)
 			continue;
 		ua_nm = ua_z;
 	}
-	if (!ua_nm)
-		return;
+	if (!ua_nm || (!ua_vm && u_buf[ua_nm] == 'd'))
+		return;	/* "vlan <vid> d..." alone deletes the VLAN */
 	u_c(' ');
 	ua_put(ua_nm, ua_wend(ua_nm));
 }
@@ -587,8 +608,8 @@ static void ua_gen_area(__xdata uint8_t area)
 {
 	if (area == UA_PORTS) {
 		for (ua_k = 1; ua_k < UA_NP; ua_k++) {
-			if (!ua_asic[ua_k] || !ua_room())
-				continue;
+			if (!ua_copper(ua_k) || !ua_room())
+				continue;	/* SFP ports: see ua_owner() */
 			/* One link setting: off wins over a forced speed */
 			if (ua_pf[ua_k] & UA_P_OFF) {
 				ua_port_word(ua_k);
@@ -605,8 +626,6 @@ static void ua_gen_area(__xdata uint8_t area)
 				}
 				ua_eol();
 			}
-			if (!ua_copper(ua_k))
-				continue;	/* no EEE or flow control on SFP ports */
 			if (ua_pf[ua_k] & UA_P_EEE) {
 				if (ua_pf[ua_k] & UA_P_EEE_ON)
 					u_s("eee on ");
@@ -632,9 +651,7 @@ static void ua_gen_area(__xdata uint8_t area)
 				continue;
 			u_s("vlan ");
 			u_dec(ua_vid[ua_k]);
-			/* Without members, "vlan <vid> <name>" with a name starting
-			 * with d would delete the VLAN: no name then */
-			ua_vm = 0;
+			ua_vm = 0;	/* any members */
 			ua_s = ua_k;
 			for (ua_q = 1; ua_q < UA_NP; ua_q++) {
 				ua_bit = (uint16_t)1 << ua_q;
@@ -642,8 +659,7 @@ static void ua_gen_area(__xdata uint8_t area)
 				if (ua_asic[ua_q] && (ua_m == UA_V_UNTAGGED || ua_m == UA_V_TAGGED))
 					ua_vm = 1;
 			}
-			if (ua_vm)
-				ua_vlan_name();
+			ua_vlan_name();
 			for (ua_q = 1; ua_q < UA_NP; ua_q++) {
 				if (!ua_asic[ua_q])
 					continue;
@@ -693,14 +709,6 @@ static void ua_gen_area(__xdata uint8_t area)
 #if SOC_FAMILY == RTL836X
 			ua_g = (ua_asic[ua_k] - 1) >> 2;
 			ua_m = ua_g + 1;	/* the group's bit */
-			for (ua_q = ua_k; ua_q < UA_NP; ua_q++)
-				if ((ua_pf[ua_q] & UA_P_AGG) && ua_lag[ua_q] == ua_lag[ua_k] && ua_asic[ua_q]
-				    && ((ua_asic[ua_q] - 1) >> 2) != ua_g)
-					break;
-			if (ua_q < UA_NP) {
-				print_string("UniFi: a LAG across both port groups is not applied\n");
-				continue;
-			}
 #else
 			for (ua_g = 0, ua_m = 1; ua_gu & ua_m; ua_g++)
 				ua_m <<= 1;
@@ -785,6 +793,7 @@ static void ua_undo(__xdata uint16_t o)
 {
 	if (!ua_room())
 		return;
+	o = ua_lead(o);
 	ua_y = ua_find(o);
 	if (ua_y) {
 		if (ua_has(ua_y, UA_OLD, ua_old_end))
@@ -824,6 +833,25 @@ static void ua_undo(__xdata uint16_t o)
 	ua_eol();
 }
 
+/* Can every controller LAG be a group? The RTL836x's groups are fixed to
+ * ports 0-3 and 4-7. If not, the LAGs stay as they are. */
+static uint8_t ua_lag_ok(void)
+{
+#if SOC_FAMILY == RTL836X
+	for (ua_k = 1; ua_k < UA_NP; ua_k++) {
+		if (!(ua_pf[ua_k] & UA_P_AGG) || !ua_lag[ua_k] || !ua_asic[ua_k])
+			continue;
+		for (ua_q = 1; ua_q < UA_NP; ua_q++)
+			if ((ua_pf[ua_q] & UA_P_AGG) && ua_lag[ua_q] == ua_lag[ua_k] && ua_asic[ua_q]
+			    && ((ua_asic[ua_q] - 1) >> 2) != ((ua_asic[ua_k] - 1) >> 2)) {
+				print_string("UniFi: a LAG across both port groups: LAGs not applied\n");
+				return 0;
+			}
+	}
+#endif
+	return 1;
+}
+
 /* Reads config.txt into [UA_OLD, ua_old_end) */
 static void ua_read_config(void)
 {
@@ -849,8 +877,15 @@ static uint8_t ua_plan(void)
 {
 	ua_changed = 0;
 	ua_over = 0;
-	if (ua_mask & UA_VLANS)
-		ua_over = ua_vover;
+	ua_eff = ua_mask & ua_seen;
+	if (ua_vover) {
+		/* Some VLANs are missing: IGMP, which follows them, waits too */
+		ua_eff &= ~UA_IGMP;
+		if (ua_eff & UA_VLANS)
+			ua_over = 1;
+	}
+	if (!ua_lag_ok())
+		ua_eff &= ~UA_LAG;
 	ua_read_config();
 
 	/* The uplink's native VLAN: its last pvid line, else 1 */
@@ -873,7 +908,7 @@ static uint8_t ua_plan(void)
 	unifi.pos = UA_NEW;
 	ua_lim = UA_NEW + CONFIG_LEN - 1;
 	for (ua_x = UA_OLD; ua_x < ua_old_end; ua_x = ua_eolat(ua_x) + 1) {
-		if (ua_owner(ua_x) & ((ua_mask & ua_seen) | UA_SELF))
+		if (ua_owner(ua_x) & (ua_eff | UA_SELF))
 			continue;
 		if (!ua_room())
 			break;
@@ -895,7 +930,7 @@ static uint8_t ua_plan(void)
 	}
 	ua_gen = unifi.pos;
 	for (ua_area = 1; ua_area <= UA_MIRROR; ua_area <<= 1)
-		if (ua_area & ua_mask & ua_seen)
+		if (ua_area & ua_eff)
 			ua_gen_area(ua_area);
 	ua_new_end = unifi.pos;
 	if (ua_new_end > UA_NEW + CONFIG_LEN - 1)
@@ -907,13 +942,14 @@ static uint8_t ua_plan(void)
 	unifi.pos = UA_EXE;
 	ua_lim = UA_SAVE - 1;
 	for (ua_x = UA_OLD; ua_x < ua_old_end; ua_x = ua_eolat(ua_x) + 1) {
-		if (!(ua_owner(ua_x) & ua_mask & ua_seen) || ua_has(ua_x, ua_gen, ua_new_end))
+		if (!(ua_owner(ua_x) & ua_eff) || ua_has(ua_x, ua_gen, ua_new_end))
 			continue;
 		ua_changed = 1;
 		ua_undo(ua_x);
 	}
 	for (ua_x = ua_gen; ua_x < ua_new_end; ua_x = ua_eolat(ua_x) + 1) {
-		if (ua_has(ua_x, UA_OLD, ua_old_end))
+		/* After a stopped apply every line runs: the switch may differ */
+		if (!ua_dirty && ua_has(ua_x, UA_OLD, ua_old_end))
 			continue;
 		ua_changed = 1;
 		if (!ua_room())
@@ -929,6 +965,32 @@ static uint8_t ua_plan(void)
 	}
 	ua_x = UA_EXE;
 	return ua_changed;
+}
+
+/* Lines of the applied areas in the command history would win over the
+ * new config.txt at the next Save to flash: they are blanked */
+extern __xdata uint8_t cmd_history[CMD_HISTORY_SIZE];
+extern __xdata uint16_t cmd_history_ptr;
+
+static void ua_purge(void)
+{
+	ua_x = (cmd_history_ptr + 1) & CMD_HISTORY_MASK;	/* the oldest byte */
+	for (ua_z = 0; ua_z < CMD_HISTORY_SIZE; ua_z++) {
+		ua_pb = ua_x;	/* the line's start */
+		for (ua_y = 0; ua_z < CMD_HISTORY_SIZE && ua_y < CMD_BUF_SIZE
+		     && cmd_history[ua_x] && cmd_history[ua_x] != '\n'; ua_y++, ua_z++) {
+			u_buf[UA_OLD + ua_y] = cmd_history[ua_x];
+			ua_x = (ua_x + 1) & CMD_HISTORY_MASK;
+		}
+		u_buf[UA_OLD + ua_y] = 0;
+		if (ua_y && (ua_owner(UA_OLD) & ua_eff)) {
+			for (; ua_y; ua_y--) {
+				cmd_history[ua_pb] = ' ';
+				ua_pb = (ua_pb + 1) & CMD_HISTORY_MASK;
+			}
+		}
+		ua_x = (ua_x + 1) & CMD_HISTORY_MASK;
+	}
 }
 
 /* One command per tick. Returns 1 when all ran, config.txt is written and
@@ -961,7 +1023,20 @@ static uint8_t ua_run(void)
 	flash_region.addr = CONFIG_START;
 	flash_region.len = ua_new_end - UA_NEW + 1;
 	flash_write_bytes(u_buf + UA_NEW);
+	/* Read back: only a config.txt that holds reports the cfgversion */
+	ua_b = ua_new_end - UA_NEW + 1;
+	for (ua_a = 0; ua_a < ua_b; ua_a += 256) {
+		flash_region.addr = CONFIG_START + ua_a;
+		flash_region.len = 256;
+		flash_read_bulk(u_buf + UA_OLD + ua_a);
+	}
+	if (memcmp(u_buf + UA_OLD, u_buf + UA_NEW, ua_b)) {
+		print_string("UniFi: config.txt did not write, the controller will send it again\n");
+		return 1;
+	}
 	print_string("UniFi: config.txt written\n");
+	ua_purge();
+	ua_dirty = 0;
 	memcpy(unifi.cfgver, ua_cfgver, UNIFI_CFGVER_LEN);
 	u_save();
 	return 1;
@@ -1040,22 +1115,22 @@ static __xdata uint32_t ua_cap;
 
 static void ua_caps(void)
 {
-	if (!ua_mask)
+	if (!ua_imask)
 		return;	/* as before apply existed */
 	u_s(",\"switch_caps\":{\"feature_caps\":");
 	ua_cap = 0;
-	if (ua_mask & UA_STP)
+	if (ua_imask & UA_STP)
 		ua_cap |= 64;
-	if (ua_mask & UA_IGMP)
+	if (ua_imask & UA_IGMP)
 		ua_cap |= 256;
-	if (ua_mask & UA_LAG)
+	if (ua_imask & UA_LAG)
 		ua_cap |= 8192;
-	if (ua_mask & UA_JUMBO)
+	if (ua_imask & UA_JUMBO)
 		ua_cap |= 524288;
 	u_dec(ua_cap);
 	u_s(",\"max_aggregate_sessions\":");
-	u_c(ua_mask & UA_LAG ? '0' + UA_LAGS : '0');
+	u_c(ua_imask & UA_LAG ? '0' + UA_LAGS : '0');
 	u_s(",\"max_mirror_sessions\":");
-	u_c(ua_mask & UA_MIRROR ? '1' : '0');
+	u_c(ua_imask & UA_MIRROR ? '1' : '0');
 	u_c('}');
 }

@@ -774,14 +774,17 @@ Network 11.1.50), not by `lldp_table`: a device sits behind the port whose
   - VLAN slots become `vlan <vid> <port>[t]...`, with each port's mode taken
     from its `switch.vlan.K.port.N.mode` line, else the slot's mode;
   - a VLAN keeps the name `config.txt` gave it last, unless it has no
-    members (`vlan <vid> d...` with three words deletes a VLAN);
+    members and the name starts with `d` (`vlan <vid> d...` with three
+    words deletes a VLAN);
   - `pvid <port> <vid>` for every port but the uplink: `switch.port.N.pvid`,
     else the slot the port is untagged in, else 1;
-  - one link setting per port, `port N off` or `port N <speed> [half|full]`
-    (off wins), then `eee on|off N` and `port N fc on|off`;
+  - on copper ports, one link setting, `port N off` or
+    `port N <speed> [half|full]` (off wins; 10M to 1G on the RTL836x),
+    then `eee on|off N` and `port N fc on|off`;
   - `lag G lacp <ports>`: each controller LAG id gets the next free group
     (1..4); on the RTL836x, whose two groups are fixed to ports 0–3 and
-    4–7, the group of its members, and a LAG across both is not applied;
+    4–7, the group of its members; a LAG across both leaves the LAGs as
+    they are;
   - `stp on|off`, `stp version`, `stp prio` (priority / 4096);
   - `igmp on` when any VLAN slot has `igmp_snooping=true`;
   - `mtu N 9216` for jumbo frames;
@@ -798,12 +801,15 @@ Network 11.1.50), not by `lldp_table`: a device sits behind the port whose
   sector is written once at the end. Settings that are already in
   `config.txt`, for example after a reboot, run nothing.
 - **The cfgversion.** It is reported, and saved, once every command ran and
-  `config.txt` is written. An apply that `unifi off`, `unifi inform`,
+  `config.txt` is written and reads back the same. The command history's
+  lines of the applied areas are then blanked, so a later Save to flash
+  does not undo the apply. After a stopped apply, the next one runs every
+  line, as the switch may no longer match `config.txt`. An apply that `unifi off`, `unifi inform`,
   `unifi forget` or a reboot interrupts leaves no cfgversion, so the
   controller sends the settings again, as does a selection change while
   an apply runs. Settings that do not fit apply nothing and are not
   retried until the controller's next cfgversion; more than 32 VLAN slots
-  count only while VLANs are applied.
+  count only while VLANs are applied, and keep IGMP as it is.
 - **Left alone:**
   - the management VLAN's lines (`vlan <mgmt> ...` and `vlan <vid> mgmt`),
     and the uplink's native VLAN: its `pvid` lines and that VLAN's lines,
@@ -812,7 +818,8 @@ Network 11.1.50), not by `lldp_table`: a device sits behind the port whose
     other members of its LAG;
   - port names;
   - per-port STP;
-  - EEE and flow control on SFP ports;
+  - link, EEE and flow control on SFP ports (`port N` does not set them
+    there);
   - runtime changes that were never saved to `config.txt`.
 - **Capabilities.** While an area is applied, the inform claims it:
   `feature_caps` STP 64, IGMP snooping 256, LACP 8192 and jumbo 524288;

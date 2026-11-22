@@ -66,6 +66,7 @@
 #define UA_ALL		0x7f
 #define UA_AREAS	7
 static __xdata uint8_t ua_mask;
+static __xdata uint8_t ua_imask;	/* ua_mask as the inform being built started */
 static void ua_caps(void);
 
 #define UE_DNS		1
@@ -512,7 +513,7 @@ static void u_port_entry(void)
 	if (u_isup)
 		u_s(",\"is_uplink\":true");
 	/* EEE is offered on copper ports while ports are applied */
-	if ((ua_mask & UA_PORTS) && !machine.is_sfp[u_ph])
+	if ((ua_imask & UA_PORTS) && !machine.is_sfp[u_ph])
 		u_s(",\"port_caps\":1");
 	if (u_up)
 		u_s(",\"up\":true");
@@ -591,6 +592,7 @@ static uint8_t u_port_macs(void)
 /* The inform JSON up to its port table */
 static void u_build(void)
 {
+	ua_imask = ua_mask;
 	unifi.pos = HROOM + TNBU_HDR;
 	u_s("{\"mac\":\"");
 	u_ma = uip_ethaddr.addr;
@@ -1429,6 +1431,8 @@ void unifi_tick(void) __banked
  * its timeout; the next inform waits for that. */
 static void u_stop(void)
 {
+	if (ua_busy)
+		ua_dirty = 1;	/* what ran stays: the next apply runs every line */
 	ua_busy = 0;	/* an apply stops too; its cfgversion is not saved */
 	if (unifi.conn)
 		unifi.abort = 1;
